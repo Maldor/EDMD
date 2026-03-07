@@ -345,6 +345,8 @@ class EdmdWindow(Gtk.ApplicationWindow):
             ("Combat Rank", "_cmdr_rank"),
             ("Power",       "_cmdr_pp"),
             ("PP Rank",     "_cmdr_pprank"),
+            ("System",      "_cmdr_system"),
+            ("Location",    "_cmdr_location"),
         ]:
             row, val = make_row(lbl_text)
             setattr(self, attr, val)
@@ -601,6 +603,25 @@ class EdmdWindow(Gtk.ApplicationWindow):
             self._cmdr_pprank.set_label("—")
             self._pp_rank_bar.set_fraction(0.0)
             self._pp_rank_bar.set_visible(False)
+
+        # System and Location rows
+        if s.pilot_system:
+            self._cmdr_system.set_label(s.pilot_system)
+            self._cmdr_system.get_parent().set_visible(True)
+        else:
+            self._cmdr_system.set_label("—")
+            self._cmdr_system.get_parent().set_visible(False)
+
+        if s.pilot_body:
+            # Strip system name prefix if system is visible alongside it
+            body = s.pilot_body
+            if s.pilot_system and body.startswith(s.pilot_system):
+                body = body[len(s.pilot_system):].lstrip()
+            self._cmdr_location.set_label(body or "—")
+            self._cmdr_location.get_parent().set_visible(True)
+        else:
+            self._cmdr_location.set_label("—")
+            self._cmdr_location.get_parent().set_visible(False)
 
     def _refresh_crew(self):
         s = self.state

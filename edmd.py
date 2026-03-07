@@ -522,8 +522,13 @@ class MonitorState:
         self.pilot_rank = None
         self.pilot_rank_progress = None
         self.pilot_mode = None
-        self.pilot_location = None
+        self.pilot_location = None   # kept for compat; prefer pilot_system / pilot_body
+        self.pilot_system = None     # current star system
+        self.pilot_body = None       # body / ring / station (None when in supercruise)
         self.last_rate_check = None
+        self.last_periodic_summary = None   # monotonic time of last timed summary
+        self.last_inactive_alert = None     # monotonic time of last inactivity alert
+        self.last_rate_alert = None         # monotonic time of last rate alert
         self.mission_value_map = {}
         self.stack_value = 0
         self.has_fighter_bay = False      # True when current ship's Loadout includes a fighter bay
@@ -585,6 +590,9 @@ class MonitorState:
             self.alerted_no_kills = None
             self.alerted_kill_rate = None
             self.last_rate_check = time.monotonic()
+            self.last_periodic_summary = time.monotonic()
+            self.last_inactive_alert = None
+            self.last_rate_alert = None
 
     def sessionend(self):
         if self.session_start_time:
@@ -1170,8 +1178,6 @@ def handle_event(line):
                     loglevel=log,
                 )
 
-                if active_session.kills % 10 == 0:
-                    emit_summary(active_session, logtime=logtime)
             # -----------------------------
             # MISSIONS
             # -----------------------------
@@ -1558,6 +1564,10 @@ def handle_event(line):
                     j["Type_Localised"] if "Type_Localised" in j else LABEL_UNKNOWN
                 )
 
+                state.pilot_body = type_local
+                if gui_mode:
+                    gui_queue.put(("cmdr_update", None))
+
                 if "Resource Extraction Site" in type_local:
                     emoji = "🪐"
                 else:
@@ -1766,8 +1776,32 @@ def handle_event(line):
                     active_session.pending_merit_events -= 1
 
             case "Location":
+                if j.get("StarSystem"):
+                    state.pilot_system = j["StarSystem"]
+                if j.get("Body"):
+                    state.pilot_body = j["Body"] if j.get("Docked") is False else None
+                if j.get("Docked") and j.get("StationName"):
+                    state.pilot_body = j["StationName"]
+                elif j.get("Docked") and not j.get("StationName"):
+                    state.pilot_body = None
+                if gui_mode:
+                    gui_queue.put(("cmdr_update", None))
                 if j["BodyType"] == "PlanetaryRing":
                     state.sessionstart()
+
+            case "Docked":
+                if j.get("StationName"):
+                    state.pilot_body = j["StationName"]
+                if j.get("StarSystem"):
+                    state.pilot_system = j["StarSystem"]
+                if gui_mode:
+                    gui_queue.put(("cmdr_update", None))
+
+            case "Undocked":
+                # Left station — still in system, body cleared until drop or supercruise
+                state.pilot_body = None
+                if gui_mode:
+                    gui_queue.put(("cmdr_update", None))
 
             case "ShipyardSwap":
                 state.pilot_ship = (
@@ -1798,9 +1832,16 @@ def handle_event(line):
                 if j["event"] == "SupercruiseEntry":
                     event_name = "Supercruise entry in"
                     emoji = "🚀"
+                    state.pilot_system = j.get("StarSystem", state.pilot_system)
+                    state.pilot_body = None   # in supercruise — no specific body
                 else:
                     event_name = "FSD jump to"
                     emoji = "☀️"
+                    state.pilot_system = j.get("StarSystem", state.pilot_system)
+                    state.pilot_body = None   # body resolved on drop/dock
+
+                if gui_mode:
+                    gui_queue.put(("cmdr_update", None))
 
                 emit(
                     msg_term=f"{event_name} {j['StarSystem']}",
@@ -1810,6 +1851,7 @@ def handle_event(line):
                 )
 
                 state.sessionend()
+
 
         state.prev_event = j["event"]
 
@@ -1887,12 +1929,18 @@ def emit_summary(stats, logtime=None):
 
     duration_fmt = fmt_duration(duration)
 
+    # Average kill interval from tracked intervals
+    avg_interval = ""
+    if stats.kills > 1 and stats.kill_interval_total > 0:
+        avg_secs = stats.kill_interval_total / (stats.kills - 1)
+        avg_interval = f" | avg {fmt_duration(avg_secs)}/kill"
+
     sep = " | "
 
     summary_text = (
         f"Session Summary:\n"
         f"- Duration: {duration_fmt}\n"
-        f"- Kills:    {stats.kills}{sep}{kills_per_hour} /hr\n"
+        f"- Kills:    {stats.kills}{sep}{kills_per_hour} /hr{avg_interval}\n"
         f"- Bounties: {fmt_credits(stats.credit_total)}{sep}{fmt_credits(bounties_per_hour)} /hr\n"
     )
 
@@ -1908,6 +1956,11 @@ def emit_summary(stats, logtime=None):
         summary_text += (
             f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
         )
+        # Kill counter progress per target faction
+        if state.target_kill_totals:
+            for target, total_needed in sorted(state.target_kill_totals.items()):
+                credited = state.target_kills_credited.get(target, 0)
+                summary_text += f"- Progress: {credited}/{total_needed} kills vs {target}\n"
 
     summary_text += f"- Merits:   {stats.merits}{sep}{merits_per_hour} /hr"
 
@@ -1918,7 +1971,6 @@ def emit_summary(stats, logtime=None):
         timestamp=logtime,
         loglevel=2,
     )
-
 
 
 def _release_handle(pattern: str, description: str):
@@ -2417,8 +2469,29 @@ def monitor_journal(jfile):
                 else f"{_done}/{_total} complete, {_remaining} remaining"
             )
             stack_line = f"  Stack: {fmt_credits(state.stack_value)} ({_status})\n"
+            kill_lines = ""
+            if state.target_kill_totals:
+                for _target, _needed in sorted(state.target_kill_totals.items()):
+                    _credited = state.target_kills_credited.get(_target, 0)
+                    kill_lines += f"  Kills: {_credited}/{_needed} vs {_target}\n"
         else:
             stack_line = ""
+            kill_lines = ""
+
+        if state.pilot_system:
+            _loc = state.pilot_system
+            if state.pilot_body:
+                _loc += f"  |  {state.pilot_body}"
+            location_line = f"  {_loc}\n"
+        else:
+            location_line = ""
+
+        if state.pp_power:
+            _pp_rank = f"  Rank {state.pp_rank}" if state.pp_rank else ""
+            _pp_merits = f"  ({state.pp_merits_total:,} merits)" if state.pp_merits_total else ""
+            pp_line = f"  {state.pp_power}{_pp_rank}{_pp_merits}\n"
+        else:
+            pp_line = ""
 
         term_msg = (
             f"\n{term_bar}\n"
@@ -2426,9 +2499,13 @@ def monitor_journal(jfile):
             f"  CMDR {state.pilot_name}\n"
             f"  {state.pilot_ship}  |  {state.pilot_mode}\n"
             f"  {state.pilot_rank} +{state.pilot_rank_progress}%\n"
+            f"{pp_line}"
+            f"{location_line}"
             f"{stack_line}"
+            f"{kill_lines}"
             f"{term_bar}"
         )
+
 
         print(f"{Terminal.CYAN}{term_msg}{Terminal.END}\n")
 
@@ -2453,6 +2530,18 @@ def monitor_journal(jfile):
                 value=f"{state.pilot_rank} +{state.pilot_rank_progress}%",
                 inline=True,
             )
+            if state.pp_power:
+                _pp_val = state.pp_power
+                if state.pp_rank:
+                    _pp_val += f" — Rank {state.pp_rank}"
+                if state.pp_merits_total:
+                    _pp_val += f" ({state.pp_merits_total:,} merits)"
+                embed.add_embed_field(name="Powerplay", value=_pp_val, inline=False)
+            if state.pilot_system:
+                _loc_val = state.pilot_system
+                if state.pilot_body:
+                    _loc_val += f" / {state.pilot_body}"
+                embed.add_embed_field(name="Location", value=_loc_val, inline=False)
             if state.stack_value > 0:
                 _done = state.missions_complete
                 _total = len(state.active_missions)
@@ -2467,6 +2556,15 @@ def monitor_journal(jfile):
                     value=f"{fmt_credits(state.stack_value)} — {_status}",
                     inline=False,
                 )
+                if state.target_kill_totals:
+                    kill_progress = "\n".join(
+                        f"{state.target_kills_credited.get(t, 0)}/{n} vs {t}"
+                        for t, n in sorted(state.target_kill_totals.items())
+                    )
+                    embed.add_embed_field(
+                        name="Kill Progress", value=kill_progress, inline=False
+                    )
+
             embed.set_footer(text=f"{PROGRAM} v{VERSION}")
             embed.set_timestamp()
             try:
@@ -2501,9 +2599,89 @@ def monitor_journal(jfile):
                     )
                     return latest
 
+                now_mono = time.monotonic()
+
+                # ── Periodic 15-minute session summary ────────────────────────
+                SUMMARY_INTERVAL = 15 * 60  # seconds
+                if (
+                    state.session_start_time
+                    and active_session.kills > 0
+                    and state.last_periodic_summary is not None
+                    and now_mono - state.last_periodic_summary >= SUMMARY_INTERVAL
+                ):
+                    state.last_periodic_summary = now_mono
+                    emit_summary(active_session, logtime=state.event_time)
+
+                # ── Inactivity alert (no kills for WarnNoKills minutes) ────────
+                warn_no_kills = app_settings.get("WarnNoKills", 20)
+                warn_initial  = app_settings.get("WarnNoKillsInitial", 5)
+                warn_cooldown = app_settings.get("WarnCooldown", 15)
+                if (
+                    notify_levels.get("InactiveAlert", 3) > 0
+                    and state.session_start_time
+                    and warn_no_kills > 0
+                ):
+                    # Use shorter grace period if no kill has been made yet
+                    threshold_mins = (
+                        warn_initial if active_session.kills == 0 else warn_no_kills
+                    )
+                    threshold_secs = threshold_mins * 60
+                    last_kill = active_session.last_kill_mono or (
+                        state.last_periodic_summary or now_mono
+                    )
+                    cooldown_ok = (
+                        state.last_inactive_alert is None
+                        or now_mono - state.last_inactive_alert >= warn_cooldown * 60
+                    )
+                    if cooldown_ok and now_mono - last_kill >= threshold_secs:
+                        idle_dur = fmt_duration(now_mono - last_kill)
+                        emit(
+                            msg_term=f"No kills in {idle_dur} — session may be inactive",
+                            msg_discord=f"⚠️ **No kills in {idle_dur}** — session may be inactive",
+                            emoji="⚠️",
+                            timestamp=state.event_time,
+                            loglevel=notify_levels.get("InactiveAlert", 3),
+                        )
+                        state.last_inactive_alert = now_mono
+
+                # ── Low kill rate alert ────────────────────────────────────────
+                warn_rate = app_settings.get("WarnKillRate", 20)
+                if (
+                    notify_levels.get("RateAlert", 3) > 0
+                    and warn_rate > 0
+                    and active_session.kills >= 3
+                    and len(active_session.recent_kill_times) >= 3
+                ):
+                    recent_avg_secs = (
+                        sum(active_session.recent_kill_times)
+                        / len(active_session.recent_kill_times)
+                    )
+                    recent_rate = 3600 / recent_avg_secs if recent_avg_secs > 0 else 0
+                    cooldown_ok = (
+                        state.last_rate_alert is None
+                        or now_mono - state.last_rate_alert >= warn_cooldown * 60
+                    )
+                    if cooldown_ok and recent_rate < warn_rate:
+                        rate_fmt = f"{recent_rate:.1f}"
+                        emit(
+                            msg_term=(
+                                f"Kill rate low: {rate_fmt}/hr "
+                                f"(threshold: {warn_rate}/hr)"
+                            ),
+                            msg_discord=(
+                                f"📉 **Kill rate low: {rate_fmt}/hr** "
+                                f"(threshold: {warn_rate}/hr)"
+                            ),
+                            emoji="📉",
+                            timestamp=state.event_time,
+                            loglevel=notify_levels.get("RateAlert", 3),
+                        )
+                        state.last_rate_alert = now_mono
+
                 continue
 
             handle_event(line)
+
 
 
 def run_monitor():
