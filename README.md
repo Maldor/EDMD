@@ -189,7 +189,7 @@ install.bat
 or manually: `pip install psutil discord-webhook cryptography`
 
 > **Why not `pip install -r requirements.txt`?**
-> `psutil` and `PyGObject` (GTK4) have C extensions that require system libraries. They must be installed via your distro's package manager. See [INSTALL.md](INSTALL.md) for details.
+> `psutil` and `PyGObject` (GTK4, Pango) have C extensions that require system libraries. They must be installed via your distro's package manager. Pango is bundled with GTK4 — no separate install needed. See [INSTALL.md](INSTALL.md) for details.
 
 ---
 

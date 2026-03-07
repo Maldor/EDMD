@@ -2295,12 +2295,15 @@ def bootstrap_kill_counts():
     state.active_missions is already populated.
 
     target_kill_totals[T] = max issuer sum for target T across all active missions.
-    target_kills_credited starts at zero — we only count live kills post-preload."""
+    target_kills_credited[T] = kills against T found in journal history on or after
+    the earliest MissionAccepted timestamp in the current stack — so the counter
+    reflects real progress rather than starting from zero every EDMD launch."""
     if not state.active_missions:
         return
 
     active_set = set(state.active_missions)
     killcount_map = {}
+    earliest_accept_ts = None
 
     journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
     for jpath in journals:
@@ -2320,6 +2323,9 @@ def bootstrap_kill_counts():
                             state.mission_target_faction_map[je["MissionID"]] = je["TargetFaction"]
                         if "Faction" in je:
                             state.mission_issuing_faction_map[je["MissionID"]] = je["Faction"]
+                        ts = je.get("timestamp", "")
+                        if ts and (earliest_accept_ts is None or ts < earliest_accept_ts):
+                            earliest_accept_ts = ts
         except OSError:
             continue
 
@@ -2327,10 +2333,35 @@ def bootstrap_kill_counts():
         return
 
     state.mission_killcount_map = killcount_map
-    state.target_kills_credited = {}   # reset — fresh tracking session
     recalc_target_kill_totals()
 
-    trace(f"Kill count bootstrap: target_kill_totals={state.target_kill_totals}")
+    # Pre-credit kills from journal history: scan for Bounty/FactionKillBond
+    # events on or after the earliest MissionAccepted timestamp in this stack.
+    # This ensures the counter reflects actual progress when EDMD is launched
+    # mid-session or after a relog.
+    state.target_kills_credited = {}
+    if earliest_accept_ts and state.target_kill_totals:
+        target_factions = set(state.target_kill_totals.keys())
+        for jpath in journals:
+            try:
+                with open(jpath, mode="r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            je = json.loads(line)
+                        except ValueError:
+                            continue
+                        if (je.get("event") in ("Bounty", "FactionKillBond")
+                                and je.get("timestamp", "") >= earliest_accept_ts):
+                            vf = je.get("VictimFaction", "")
+                            if vf in target_factions:
+                                state.target_kills_credited[vf] = (
+                                    state.target_kills_credited.get(vf, 0) + 1
+                                )
+            except OSError:
+                continue
+
+    trace(f"Kill count bootstrap: target_kill_totals={state.target_kill_totals} "
+          f"target_kills_credited={state.target_kills_credited}")
 
 # ----------------------------------------
 # ENTRY POINT

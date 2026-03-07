@@ -94,7 +94,7 @@ python3 -c "import psutil, discord_webhook, cryptography; print('All dependencie
 
 ## GTK4 GUI (Linux only)
 
-The GUI requires PyGObject with GTK4 bindings. If these are not available you can still run EDMD in terminal mode:
+The GUI requires PyGObject with GTK4 bindings, including Pango (bundled with GTK4 — no separate install needed). If these are not available you can still run EDMD in terminal mode:
 
 ```bash
 ./edmd.py    # terminal mode only
