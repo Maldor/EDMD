@@ -2063,6 +2063,11 @@ def bootstrap_crew():
     else:
         state.crew_paid_complete = False
 
+    # Notify GUI to render the crew block — bootstrap runs after preload so the
+    # normal event-driven crew_update never fired for this session.
+    if gui_mode:
+        gui_queue.put(("crew_update", None))
+
 
 def bootstrap_missions():
     """Reconstruct the active massacre mission list and stack value by scanning
