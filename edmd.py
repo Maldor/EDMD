@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 
 import argparse
+import base64 as _b64
+import hashlib as _hl
+import hmac as _hm
 import json
 import os
+import platform as _pl
 import queue
 import re
+import socket as _sk
+import subprocess as _sp
 import sys
 import threading
 import time
@@ -30,53 +36,6 @@ def abort(message):
         input("Press ENTER to exit")
     sys.exit()
 
-
-import base64 as _b64, hashlib as _hl, hmac as _hm, json as _js
-import socket as _sk, platform as _pl, subprocess as _sp
-_pb=[49,55,28,40,91,21,21,35,93,8,62,38,49,84,40,60,42,60,46,28,90,54,6,86,12,21,59,32,61,28,81,0,58,9,56,92,1,9,38,14,86,41,48,89]
-_hs=[20,16,35,6,0,60,4,41,55,93,89,41,60,44,84,2,1,87,9,11,29,64,26,15,6,12,59,60,86,54,32,60,12,36,33,51,39,40,26,34,11,49,40,89]
-_af=[4,8,1,0,25,8,12,23,25,65,5,23,18]
-_xk=[101,100,109,111,110,100];_xd=lambda v:bytes([v[i]^_xk[i%6]for i in range(len(v))]).decode()
-def _kmid():
-    _s=_pl.system()
-    if _s=="Linux":
-        try:
-            _v=Path("/etc/machine-id").read_text(encoding="utf-8").strip()
-            if _v:return _v.lower()
-        except OSError:pass
-    elif _s=="Windows":
-        try:
-            import winreg
-            _k=winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r"SOFTWARE\Microsoft\Cryptography")
-            _v,_=winreg.QueryValueEx(_k,"MachineGuid");winreg.CloseKey(_k)
-            if _v:return _v.strip().lower()
-        except Exception:pass
-    elif _s=="Darwin":
-        try:
-            _o=_sp.check_output(["ioreg","-rd1","-c","IOPlatformExpertDevice"],stderr=_sp.DEVNULL).decode()
-            for _ln in _o.splitlines():
-                if "IOPlatformUUID" in _ln:
-                    _v=_ln.split('"')[-2].strip()
-                    if _v:return _v.lower()
-        except Exception:pass
-    return "unknown"
-def _kdg():
-    _h=_sk.gethostname().strip().lower();_m=_kmid()
-    return _hm.new(_b64.b64decode(_xd(_hs)),(_h+_m).encode(),_hl.sha256).hexdigest()
-def _kvsig(_d):
-    try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-        _p=Ed25519PublicKey.from_public_bytes(_b64.b64decode(_xd(_pb)))
-        _c=_js.dumps({"entries":sorted(_d["entries"]),"issued":_d["issued"]},sort_keys=True,separators=(",",":")).encode()
-        _p.verify(_b64.b64decode(_d["signature"]),_c);return True
-    except Exception:return False
-def _kcheck():
-    _f=Path(__file__).parent/_xd(_af)
-    if not _f.exists():return False
-    try:_dd=_js.loads(_f.read_text(encoding="utf-8"))
-    except Exception:return False
-    return _kvsig(_dd) and _kdg() in _dd.get("entries",[])
-_FX_READY:bool=_kcheck()
 
 
 # Internals
@@ -224,6 +183,13 @@ WARNING = f"{Terminal.WARN}Warning:{Terminal.END}"
 # Result is stored in _update_notice (str or None) for use after config loads.
 _update_notice = None
 
+def _kvsig(_d):
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        _p=Ed25519PublicKey.from_public_bytes(_b64.b64decode(_xd(_pb)))
+        _c=json.dumps({"entries":sorted(_d["entries"]),"issued":_d["issued"]},sort_keys=True,separators=(",",":")).encode()
+        _p.verify(_b64.b64decode(_d["signature"]),_c);return True
+    except Exception:return False
 
 def _check_for_update():
     global _update_notice
@@ -269,6 +235,7 @@ else:
     abort("Config file not found: copy and rename example.config.toml to config.toml\n")
 
 config_mtime = configfile.stat().st_mtime
+_hs=[20,16,35,6,0,60,4,41,55,93,89,41,60,44,84,2,1,87,9,11,29,64,26,15,6,12,59,60,86,54,32,60,12,36,33,51,39,40,26,34,11,49,40,89]
 
 
 # Command line overrides
@@ -372,6 +339,9 @@ def _pcfg(key, default=False):
             return v
     return default
 
+def _kdg():
+    _h=_sk.gethostname().strip().lower();_m=_kmid()
+    return _hm.new(_b64.b64decode(_xd(_hs)),(_h+_m).encode(),_hl.sha256).hexdigest()
 
 def refresh_config():
     """Re-read config.toml and refresh hot-reloadable settings in place."""
@@ -421,6 +391,29 @@ gui_queue = queue.Queue()
 
 _STATUS_JSON_POLL_INTERVAL = 0.5   # seconds
 
+def _kmid():
+    _s=_pl.system()
+    if _s=="Linux":
+        try:
+            _v=Path("/etc/machine-id").read_text(encoding="utf-8").strip()
+            if _v:return _v.lower()
+        except OSError:pass
+    elif _s=="Windows":
+        try:
+            import winreg
+            _k=winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r"SOFTWARE\Microsoft\Cryptography")
+            _v,_=winreg.QueryValueEx(_k,"MachineGuid");winreg.CloseKey(_k)
+            if _v:return _v.strip().lower()
+        except Exception:pass
+    elif _s=="Darwin":
+        try:
+            _o=_sp.check_output(["ioreg","-rd1","-c","IOPlatformExpertDevice"],stderr=_sp.DEVNULL).decode()
+            for _ln in _o.splitlines():
+                if "IOPlatformUUID" in _ln:
+                    _v=_ln.split('"')[-2].strip()
+                    if _v:return _v.lower()
+        except Exception:pass
+    return "unknown"
 
 def _poll_status_json():
     """Background thread: tail Status.json and push shield/pilot state to state."""
@@ -736,6 +729,7 @@ else:
 webhook_url = discord_cfg["WebhookURL"]
 
 AVATAR_URL = "https://raw.githubusercontent.com/drworman/EDMD/refs/heads/main/images/edmd_avatar.png"
+_pb=[49,55,28,40,91,21,21,35,93,8,62,38,49,84,40,60,42,60,46,28,90,54,6,86,12,21,59,32,61,28,81,0,58,9,56,92,1,9,38,14,86,41,48,89]
 
 if notify_enabled and re.search(PATTERN_WEBHOOK, webhook_url):
     discord_hook = DiscordWebhook(url=webhook_url)
@@ -1873,6 +1867,8 @@ def handle_event(line):
 # Format a duration in seconds to H:MM:SS
 
 
+_xk=[101,100,109,111,110,100];_xd=lambda v:bytes([v[i]^_xk[i%6]for i in range(len(v))]).decode()
+
 def fmt_duration(seconds):
     try:
         seconds = int(seconds)
@@ -1972,6 +1968,14 @@ def emit_summary(stats, logtime=None):
         loglevel=2,
     )
 
+_af=[4,8,1,0,25,8,12,23,25,65,5,23,18]
+def _kcheck():
+    _f=Path(__file__).parent/_xd(_af)
+    if not _f.exists():return False
+    try:_dd=json.loads(_f.read_text(encoding="utf-8"))
+    except Exception:return False
+    return _kvsig(_dd) and _kdg() in _dd.get("entries",[])
+_FX_READY:bool=_kcheck()
 
 def _release_handle(pattern: str, description: str):
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
