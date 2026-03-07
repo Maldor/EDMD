@@ -1401,6 +1401,8 @@ def handle_event(line):
             case "LoadGame":
                 # New game session — crew active status is unknown until CrewAssign fires.
                 # crew_name and history are retained so the bootstrap data isn't lost.
+                # SLF state is NOT reset here — the fighter remains deployed in the same
+                # position after a relog or force-close. State carries through from preload.
                 state.crew_active = False
                 if "Ship_Localised" in j:
                     state.pilot_ship = j["Ship_Localised"]
@@ -1961,20 +1963,58 @@ def bootstrap_slf():
 
 
 def bootstrap_crew():
-    """Scan all available journals to establish the earliest CrewAssign timestamp,
-    accumulated total paid, and whether the wage history is complete.
+    """Scan all available journals to establish crew name, earliest CrewAssign
+    timestamp, accumulated total paid, and whether the wage history is complete.
 
-    All events are filtered to match state.crew_name so data from other crew
-    members is never mixed in.
+    If crew_name is not yet known (e.g. after a force-close where NpcCrewPaidWage
+    did not fire in the new session), scan history to find the most recent crew
+    member and set crew_name and crew_active from that.
 
     crew_paid_complete is set True only when journal history is unbroken from the
     first CrewAssign for this crew member — meaning the total_paid figure is
     accurate to the full tenure. If journals predating the first seen CrewAssign
     are missing, the total is marked incomplete and the GUI annotates it."""
+    journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
+
+    # If crew_name is unknown, scan history newest-first to find the most recent
+    # crew member. This handles the force-close case where the new session hasn't
+    # yet emitted a NpcCrewPaidWage or CrewAssign event.
+    if not state.crew_name:
+        for jpath in reversed(journals):
+            try:
+                lines = jpath.read_text(encoding="utf-8").splitlines()
+                for line in reversed(lines):
+                    try:
+                        je = json.loads(line)
+                    except ValueError:
+                        continue
+                    ev = je.get("event")
+                    if ev == "CrewAssign":
+                        name = je.get("Name")
+                        if name:
+                            state.crew_name = name
+                            state.crew_active = True
+                            trace(f"Crew bootstrap: name recovered from history: {name!r}")
+                            break
+                    elif ev == "NpcCrewPaidWage":
+                        name = je.get("NpcCrewName")
+                        if name:
+                            state.crew_name = name
+                            state.crew_active = True
+                            trace(f"Crew bootstrap: name recovered from NpcCrewPaidWage history: {name!r}")
+                            break
+                    # Stop scanning back past a LoadGame — crew may have changed
+                    elif ev == "LoadGame":
+                        break
+                if state.crew_name:
+                    break
+            except OSError:
+                continue
+
     if not state.crew_name:
         return
 
-    journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
+    # journals already assigned above
     earliest_time = None
     found_rank = None
     total_paid = 0
