@@ -70,18 +70,25 @@ RANK_NAMES = [
 THEMES_DIR = Path(__file__).parent / "themes"
 
 def load_theme(theme_name: str) -> str:
-    """Load CSS from themes/<n>.css, falling back to default."""
-    theme_file = THEMES_DIR / f"{theme_name}.css"
-    if not theme_file.is_file():
-        fallback = THEMES_DIR / "default.css"
-        if fallback.is_file():
-            theme_file = fallback
-        else:
-            return ""
-    try:
-        return theme_file.read_text(encoding="utf-8")
-    except OSError:
-        return ""
+    """Load base.css (structure) + palette CSS for the named theme.
+
+    Theme files now contain only colour variable definitions (:root { }).
+    base.css holds all structural rules and references those variables.
+    Falls back to default.css palette if the named theme is not found.
+    """
+    base_file = THEMES_DIR / "base.css"
+    palette_file = THEMES_DIR / f"{theme_name}.css"
+
+    if not palette_file.is_file():
+        palette_file = THEMES_DIR / "default.css"
+
+    parts = []
+    for path in (base_file, palette_file):
+        try:
+            parts.append(path.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+    return "\n".join(parts)
 
 
 def apply_theme(theme_name: str) -> None:

@@ -88,7 +88,7 @@ A full graphical interface alongside the terminal and Discord pipeline:
 - **Mission stack panel** — live stack value, completion progress, status
 - **Session stats panel** — kills, credits, merits and their per-hour rates, duration
 
-All panels update live. Supports system theme (Adwaita light/dark auto-detected) and custom CSS themes in the `themes/` directory.
+All panels update live. Supports system theme (Adwaita light/dark auto-detected) and custom colour themes via the `themes/custom/` directory — no CSS expertise required.
 
 Launch with `--gui` or set `Enabled = true` in `[GUI]` of `config.toml`.
 
@@ -277,20 +277,26 @@ Every event type has an independently configurable level:
 <img src="images/edmd_avatar.png" width="64" alt="EDMD"/>
 </div>
 
-The GTK4 interface supports full CSS theming. Themes are standard GTK4 CSS files loaded at startup from the `themes/` directory.
+The GTK4 interface supports full CSS theming. Themes are loaded from the `themes/` directory at startup and can be hot-reloaded by changing `Theme` in `config.toml`.
+
+### How themes work
+
+EDMD uses a two-file system. `themes/base.css` contains all structural rules — layout, spacing, font sizes, and widget geometry. Each theme file contains only a `:root { }` block of CSS custom property (variable) definitions for colours. Both files are loaded together automatically; you never need to touch `base.css`.
+
+This means spacing fixes and layout changes apply to all themes at once, and creating a custom theme is as simple as defining a handful of colour values.
 
 ### Built-in themes
 
 | Theme | Accent | Description |
 |-------|--------|-------------|
 | `default` | 🟠 Orange `#e07b20` | Elite Dangerous orange — the one true choice |
-| `default-dark` | 🟠 Orange `#e07b20` | Original dark variant (legacy name) |
+| `default-dark` | 🟠 Orange `#e07b20` | Legacy name, identical to `default` |
 | `default-blue` | 🔵 Blue `#3d8fd4` | |
 | `default-green` | 🟢 Green `#00aa44` | |
 | `default-purple` | 🟣 Purple `#9b59b6` | |
 | `default-red` | 🔴 Red `#cc3333` | |
 | `default-yellow` | 🟡 Yellow `#d4a017` | |
-| `default-light` | System | Follows your Adwaita light/dark preference |
+| `default-light` | System | Accent follows your Adwaita GTK theme |
 
 Select a theme in `config.toml`:
 
@@ -308,24 +314,22 @@ GUI.Theme = "default-blue"
 
 ### Custom themes
 
-Place personal themes in `themes/custom/` — this directory is tracked in the repo but its contents are excluded by `.gitignore`, so your themes will never be accidentally committed or overwritten by a pull.
+A ready-to-use template lives at `themes/custom/my-theme.css`. Copy it, rename it, and edit the colour values — that's all that's needed. The `themes/custom/` directory is gitignored so your themes are never overwritten by a pull.
 
 ```
 themes/
-├── default.css
+├── base.css              ← structure and layout (do not edit for colours)
+├── default.css           ← palette only
 ├── default-blue.css
-├── default-green.css
 │   ...
 └── custom/
-    ├── .gitkeep          ← keeps the directory in the repo
-    └── mytheme.css       ← your theme (gitignored)
+    ├── .gitkeep
+    └── my-theme.css      ← start here (gitignored)
 ```
 
-To create a custom theme:
-
 ```bash
-cp themes/default.css themes/custom/mytheme.css
-# edit themes/custom/mytheme.css
+cp themes/custom/my-theme.css themes/custom/mytheme.css
+# open themes/custom/mytheme.css and change the colour values
 ```
 
 Then set it in `config.toml`:
@@ -335,7 +339,9 @@ Then set it in `config.toml`:
 Theme = "custom/mytheme"
 ```
 
-The theme name is the path relative to `themes/`, without the `.css` extension. The built-in CSS files are heavily commented — the simplest customisation is changing the accent colour hex value throughout.
+The template is thoroughly commented. At minimum, change `--accent` and its two `rgba()` hover variants to match. Everything else — backgrounds, foregrounds, status colours — has sensible defaults you can leave alone or adjust as desired.
+
+The theme name is the path relative to `themes/`, without the `.css` extension.
 
 ---
 

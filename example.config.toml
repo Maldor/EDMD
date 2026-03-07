@@ -109,10 +109,12 @@ PeriodicFaction = 0
 #
 [GUI]
 Enabled = true              # set false or true (or use --gui flag to force gui)
-Theme   = "default-green"   # filename in themes/ without .css extension
+Theme   = "default-green"   # palette filename in themes/ without .css extension
                             # built-in: "default", "default-dark",
                             # "default-light", "default-blue", "default-green",
                             # "default-purple", "default-red", "default-yellow"
+                            # custom:   "custom/mytheme"  (copy themes/custom/my-theme.css
+                            #           to get started — only colour vars needed)
 
 # ==============================================================================
 # Custom profiles (advanced)

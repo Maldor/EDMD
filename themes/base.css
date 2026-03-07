@@ -1,0 +1,320 @@
+/*
+ * EDMD — base.css
+ *
+ * Structural layout for all themes.  Colours are expressed as CSS custom
+ * properties (var(--...)) defined in each theme's palette file.
+ *
+ * DO NOT edit colours here.  To change colours, edit your theme file or
+ * create a custom palette in themes/custom/.
+ *
+ * Loaded automatically by EDMD alongside the active theme palette.
+ */
+
+/* ── Window & layout ─────────────────────────────────────────────────────── */
+
+.edmd-window {
+    background-color: var(--bg-deep);
+    color: var(--fg);
+}
+
+.root-box {
+    padding: 0;
+}
+
+/* ── Event log ───────────────────────────────────────────────────────────── */
+
+.log-frame {
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    padding: 0;
+    background-color: var(--bg-log);
+}
+
+/* ── Header bar ──────────────────────────────────────────────────────────── */
+
+headerbar.edmd-header {
+    min-height: 0;
+    padding: 0.15em 4px;
+    background-color: var(--bg-deep);
+    background-image: none;
+    box-shadow: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg);
+}
+
+headerbar.edmd-header .title {
+    padding: 0;
+    margin: 0;
+}
+headerbar.edmd-header windowcontrols {
+    padding: 0 2px;
+    margin: 0;
+}
+headerbar.edmd-header windowcontrols button {
+    min-height: 0;
+    min-width: 0;
+    padding: 3px;
+    margin: 0;
+    color: var(--accent);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+}
+headerbar.edmd-header windowcontrols button:hover {
+    background-color: var(--accent-hover);
+}
+headerbar.edmd-header button.flat {
+    min-height: 0;
+    min-width: 0;
+    padding: 3px 5px;
+    color: var(--accent);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+}
+headerbar.edmd-header button.flat:hover {
+    background-color: var(--accent-hover);
+}
+
+headerbar.edmd-header .header-title {
+    font-size: 0.80em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    padding: 0 4px;
+}
+
+.log-header {
+    font-family: monospace;
+    font-size: 0.85em;
+    font-weight: bold;
+    color: var(--accent);
+    background-color: var(--bg-mid);
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.log-scroll {
+    background-color: var(--bg-log);
+}
+
+.log-inner {
+    padding: 6px 8px;
+    background-color: var(--bg-log);
+}
+
+.log-entry {
+    font-family: monospace;
+    font-size: 0.82em;
+    color: var(--fg-log);
+    padding: 1px 0;
+    border-radius: 2px;
+    background-color: transparent;
+}
+
+.log-entry:hover {
+    background-color: var(--accent-log-hover);
+}
+
+/* ── Right panel ─────────────────────────────────────────────────────────── */
+
+.right-panel {
+    min-width: 300px;
+    padding: 6px 8px;
+    background-color: var(--bg-panel);
+}
+
+.panel-scroll {
+    background-color: var(--bg-panel);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.panel-section {
+    margin-bottom: 4px;
+    padding: 4px 8px 6px 8px;
+    border-radius: 6px;
+    background-color: var(--bg-mid);
+    border: 1px solid var(--border);
+}
+
+.section-header {
+    font-size: 0.78em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    padding-bottom: 2px;
+}
+
+.section-sep {
+    margin-bottom: 2px;
+    color: var(--border);
+}
+
+.section-body {
+    padding: 0;
+}
+
+/* ── Data rows ───────────────────────────────────────────────────────────── */
+
+.data-row {
+    padding: 1px 0;
+}
+
+.data-key {
+    font-size: 0.80em;
+    color: var(--fg-dim);
+    min-width: 80px;
+}
+
+.data-value {
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--fg);
+}
+
+/* ── SLF status indicators ───────────────────────────────────────────────── */
+
+.slf-deployed {
+    color: var(--green);
+    font-weight: bold;
+}
+
+.slf-docked {
+    color: var(--fg-dim);
+}
+
+/* ── Mission status indicators ───────────────────────────────────────────── */
+
+.status-ready {
+    color: var(--green);
+    font-weight: bold;
+}
+
+.status-active {
+    color: var(--amber);
+}
+
+/* ── Placeholder ─────────────────────────────────────────────────────────── */
+
+.placeholder {
+    color: var(--fg-dim);
+    font-style: italic;
+}
+
+/* ── Sponsor panel ───────────────────────────────────────────────────────── */
+
+.sponsor-note {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    line-height: 1.5;
+}
+
+.sponsor-link {
+    font-size: 0.82em;
+    padding: 1px 0;
+    color: var(--accent);
+}
+
+/* ── PP Rank progress bar ────────────────────────────────────────────────── */
+
+.pp-rank-bar-row {
+    padding: 2px 0 4px 0;
+}
+
+progressbar.pp-rank-bar {
+    min-height: 4px;
+}
+
+progressbar.pp-rank-bar trough {
+    min-height: 4px;
+    border-radius: 2px;
+    background-color: var(--border);
+    border: none;
+}
+
+progressbar.pp-rank-bar progress {
+    min-height: 4px;
+    border-radius: 2px;
+    background-color: var(--accent);
+    background-image: none;
+    border: none;
+}
+
+/* ── Update available notice ─────────────────────────────────────────────── */
+
+.update-available {
+    color: var(--accent);
+    font-weight: bold;
+}
+
+/* ── Hull / shield health colours ───────────────────────────────────────── */
+
+.health-good {
+    color: var(--health-good);
+}
+
+.health-warn {
+    color: var(--health-warn);
+}
+
+.health-crit {
+    color: var(--health-crit);
+    font-weight: bold;
+}
+
+/* ── Condensed stat row separator ───────────────────────────────────────── */
+
+.data-sep {
+    color: var(--fg-sep);
+    font-size: 0.85em;
+}
+
+.data-rate {
+    color: var(--fg-rate);
+    font-size: 0.85em;
+    min-width: 70px;
+}
+
+/* ── Vessel / SLF header type label ─────────────────────────────────────── */
+
+.vessel-type-hdr {
+    font-size: 0.75em;
+    font-weight: normal;
+    color: var(--fg-dim);
+    letter-spacing: 0;
+    text-transform: none;
+    padding-bottom: 4px;
+}
+
+/* ── Stat row total value ─────────────────────────────────────────────── */
+
+.stat-total {
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--fg);
+}
+
+/* ── Sponsor link row ────────────────────────────────────────────────────── */
+
+.sponsor-link-row {
+    padding-top: 4px;
+}
+
+.sponsor-sep {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    padding: 0 2px;
+}
+
+/* ── Monospace stat line (kills / credits / merits with aligned pipes) ─────── */
+
+.stat-line {
+    font-family: monospace;
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--fg);
+}
