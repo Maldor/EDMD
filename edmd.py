@@ -1699,11 +1699,12 @@ def handle_event(line):
                 state.mission_killcount_map.pop(j["MissionID"], None)
                 state.mission_target_faction_map.pop(j["MissionID"], None)
                 state.mission_issuing_faction_map.pop(j["MissionID"], None)
-                # Recalculate kills_required from remaining active missions
-                if state.kills_required is not None and state.mission_killcount_map:
-                    state.kills_required = max(0, sum(state.mission_killcount_map.values()) - state.kills_credited)
-                elif not state.mission_killcount_map:
+                # kills_required is maintained by per-kill decrements; just clamp and
+                # clear if no missions remain.
+                if not state.mission_killcount_map:
                     state.kills_required = None
+                elif state.kills_required is not None:
+                    state.kills_required = max(0, state.kills_required)
 
                 state.active_missions.remove(j["MissionID"])
 
