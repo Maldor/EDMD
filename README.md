@@ -7,7 +7,7 @@
 
 **Real-time AFK session monitoring for Elite Dangerous**
 
-*Kill tracking · Discord alerts · Automated session management · Mission stack awareness · GTK4 GUI*
+*Kill tracking · Discord alerts · Session awareness · Mission stack tracking · GTK4 GUI*
 
 ---
 
@@ -27,7 +27,7 @@ by **CMDR CALURSUS**
 
 EDMD is a Python daemon that tails your Elite Dangerous journal in real time, watching over your AFK combat sessions so you don't have to. It tracks every kill, bounty, merit, and massacre mission — streaming events to your terminal, a GTK4 GUI window, and optionally to a Discord channel via webhook.
 
-When things go wrong — your fighter blown up, hull taking critical damage, fuel running dry — EDMD can exit the game process before you come back to a rebuy screen.
+When things go wrong — your fighter blown up, hull taking critical damage, fuel running dry — EDMD will alert you so you can intervene before coming back to a rebuy screen.
 
 ---
 
@@ -104,7 +104,7 @@ Launch with `--gui` or set `Enabled = true` in `[GUI]` of `config.toml`.
 
 - Reports fuel percentage and estimated time remaining on every replenishment tick
 - Separate warn/critical thresholds with distinct notification levels
-- Auto-quit: exits the game if fuel percentage drops below a set threshold, or if estimated time remaining falls below a configured number of minutes
+- Critical fuel alerts when percentage drops below a set threshold, or when estimated time remaining falls below a configured number of minutes
 
 </details>
 
@@ -115,8 +115,8 @@ Launch with `--gui` or set `Enabled = true` in `[GUI]` of `config.toml`.
 - Fighter hull damage notifications at each 20% degradation step
 - Ship hull integrity reports at each damage event
 - Fighter launch, dock, and NPC orders logged live
-- Auto-quit: exits the game when your fighter is destroyed
-- Auto-quit: exits the game when ship hull falls to or below a configured percentage
+- Critical alert when your fighter is destroyed
+- Critical alert when ship hull falls to or below a configured percentage
 
 </details>
 
@@ -463,8 +463,7 @@ This means your stack value and completion count are accurate from the moment mo
 
 ## Notes
 
-- **Auto-quit** targets `EliteDangerous64.exe`. It sends `SIGTERM` first, then force-kills after 5 seconds if the process hasn't exited cleanly.
-- **Fuel auto-quit** triggers on *either* the percentage threshold *or* the estimated time-remaining threshold — whichever fires first.
+- **Fuel alerts** trigger on *either* the percentage threshold *or* the estimated time-remaining threshold — whichever fires first.
 - **Duplicate suppression** caps repeated identical Discord messages at 5 before switching to a suppression notice, preventing notification floods.
 - **SLF shields** are not yet tracked in GUI mode — the game does not report fighter shield state in the journal or Status.json. This will be added in a future update.
 - **Journal path (Windows):** `%USERPROFILE%\Saved Games\Frontier Developments\Elite Dangerous`
