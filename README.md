@@ -234,7 +234,52 @@ The `Stack` line is omitted when no active massacre missions are detected.
 
 ---
 
-## Discord Integration
+## Terminal Output
+
+When running without a GUI, EDMD prints timestamped event lines to the terminal. Each line is prefixed with a fixed-width sigil indicating event category and urgency:
+
+```
+[14:23:07] *  KILL  Anaconda [Bhutatani Partnership] +4 [30.25M cr]
+[14:31:44] *  MISS  Accepted massacre mission (active: 12)
+[14:38:00] ~  SUMM  Session Summary: ...
+[14:55:12] !! ATCK  Under attack by security services!
+```
+
+**Urgency prefix:**
+
+| Prefix | Meaning |
+|--------|---------|
+| `!! ` | Critical — immediate threat or loss |
+| `!  ` | Warning — degraded state or alert |
+| `*  ` | Active event — kill, mission change |
+| `^  ` | Damage / defensive event |
+| `+  ` | Gain — reward, merit, fuel |
+| `~  ` | Summary / periodic report |
+| `-  ` | Status / informational |
+| `>  ` | Navigation / movement |
+
+**Category tag:**
+
+| Tag | Event type |
+|-----|-----------|
+| `KILL` | Bounty or faction kill bond awarded |
+| `MISS` | Mission accepted, loaded, completed, or abandoned |
+| `SUMM` | Session summary (periodic or on demand) |
+| `ATCK` | Under attack by security services |
+| `WARN` | Inactivity or kill rate alert |
+| `SCAN` | Cargo scan, security scan, or outbound scan |
+| `SHLD` | Shield state change |
+| `HULL` | Ship hull damage |
+| `DEAD` | Ship or fighter destroyed |
+| `SLF ` | Fighter launched, damaged, or destroyed |
+| `FUEL` | Fuel level notification |
+| `MERC` | Powerplay merits earned |
+| `SHIP` | Ship loadout change |
+| `INFO` | Session start, CMDR info, menu/quit events |
+| `JUMP` | Supercruise entry or FSD jump |
+| `DROP` | Dropped at destination (RES or CZ) |
+
+---
 
 EDMD sends structured notifications to a Discord channel via webhook.
 
