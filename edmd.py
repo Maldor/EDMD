@@ -120,6 +120,7 @@ CFG_DEFAULTS_EXTRA = {
     "TruncateNames": 30,
     "WarnNoKillsInitial": 5,
     "WarnCooldown": 15,
+    "FullStackSize": 20,
 }
 
 CFG_DEFAULTS_GUI = {
@@ -1674,15 +1675,38 @@ def handle_event(line):
                 # Rebuild faction_kills_remaining and kills_required from current maps
                 recalc_target_kill_totals()
 
+                total_now = len(state.active_missions)
                 emit(
                     msg_term=(
                         f"Accepted massacre mission "
-                        f"(active: {len(state.active_missions)})"
+                        f"(active: {total_now})"
                     ),
                     emoji="🎯",
                     timestamp=logtime,
                     loglevel=notify_levels["MissionUpdate"],
                 )
+
+                # Stack-full announcement
+                full_stack = app_settings.get("FullStackSize", 20)
+                if (
+                    not state.in_preload
+                    and total_now == full_stack
+                    and state.stack_value > 0
+                    and state.target_kill_totals
+                ):
+                    for _t, _n in sorted(state.target_kill_totals.items()):
+                        _stack_line = (
+                            f"Stack full ({total_now} missions) — "
+                            f"{fmt_credits(state.stack_value)} | "
+                            f"{_n:,} kills vs {_t}"
+                        )
+                        emit(
+                            msg_term=_stack_line,
+                            msg_discord=f"**{_stack_line}**",
+                            emoji="🎯",
+                            timestamp=logtime,
+                            loglevel=notify_levels["MissionUpdate"],
+                        )
 
             case "MissionAbandoned" | "MissionCompleted" | "MissionFailed" if (
                 state.missions and j["MissionID"] in state.active_missions
@@ -1761,7 +1785,7 @@ def handle_event(line):
                     lifetime.merits += j["MeritsGained"]
 
                     emit(
-                        msg_term=(f"Merits: +{j['MeritsGained']} ({j['Power']})"),
+                        msg_term=(f"Merits: +{j['MeritsGained']:,} ({j['Power']})"),
                         emoji="🎫",
                         timestamp=logtime,
                         loglevel=notify_levels["MeritEvent"],
@@ -1936,7 +1960,7 @@ def emit_summary(stats, logtime=None):
     summary_text = (
         f"Session Summary:\n"
         f"- Duration: {duration_fmt}\n"
-        f"- Kills:    {stats.kills}{sep}{kills_per_hour} /hr{avg_interval}\n"
+        f"- Kills:    {stats.kills:,}{sep}{kills_per_hour:,} /hr{avg_interval}\n"
         f"- Bounties: {fmt_credits(stats.credit_total)}{sep}{fmt_credits(bounties_per_hour)} /hr\n"
     )
 
@@ -1952,13 +1976,16 @@ def emit_summary(stats, logtime=None):
         summary_text += (
             f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
         )
-        # Kill counter progress per target faction
+        # Kill counter progress + stack value per target faction
         if state.target_kill_totals:
             for target, total_needed in sorted(state.target_kill_totals.items()):
                 credited = state.target_kills_credited.get(target, 0)
-                summary_text += f"- Progress: {credited}/{total_needed} kills vs {target}\n"
+                summary_text += (
+                    f"- Progress: {credited:,}/{total_needed:,} kills vs {target} "
+                    f"| {fmt_credits(state.stack_value)} stack\n"
+                )
 
-    summary_text += f"- Merits:   {stats.merits}{sep}{merits_per_hour} /hr"
+    summary_text += f"- Merits:   {stats.merits:,}{sep}{int(merits_per_hour):,} /hr"
 
     emit(
         msg_term=summary_text,
@@ -2477,7 +2504,7 @@ def monitor_journal(jfile):
             if state.target_kill_totals:
                 for _target, _needed in sorted(state.target_kill_totals.items()):
                     _credited = state.target_kills_credited.get(_target, 0)
-                    kill_lines += f"  Kills: {_credited}/{_needed} vs {_target}\n"
+                    kill_lines += f"  Kills: {_credited:,}/{_needed:,} vs {_target}\n"
         else:
             stack_line = ""
             kill_lines = ""
@@ -2562,7 +2589,7 @@ def monitor_journal(jfile):
                 )
                 if state.target_kill_totals:
                     kill_progress = "\n".join(
-                        f"{state.target_kills_credited.get(t, 0)}/{n} vs {t}"
+                        f"{state.target_kills_credited.get(t, 0):,}/{n:,} vs {t}"
                         for t, n in sorted(state.target_kill_totals.items())
                     )
                     embed.add_embed_field(
