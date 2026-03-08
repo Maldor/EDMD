@@ -55,11 +55,11 @@ Session Summary:
 - Kills:    67 | 29.9 /hr | avg 0:53/kill
 - Bounties: 5.61M | 2.50M /hr
 - Missions: 386.32M stack (18/20 complete, 2 remaining)
-- Progress: 67/255 kills vs Bhutatani Partnership | 386.32M stack
+- Kills:    188 remaining vs Bhutatani Partnership | 386.32M stack
 - Merits:   1072 | 478 /hr
 ```
 
-The `Progress` line appears for each target faction when massacre missions are active. The `avg X/kill` interval is included once more than one kill has been recorded.
+The `Kills` line appears for each target faction when massacre missions are active. The `avg X/kill` interval is included once more than one kill has been recorded.
 
 <div align="center">
 <img src="images/discord_periodic_summary.png" alt="Discord periodic session summary" width="560"/>
@@ -140,6 +140,7 @@ Launch with `--gui` or set `Enabled = true` in `[GUI]` of `config.toml`.
 - Alerts after a configurable number of minutes with no kills
 - Alerts when average kill rate drops below a configurable kills/hour threshold
 - Both warnings use a flat cooldown (default 15 minutes, configurable via `WarnCooldown`) to avoid spam
+- Detects when the player is not in an active game session — alerts at your highest configured notification level, re-alerts hourly, and suppresses all other output until the player is back in game. A 5-minute startup grace and a 15-minute grace after going to menu prevent alerts during brief interruptions
 
 </details>
 
@@ -235,7 +236,7 @@ On launch, EDMD preloads the current journal, bootstraps mission state, then pri
   A. Lavigny-Duval  Rank 22  (152,198 merits)
   Bhutatani
   Stack: 386.32M (18/20 complete, 2 remaining)
-  Kills: 97/255 vs Bhutatani Partnership
+  Kills: 158 remaining vs Bhutatani Partnership
 ==========================================
 ```
 

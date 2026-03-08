@@ -42,7 +42,7 @@ def abort(message):
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR = "CMDR CALURSUS"
-VERSION = "20260308a"
+VERSION = "20260308b"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE = False
 
@@ -1423,10 +1423,40 @@ def handle_event(line):
             # -----------------------------
             case "MissionRedirected" if "Mission_Massacre" in j["Name"]:
                 state.missions_complete += 1
+                mid = j["MissionID"]
                 # MissionRedirected = kills quota met, but mission still live until
                 # reward is collected. Track the ID so recalc excludes it from totals.
-                state.mission_redirected_set.add(j["MissionID"])
+                state.mission_redirected_set.add(mid)
                 recalc_target_kill_totals()
+
+                # Reset the credited kill count for this target faction.
+                # Kills credited before this redirect satisfied the now-redirected
+                # missions; they must not carry forward and inflate progress against
+                # the remaining open missions, which start fresh from this moment.
+                tf = state.mission_target_faction_map.get(mid, "")
+                if tf and tf in state.target_kill_totals:
+                    # Re-count only kills that arrived AFTER this redirect timestamp.
+                    # Use the ISO string from the journal event for exact comparison.
+                    redirect_ts = j.get("timestamp", "")
+                    if redirect_ts:
+                        new_credited = 0
+                        for jpath in sorted(Path(journal_dir).glob("Journal*.log")):
+                            try:
+                                with open(jpath, mode="r", encoding="utf-8") as jf:
+                                    for kline in jf:
+                                        try:
+                                            ke = json.loads(kline)
+                                        except ValueError:
+                                            continue
+                                        if ke.get("event") not in ("Bounty", "FactionKillBond"):
+                                            continue
+                                        if ke.get("VictimFaction") != tf:
+                                            continue
+                                        if ke.get("timestamp", "") > redirect_ts:
+                                            new_credited += 1
+                            except OSError:
+                                continue
+                        state.target_kills_credited[tf] = new_credited
                 total = len(state.active_missions)
                 done = state.missions_complete
 
@@ -2695,26 +2725,28 @@ def bootstrap_kill_counts():
 
     target_kill_totals[T] = max issuer sum for target T across all active missions.
     target_kills_credited[T] = kills against T found in journal history after the
-    most recent MissionCompleted for that target faction.
+    kill-credit cutoff for that target faction.
 
-    Kill scan cutoff per target faction:
-      1. Most recent MissionCompleted timestamp for that faction (primary).
-         Kills before this completion were for the previous stack and must not
-         be credited to the current one.
-      2. Earliest MissionAccepted timestamp in the current active stack (fallback
-         when no prior completion exists — e.g. the very first stack ever run).
-
-    Bug this fixes: using the earliest MissionAccepted as the cutoff caused
-    kills made for a previous stack (accepted mid-stack, after the old stack was
-    still active) to be credited to the new stack, yielding 0 kills remaining
-    even when missions were still incomplete."""
+    Kill scan cutoff per target faction (first match wins):
+      1. Latest MissionRedirected timestamp among currently-active redirected
+         missions for that target.  When a mission redirects, its kill quota was
+         satisfied; kills before that point belong to completed work and must not
+         be double-credited to the still-open missions.
+      2. Most recent MissionCompleted timestamp for that faction (covers the case
+         where the entire previous stack was turned in before any new missions
+         redirected in the current stack).
+      3. Earliest MissionAccepted timestamp in the current active stack (fallback
+         when no prior completion or redirect exists — e.g. the very first stack
+         ever run)."""
     if not state.active_missions:
         return
 
     active_set = set(state.active_missions)
+    active_redirected_set = state.mission_redirected_set  # MIDs already quota-met
     killcount_map = {}
     earliest_accept_ts_by_target = {}   # TargetFaction -> earliest accept ts in active stack
     last_completed_ts_by_target = {}    # TargetFaction -> most recent MissionCompleted ts
+    last_redirected_ts_by_target = {}   # TargetFaction -> latest MissionRedirected ts among active-redirected
 
     journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
     for jpath in journals:
@@ -2745,12 +2777,24 @@ def bootstrap_kill_counts():
 
                     elif ev == "MissionCompleted" and ts:
                         # Track most recent completion per target faction.
-                        # We must look up the TargetFaction from MissionAccepted history
-                        # since MissionCompleted also carries it.
                         tf = je.get("TargetFaction", "")
                         if tf and (tf not in last_completed_ts_by_target
                                    or ts > last_completed_ts_by_target[tf]):
                             last_completed_ts_by_target[tf] = ts
+
+                    elif (ev == "MissionRedirected"
+                            and mid in active_redirected_set
+                            and ts):
+                        # Track latest redirect among currently-active redirected missions.
+                        # This is the real kill-clock reset: kills before this moment
+                        # already satisfied redirected missions and must not count again.
+                        tf = state.mission_target_faction_map.get(mid, "")
+                        if not tf:
+                            # target map may not be populated yet — look it up from je
+                            tf = je.get("TargetFaction", "")
+                        if tf and (tf not in last_redirected_ts_by_target
+                                   or ts > last_redirected_ts_by_target[tf]):
+                            last_redirected_ts_by_target[tf] = ts
 
         except OSError:
             continue
@@ -2763,16 +2807,17 @@ def bootstrap_kill_counts():
 
     # Pre-credit kills from journal history: scan for Bounty/FactionKillBond
     # events strictly after the kill scan cutoff for each target faction.
-    # Cutoff = most recent MissionCompleted for that target (previous stack cleared),
-    # falling back to earliest MissionAccepted in the active stack if no prior
-    # completion exists.
+    # Cutoff priority: latest MissionRedirected (active-redirected) > last
+    # MissionCompleted > earliest MissionAccepted in current stack.
     state.target_kills_credited = {}
     if state.target_kill_totals:
         target_factions = set(state.target_kill_totals.keys())
         # Build per-faction cutoff timestamps
         cutoff_by_target = {}
         for tf in target_factions:
-            if tf in last_completed_ts_by_target:
+            if tf in last_redirected_ts_by_target:
+                cutoff_by_target[tf] = last_redirected_ts_by_target[tf]
+            elif tf in last_completed_ts_by_target:
                 cutoff_by_target[tf] = last_completed_ts_by_target[tf]
             elif tf in earliest_accept_ts_by_target:
                 cutoff_by_target[tf] = earliest_accept_ts_by_target[tf]
