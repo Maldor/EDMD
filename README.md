@@ -98,7 +98,7 @@ Launch with `--gui` or set `Enabled = true` in `[GUI]` of `config.toml`.
 
 <div align="center">
 <img src="images/gui-screenshot.png" alt="EDMD GTK4 GUI" width="900"/>
-<br><em>GTK4 GUI — default theme, live session in progress</em>
+<br><em>GTK4 GUI — default-green theme, live session in progress</em>
 </div>
 
 </details>
