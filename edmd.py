@@ -1493,6 +1493,11 @@ def handle_event(line):
                     state.crew_name = None
                 # If a bay IS present and we already have a type from a prior launch, keep it.
                 # (slf_type gets set properly on LaunchFighter/RestockVehicle)
+                # If a fighter bay is present and crew_name is known but crew_active is still
+                # False (e.g. relog where CrewAssign did not re-fire), restore crew_active now.
+                # bootstrap_crew() only runs once at preload; this covers the live relog case.
+                if slf_found and state.crew_name and not state.crew_active:
+                    state.crew_active = True
                 if gui_mode:
                     gui_queue.put(("slf_update", None))
                     gui_queue.put(("crew_update", None))
