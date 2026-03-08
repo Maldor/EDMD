@@ -1600,9 +1600,10 @@ def handle_event(line):
                     gui_queue.put(("slf_update", None))
 
             case "FighterRebuilt":
-                state.slf_hull = 100
-                state.slf_docked = True
-                state.slf_deployed = False
+                # A previously-destroyed fighter has been rebuilt and placed in the bay.
+                # This does NOT mean the currently-deployed fighter docked — if one is
+                # out, it remains deployed. Only update the destroyed count; leave all
+                # other SLF state (deployed, docked, hull) unchanged.
                 state.slf_destroyed_count = max(0, state.slf_destroyed_count - 1)
                 if gui_mode:
                     gui_queue.put(("slf_update", None))
@@ -2394,8 +2395,12 @@ def bootstrap_slf():
 
     Recovers:
     - slf_type: from the most recent RestockVehicle event
-    - slf_deployed / slf_docked: from the most recent fighter state event
-      (LaunchFighter, DockFighter, FighterDestroyed, FighterRebuilt)
+    - slf_deployed / slf_docked: from the most recent LaunchFighter, DockFighter,
+      or FighterDestroyed event (newest-first scan, stops on first match)
+
+    FighterRebuilt is intentionally excluded: it means a dead fighter was rebuilt
+    in the bay, but says nothing about whether another fighter is currently deployed.
+    Including it would incorrectly set docked=True while a fighter is still out.
 
     This handles two cases:
     1. Relog with SLF deployed: new journal has no LaunchFighter yet; the
@@ -2410,7 +2415,7 @@ def bootstrap_slf():
 
     journals = sorted(Path(journal_dir).glob("Journal*.log"), reverse=True)
 
-    STATE_EVENTS = {"LaunchFighter", "DockFighter", "FighterDestroyed", "FighterRebuilt"}
+    STATE_EVENTS = {"LaunchFighter", "DockFighter", "FighterDestroyed"}
 
     slf_state_known = False
     slf_type_known = state.slf_type is not None
@@ -2440,11 +2445,6 @@ def bootstrap_slf():
                         state.slf_docked = False
                         state.slf_hull = 0
                         trace(f"SLF bootstrap: destroyed, recovered from {jpath.name}")
-                    elif ev == "FighterRebuilt":
-                        state.slf_deployed = False
-                        state.slf_docked = True
-                        state.slf_hull = 100
-                        trace(f"SLF bootstrap: rebuilt/docked, recovered from {jpath.name}")
                     slf_state_known = True
 
                 if not slf_type_known and ev == "RestockVehicle":
