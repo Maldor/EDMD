@@ -729,7 +729,7 @@ else:
 # Check discord_hook appears valid before starting
 webhook_url = discord_cfg["WebhookURL"]
 
-AVATAR_URL = "https://raw.githubusercontent.com/drworman/EDMD/refs/heads/main/images/edmd_avatar.png"
+AVATAR_URL = "https://raw.githubusercontent.com/drworman/EDMD/refs/heads/main/images/edmd_avatar_512.png"
 _pb=[49,55,28,40,91,21,21,35,93,8,62,38,49,84,40,60,42,60,46,28,90,54,6,86,12,21,59,32,61,28,81,0,58,9,56,92,1,9,38,14,86,41,48,89]
 
 if notify_enabled and re.search(PATTERN_WEBHOOK, webhook_url):

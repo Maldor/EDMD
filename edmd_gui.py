@@ -520,6 +520,31 @@ class EdmdWindow(Gtk.ApplicationWindow):
             body.append(row)
 
     def _build_sponsor_panel(self, parent):
+
+        # ── Avatar mark — themed, above sponsor block ──────────────────────
+        theme = self.gui_cfg.get("Theme", "default")
+        _theme_avatar_map = {
+            "default-blue":   "edmd_avatar_blue_512.png",
+            "default-green":  "edmd_avatar_green_512.png",
+            "default-purple": "edmd_avatar_purple_512.png",
+            "default-red":    "edmd_avatar_red_512.png",
+            "default-yellow": "edmd_avatar_yellow_512.png",
+            "default-light":  "edmd_avatar_light_512.png",
+        }
+        avatar_file = _theme_avatar_map.get(theme, "edmd_avatar_512.png")
+        avatar_path = Path(__file__).parent / "images" / avatar_file
+
+        if avatar_path.exists():
+            avatar_pic = Gtk.Picture.new_for_filename(str(avatar_path))
+            avatar_pic.set_can_shrink(True)
+            avatar_pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+            avatar_pic.set_size_request(72, 72)
+            avatar_pic.set_opacity(0.55)
+            avatar_pic.set_halign(Gtk.Align.CENTER)
+            avatar_pic.set_margin_top(8)
+            avatar_pic.set_margin_bottom(4)
+            parent.append(avatar_pic)
+
         # Outer box: vexpand so it pushes to the bottom of the panel
         section, body = make_section("Sponsoring Development")
         section.set_vexpand(True)

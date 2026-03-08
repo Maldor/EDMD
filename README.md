@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="images/edmd_avatar.png" width="140" alt="EDMD"/>
+<img src="images/edmd_avatar_512.png" width="140" alt="EDMD"/>
 
 # Elite Dangerous Monitor Daemon
 ### EDMD
@@ -59,7 +59,7 @@ Delivered every 10 kills and on session end — to the terminal/GUI event log an
 ```
 
 <div align="center">
-<img src="images/discord_summary.png" alt="Discord session summary" width="560"/>
+<img src="images/discord_periodic_summary.png" alt="Discord periodic session summary" width="560"/>
 <br><em>Session summary posted to Discord</em>
 </div>
 
@@ -232,6 +232,11 @@ On launch, EDMD preloads the current journal, bootstraps mission state, then pri
 
 The `Stack` line is omitted when no active massacre missions are detected.
 
+<div align="center">
+<img src="images/terminal_launch_notice.png" alt="Terminal launch banner" width="660"/>
+<br><em>Launch banner printed to terminal on startup</em>
+</div>
+
 ---
 
 ## Terminal Output
@@ -279,6 +284,11 @@ When running without a GUI, EDMD prints timestamped event lines to the terminal.
 | `JUMP` | Supercruise entry or FSD jump |
 | `DROP` | Dropped at destination (RES or CZ) |
 
+<div align="center">
+<img src="images/terminal_periodic_summary.png" alt="Terminal periodic summary" width="660"/>
+<br><em>Periodic session summary — fires every 15 minutes while active</em>
+</div>
+
 ---
 
 EDMD sends structured notifications to a Discord channel via webhook.
@@ -319,7 +329,7 @@ Every event type has an independently configurable level:
 ## GUI Theming
 
 <div align="center">
-<img src="images/edmd_avatar.png" width="64" alt="EDMD"/>
+<img src="images/edmd_avatar_512.png" width="64" alt="EDMD"/>
 </div>
 
 The GTK4 interface supports full CSS theming. Themes are loaded from the `themes/` directory at startup and can be hot-reloaded by changing `Theme` in `config.toml`.
@@ -527,7 +537,7 @@ This means your stack value and completion count are accurate from the moment mo
 
 *Fly safe out there, CMDR.*
 
-<img src="images/edmd_avatar.png" width="56" alt="EDMD"/>
+<img src="images/edmd_avatar_512.png" width="56" alt="EDMD"/>
 
 **Elite Dangerous Monitor Daemon** · by CMDR CALURSUS
 
