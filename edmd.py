@@ -2302,8 +2302,7 @@ def emit_summary(stats, logtime=None):
                 credited = state.target_kills_credited.get(target, 0)
                 remaining = max(0, total_needed - credited)
                 summary_text += (
-                    f"- Kills:    {remaining:,} remaining vs {target}"
-                    f" | {fmt_credits(state.stack_value)} stack\n"
+                    f"- Kills:    {remaining:,} remaining vs {target}\n"
                 )
 
     summary_text += f"- Merits:   {stats.merits:,}{sep}{int(merits_per_hour):,} /hr"
