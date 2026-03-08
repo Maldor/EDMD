@@ -503,14 +503,18 @@ All entries are hot-reloadable. Controls terminal, Discord, and GUI event log ou
 ## Command Line Arguments
 
 ```
-python edmd.py [-p PROFILE] [-g] [-r]
+python edmd.py [-p PROFILE] [-g] [-t] [-d] [--upgrade]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-p`, `--config_profile` | Load a named config profile |
 | `-g`, `--gui` | Launch GTK4 graphical interface (Linux only) |
-| `-r`, `--resetsession` | Reset session stats after journal preload completes |
+| `-t`, `--test` | Re-route Discord output to terminal instead of sending to webhook |
+| `-d`, `--trace` | Print verbose debug and trace output to terminal |
+| `--upgrade` | Pull the latest version from GitHub and restart with the same arguments. Cannot be combined with other flags. |
+
+In GUI mode, an **Upgrade** button appears in the sidebar when a new version is available. Clicking it saves session state and relaunches automatically via `--upgrade`.
 
 ---
 
@@ -552,11 +556,13 @@ This means your stack value and completion count are accurate from the moment mo
 
 ---
 
-## Remote Access
+## Guides
 
-EDMD supports a two-machine setup where the GUI runs on a secondary machine (e.g. a laptop) while the game and all Discord notifications run on your main machine. The secondary machine mounts the journal directory over SSH and connects as a read-only GUI front-end.
-
-**→ See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md) for full setup instructions**, including passwordless SSH configuration, optional DuckDNS WAN access, the `[REMOTE]` config profile, and the context-aware `edmd_launch.sh` launcher script.
+| Guide | Description |
+|-------|-------------|
+| [Linux Setup](docs/guides/LINUX_SETUP.md) | Getting Elite Dangerous running on Linux with Steam, Proton, Minimal ED Launcher, EDMC, and EDMD |
+| [Dual Pilot](docs/guides/DUAL_PILOT.md) | Running two accounts simultaneously with independent journal directories and separate tool instances |
+| [Remote Access](docs/guides/REMOTE_ACCESS.md) | Running the EDMD GUI on a second machine (laptop) as a thin client against your main machine's session |
 
 ---
 

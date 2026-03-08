@@ -251,6 +251,19 @@ progressbar.pp-rank-bar progress {
     font-weight: bold;
 }
 
+.upgrade-btn {
+    background: var(--accent);
+    color: #000;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 4px 8px;
+    border: none;
+}
+
+.upgrade-btn:hover {
+    background: color-mix(in srgb, var(--accent) 80%, white 20%);
+}
+
 /* ── Hull / shield health colours ───────────────────────────────────────── */
 
 .health-good {

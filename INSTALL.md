@@ -118,6 +118,11 @@ Run `pip install discord-webhook --break-system-packages`.
 **`ModuleNotFoundError: No module named 'cryptography'`**
 Run `pip install cryptography --break-system-packages`.
 
+**`sshfs` for remote access**
+If you plan to use EDMD's remote GUI mode (secondary machine as thin client), install `sshfs` on the secondary machine:
+`sudo pacman -S sshfs` (Arch) · `sudo apt install sshfs` (Debian/Ubuntu) · `sudo dnf install fuse-sshfs` (Fedora).
+See [docs/guides/REMOTE_ACCESS.md](docs/guides/REMOTE_ACCESS.md) for full setup.
+
 **`GLib.GError` or blank GUI window**
 Your GTK4 theme or icon set may be incomplete. Ensure `adwaita-icon-theme` (or equivalent) is installed for your distro.
 

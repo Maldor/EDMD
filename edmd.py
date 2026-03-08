@@ -45,6 +45,37 @@ AUTHOR = "CMDR CALURSUS"
 VERSION = "20260307"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE = False
+
+# ── User data directory ────────────────────────────────────────────────────────
+# All user-owned runtime files (state, future config) live here.
+# Linux:   ~/.local/share/EDMD/
+# Windows: %APPDATA%\EDMD\
+# macOS:   ~/Library/Application Support/EDMD/
+# A symlink from ~/.config/EDMD → ~/.local/share/EDMD is created on Linux
+# for XDG hygiene — the canonical location is always the data dir.
+
+def _user_data_dir() -> Path:
+    system = _pl.system()
+    if system == "Windows":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif system == "Darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    d = base / "EDMD"
+    d.mkdir(parents=True, exist_ok=True)
+    # Create ~/.config/EDMD symlink on Linux for XDG hygiene
+    if system not in ("Windows", "Darwin"):
+        config_link = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "EDMD"
+        if not config_link.exists() and not config_link.is_symlink():
+            try:
+                config_link.symlink_to(d)
+            except OSError:
+                pass
+    return d
+
+EDMD_DATA_DIR: Path = _user_data_dir()
+STATE_FILE: Path = EDMD_DATA_DIR / "session_state.json"
 DISCORD_TEST = False
 MAX_DUPLICATES = 5
 FUEL_WARN_THRESHOLD = 0.2  # 20%
@@ -251,45 +282,142 @@ parser.add_argument(
 # parser.add_argument("-j", "--journal", help="Override for path to journal folder")
 # parser.add_argument("-w", "--discord_hook", help="Override for Discord discord_hook URL")
 parser.add_argument(
-    "-r",
-    "--resetsession",
-    action="store_true",
-    default=None,
-    help="Reset active_session stats after in_preload",
-)
-parser.add_argument(
     "-t",
     "--test",
     action="store_true",
     default=None,
-    help="Re-routes Discord messages to terminal",
+    help="Re-route Discord output to terminal instead of sending to webhook (test mode)",
 )
 parser.add_argument(
     "-d",
     "--trace",
     action="store_true",
     default=None,
-    help="Print information for debugging",
+    help="Print verbose debug/trace output to terminal",
 )
 parser.add_argument(
     "-g",
     "--gui",
     action="store_true",
     default=None,
-    help="Launch graphical interface (requires PyGObject / GTK4)",
+    help="Launch GTK4 graphical interface (Linux only; requires PyGObject)",
 )
-
-# file_group = parser.add_mutually_exclusive_group()
-# file_group.add_argument("-s", "--setfile", help="Set specific journal file to use")
-# file_group.add_argument(
-#    "-f", "--fileselect",
-#    action="store_true",
-#    default=None,
-#    help="Show list of recent journals to chose from",
-# )
+parser.add_argument(
+    "--upgrade",
+    action="store_true",
+    default=False,
+    help="Pull latest version from GitHub and restart with the same arguments",
+)
 
 args = parser.parse_args()
 
+# --upgrade is exclusive — no other flags accepted alongside it
+if args.upgrade:
+    _other_flags = [args.config_profile, args.test, args.trace, args.gui]
+    if any(f for f in _other_flags if f):
+        parser.error("--upgrade cannot be combined with other flags")
+
+# ── In-place upgrade ──────────────────────────────────────────────────────────
+
+def do_upgrade():
+    """Pull latest from GitHub, re-run install.sh, then os.execv back to life.
+
+    --upgrade is handled before config loads — no journal, no state, no GUI.
+    Only git and install.sh are required.
+    """
+    repo_dir = Path(__file__).parent.resolve()
+
+    print(f"{Terminal.CYAN}{'=' * 52}")
+    print(f"  EDMD In-Place Upgrade")
+    print(f"{'=' * 52}{Terminal.END}\n")
+
+    # ── Require git ───────────────────────────────────────────────────────────
+    import shutil
+    if not shutil.which("git"):
+        print(f"{Terminal.WARN}ERROR:{Terminal.END} git not found on PATH.")
+        print("Install git and retry: pacman -S git / apt install git / dnf install git")
+        sys.exit(1)
+
+    # ── Confirm we are inside a git repo ─────────────────────────────────────
+    result = _sp.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"{Terminal.WARN}ERROR:{Terminal.END} {repo_dir} is not a git repository.")
+        print("EDMD must be installed via git clone to use --upgrade.")
+        sys.exit(1)
+
+    # ── Check for local modifications ─────────────────────────────────────────
+    dirty = _sp.run(
+        ["git", "-C", str(repo_dir), "status", "--porcelain"],
+        capture_output=True, text=True
+    )
+    modified = [
+        line for line in dirty.stdout.splitlines()
+        if not line.strip().endswith("config.toml")  # config.toml changes are expected
+    ]
+    if modified:
+        print(f"{Terminal.YELL}Warning:{Terminal.END} Uncommitted local changes detected:")
+        for line in modified[:5]:
+            print(f"  {line}")
+        if len(modified) > 5:
+            print(f"  ... and {len(modified) - 5} more")
+        print()
+        try:
+            answer = input("Continue with upgrade? Local changes may be overwritten. [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer != "y":
+            print("Upgrade cancelled.")
+            sys.exit(0)
+        print()
+
+    # ── Record current version ────────────────────────────────────────────────
+    current_version = VERSION
+    print(f"  Current version : {current_version}")
+
+    # ── git pull ──────────────────────────────────────────────────────────────
+    print(f"  Pulling from    : origin/main")
+    pull = _sp.run(
+        ["git", "-C", str(repo_dir), "pull", "--ff-only"],
+        capture_output=True, text=True
+    )
+    if pull.returncode != 0:
+        print(f"\n{Terminal.WARN}ERROR:{Terminal.END} git pull failed:")
+        print(pull.stderr.strip() or pull.stdout.strip())
+        sys.exit(1)
+
+    if "Already up to date" in pull.stdout:
+        print(f"\n  Already up to date (v{current_version}). Nothing to do.\n")
+        sys.exit(0)
+
+    print(pull.stdout.strip())
+    print()
+
+    # ── Re-run install.sh ─────────────────────────────────────────────────────
+    install_sh = repo_dir / "install.sh"
+    if install_sh.exists() and _pl.system() != "Windows":
+        print("  Running install.sh to update dependencies...\n")
+        inst = _sp.run(["bash", str(install_sh)], cwd=str(repo_dir))
+        if inst.returncode != 0:
+            print(f"\n{Terminal.WARN}Warning:{Terminal.END} install.sh exited with errors.")
+            print("Dependencies may be incomplete — proceeding anyway.\n")
+    elif _pl.system() == "Windows":
+        install_bat = repo_dir / "install.bat"
+        if install_bat.exists():
+            print("  Running install.bat to update dependencies...\n")
+            _sp.run([str(install_bat)], cwd=str(repo_dir), shell=True)
+
+    # ── Replace this process with a fresh one ────────────────────────────────
+    # Strip --upgrade from argv so we don't upgrade-loop, keep all other flags.
+    new_argv = [a for a in sys.argv if a != "--upgrade"]
+    print(f"\n{Terminal.GOOD}  Upgrade complete. Relaunching EDMD...{Terminal.END}\n")
+    os.execv(sys.executable, [sys.executable] + new_argv)
+
+
+if args.upgrade:
+    do_upgrade()
 
 def load_setting(category: str, defaults: dict, warn_missing=True) -> dict:
     settings = {}
@@ -587,6 +715,9 @@ class MonitorState:
             self.last_periodic_summary = time.monotonic()
             self.last_inactive_alert = None
             self.last_rate_alert = None
+            # Record wall-clock start time for state persistence
+            global _session_start_iso
+            _session_start_iso = self.session_start_time.isoformat() if self.session_start_time else None
 
     def sessionend(self):
         if self.session_start_time:
@@ -600,6 +731,78 @@ class MonitorState:
 active_session = SessionData()
 lifetime = SessionData()
 state = MonitorState()
+
+# ── Session state persistence ─────────────────────────────────────────────────
+# A thin JSON snapshot written before upgrade-restart and on clean exit.
+# Loaded at startup only when the snapshot references the same journal file
+# that is currently active — guards against stale state from a prior session.
+#
+# Fields persisted:
+#   session_start_time  — wall-clock ISO string; restores session duration
+#   kills, credit_total, merits, faction_tally — session counters
+#   kill_interval_total, recent_kill_times     — for kill rate calculations
+#
+# Fields intentionally NOT persisted:
+#   target_kill_totals / mission maps  — re-derived by bootstrap_kill_counts()
+#   pilot/ship/crew/SLF state          — re-derived from journal preload
+#   alert timers                       — reset on restart (brief gap is fine)
+#   last_periodic_summary              — reset so summary doesn't fire immediately
+
+# Sentinel: wall-clock ISO of session start, set after sessionstart() fires.
+# Used by save_session_state(); declared here so load_session_state() can set it.
+_session_start_iso: str | None = None
+
+
+def save_session_state(journal_path: Path) -> None:
+    """Write active session counters to STATE_FILE for upgrade-restart recovery."""
+    try:
+        payload = {
+            "journal":             str(journal_path),
+            "session_start_time":  _session_start_iso,
+            "kills":               active_session.kills,
+            "credit_total":        active_session.credit_total,
+            "merits":              active_session.merits,
+            "faction_tally":       active_session.faction_tally,
+            "kill_interval_total": active_session.kill_interval_total,
+            "recent_kill_times":   [t.isoformat() for t in active_session.recent_kill_times],
+            "inbound_scan_count":  active_session.inbound_scan_count,
+            "low_cargo_count":     active_session.low_cargo_count,
+        }
+        STATE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_session_state(journal_path: Path) -> None:
+    """Restore session counters from STATE_FILE if it matches journal_path.
+
+    Called once during preload, after journal_file is resolved but before
+    bootstrap functions run. Consumed immediately — STATE_FILE is deleted
+    after a successful load so state is never restored twice.
+    """
+    global _session_start_iso
+    try:
+        if not STATE_FILE.exists():
+            return
+        payload = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        if payload.get("journal") != str(journal_path):
+            return  # stale — different session or journal rolled over
+        active_session.kills               = int(payload.get("kills", 0))
+        active_session.credit_total        = int(payload.get("credit_total", 0))
+        active_session.merits              = int(payload.get("merits", 0))
+        active_session.faction_tally       = dict(payload.get("faction_tally", {}))
+        active_session.kill_interval_total = float(payload.get("kill_interval_total", 0))
+        active_session.inbound_scan_count  = int(payload.get("inbound_scan_count", 0))
+        active_session.low_cargo_count     = int(payload.get("low_cargo_count", 0))
+        active_session.recent_kill_times   = [
+            datetime.fromisoformat(t) for t in payload.get("recent_kill_times", []) if t
+        ]
+        _session_start_iso = payload.get("session_start_time")
+        STATE_FILE.unlink(missing_ok=True)  # consume — never restore twice
+        trace("Session state restored from STATE_FILE")
+    except Exception:
+        pass
+
 
 # Set journal directory
 if not setting_journal_dir:
@@ -714,6 +917,7 @@ if _update_notice:
         print(
             f"{Terminal.YELL}\u26a0 Update available: v{_update_notice}{Terminal.END}"
             f"  {Terminal.WHITE}{_releases_url}{Terminal.END}\n"
+            f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to update and restart automatically.\n"
         )
 
     # GUI — sponsor panel picks this up and appends it after the GitHub link
@@ -2486,6 +2690,9 @@ def monitor_journal(jfile):
         if not state.missions or (state.active_missions and not state.stack_value):
             bootstrap_missions()
 
+        # Restore session counters from a prior upgrade-restart if available
+        load_session_state(journal_file)
+
         # Bootstrap SLF type from journal history if not seen this session
         bootstrap_slf()
 
@@ -2494,6 +2701,15 @@ def monitor_journal(jfile):
 
         # Bootstrap kill counts for active massacre missions
         bootstrap_kill_counts()
+
+        # If session_start_time was not set by journal events but was persisted,
+        # restore it now so session duration survives an upgrade restart
+        if not state.session_start_time and _session_start_iso:
+            try:
+                state.session_start_time = datetime.fromisoformat(_session_start_iso)
+                trace(f"Session start time restored from state: {state.session_start_time}")
+            except ValueError:
+                pass
 
         print("Preload complete. Monitoring live...\n")
 
@@ -2744,6 +2960,9 @@ def run_monitor():
         if not gui_mode:
             print("\nExiting...")
         state.sessionend()
+        # Persist session counters so an immediate --upgrade restart can restore them
+        if state.session_start_time and journal_file:
+            save_session_state(journal_file)
 
     except FileNotFoundError:
         abort("Journal file not found")
@@ -2786,3 +3005,5 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\nExiting...")
             state.sessionend()
+            if state.session_start_time and journal_file:
+                save_session_state(journal_file)

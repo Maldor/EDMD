@@ -961,13 +961,42 @@ class EdmdWindow(Gtk.ApplicationWindow):
         return True  # keep timer running
 
     def _show_update_notice(self, version: str):
-        """Update the GitHub link label to show an available version."""
+        """Replace the GitHub link row with an Upgrade button when a new version is available."""
+        import sys, os
         try:
-            btn = self._github_btn
-            btn.set_label(f"🐙  GitHub  (v{version} available)")
-            btn.add_css_class("update-available")
-        except AttributeError:
-            pass  # panel not built yet — should not happen in practice
+            # Append an Upgrade button after the existing link row
+            upgrade_btn = Gtk.Button(label=f"⬆  Upgrade to v{version}")
+            upgrade_btn.add_css_class("upgrade-btn")
+            upgrade_btn.set_margin_top(6)
+            upgrade_btn.set_tooltip_text(
+                "Pull latest version from GitHub and restart EDMD automatically"
+            )
+
+            def _do_upgrade(_btn):
+                # Save session state before replacing the process
+                try:
+                    from edmd import save_session_state, journal_file, state
+                    if state.session_start_time and journal_file:
+                        save_session_state(journal_file)
+                except Exception:
+                    pass
+                # Replace this process with edmd.py --upgrade (strips any existing --upgrade)
+                new_argv = [a for a in sys.argv if a != "--upgrade"] + ["--upgrade"]
+                os.execv(sys.executable, [sys.executable] + new_argv)
+
+            upgrade_btn.connect("clicked", _do_upgrade)
+
+            # Insert below sponsor link row — find the link_row's parent
+            link_row = self._github_btn.get_parent()
+            if link_row and link_row.get_parent():
+                link_row.get_parent().append(upgrade_btn)
+                self._upgrade_btn = upgrade_btn
+
+            # Also update the GitHub button label
+            self._github_btn.set_label(f"🐙  GitHub  (v{version} available)")
+            self._github_btn.add_css_class("update-available")
+        except Exception:
+            pass  # graceful degradation — update notice is informational
 
     def _tick_stats(self):
         """Refresh stats, crew active timer, and missions every second."""
