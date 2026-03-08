@@ -42,7 +42,7 @@ def abort(message):
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR = "CMDR CALURSUS"
-VERSION = "20260307"
+VERSION = "20260308"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE = False
 
