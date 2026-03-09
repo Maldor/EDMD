@@ -42,7 +42,7 @@ def abort(message):
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR = "CMDR CALURSUS"
-VERSION = "20260308b"
+VERSION = "20260309"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE = False
 
@@ -685,17 +685,7 @@ class MonitorState:
         self.mission_value_map = {}
         self.stack_value = 0
         self.has_fighter_bay = False      # True when current ship's Loadout includes a fighter bay
-        self.mission_killcount_map = {}      # MissionID -> required kill count (from MissionAccepted)
         self.mission_target_faction_map = {}  # MissionID -> TargetFaction (who to kill)
-        self.mission_issuing_faction_map = {} # MissionID -> IssuingFaction (who gave the mission)
-        # Per-target-faction kill tracking.
-        # target_kill_totals[T] = max( sum(KillCounts) per issuing faction ) for target T
-        #   Recalculated on MissionAccepted / MissionCompleted / Abandoned / Failed.
-        #   Does NOT include redirected missions — their quota is already met.
-        # target_kills_credited[T] = kills against T observed live (post-preload).
-        self.target_kill_totals   = {}  # TargetFaction -> int (bottleneck total)
-        self.target_kills_credited = {} # TargetFaction -> int (live kills since tracking started)
-        self.mission_redirected_set = set()  # MissionIDs whose kill quota is met (MissionRedirected)
 
         # SLF state
         self.slf_deployed = False
@@ -765,8 +755,21 @@ class MonitorState:
             )
             self.session_start_time = None
 
+    def reset_missions(self):
+        """Clear all mission state so a new game session bootstraps cleanly.
 
-active_session = SessionData()
+        Called on LoadGame. Without this, the missions flag and maps carried over
+        from a prior session prevent the Missions bulk event and bootstrap_missions()
+        from running, leaving stale mission data in place when the player has
+        switched stacks or ships between sessions.
+        """
+        self.missions = False
+        self.active_missions = []
+        self.missions_complete = 0
+        self.stack_value = 0
+        self.mission_value_map = {}
+        self.mission_target_faction_map = {}
+
 lifetime = SessionData()
 state = MonitorState()
 
@@ -781,7 +784,6 @@ state = MonitorState()
 #   kill_interval_total, recent_kill_times     — for kill rate calculations
 #
 # Fields intentionally NOT persisted:
-#   target_kill_totals / mission maps  — re-derived by bootstrap_kill_counts()
 #   pilot/ship/crew/SLF state          — re-derived from journal preload
 #   alert timers                       — reset on restart (brief gap is fine)
 #   last_periodic_summary              — reset so summary doesn't fire immediately
@@ -1304,14 +1306,6 @@ def handle_event(line):
 
                 active_session.kills += 1
                 lifetime.kills += 1
-                if not state.in_preload:
-                    victim_faction = j.get("VictimFaction", "")
-                    if victim_faction and victim_faction in state.target_kill_totals:
-                        # Credit one kill against this specific target faction
-                        state.target_kills_credited[victim_faction] = (
-                            state.target_kills_credited.get(victim_faction, 0) + 1
-                        )
-
                 thiskill = logtime
                 killtime = ""
 
@@ -1426,37 +1420,6 @@ def handle_event(line):
                 mid = j["MissionID"]
                 # MissionRedirected = kills quota met, but mission still live until
                 # reward is collected. Track the ID so recalc excludes it from totals.
-                state.mission_redirected_set.add(mid)
-                recalc_target_kill_totals()
-
-                # Reset the credited kill count for this target faction.
-                # Kills credited before this redirect satisfied the now-redirected
-                # missions; they must not carry forward and inflate progress against
-                # the remaining open missions, which start fresh from this moment.
-                tf = state.mission_target_faction_map.get(mid, "")
-                if tf and tf in state.target_kill_totals:
-                    # Re-count only kills that arrived AFTER this redirect timestamp.
-                    # Use the ISO string from the journal event for exact comparison.
-                    redirect_ts = j.get("timestamp", "")
-                    if redirect_ts:
-                        new_credited = 0
-                        for jpath in sorted(Path(journal_dir).glob("Journal*.log")):
-                            try:
-                                with open(jpath, mode="r", encoding="utf-8") as jf:
-                                    for kline in jf:
-                                        try:
-                                            ke = json.loads(kline)
-                                        except ValueError:
-                                            continue
-                                        if ke.get("event") not in ("Bounty", "FactionKillBond"):
-                                            continue
-                                        if ke.get("VictimFaction") != tf:
-                                            continue
-                                        if ke.get("timestamp", "") > redirect_ts:
-                                            new_credited += 1
-                            except OSError:
-                                continue
-                        state.target_kills_credited[tf] = new_credited
                 total = len(state.active_missions)
                 done = state.missions_complete
 
@@ -1713,6 +1676,9 @@ def handle_event(line):
                 # crew_name and history are retained so the bootstrap data isn't lost.
                 # SLF state is NOT reset here — the fighter remains deployed in the same
                 # position after a relog or force-close. State carries through from preload.
+                # Mission state IS reset so the new session's Missions event and
+                # bootstrap_missions() run cleanly, even if this is a journal switch.
+                state.reset_missions()
                 state.crew_active = False
                 state.in_game = True
                 state.offline_since_mono = None   # back in game — clear offline clock
@@ -1974,15 +1940,8 @@ def handle_event(line):
                 if "Reward" in j:
                     state.stack_value += j["Reward"]
                     state.mission_value_map[j["MissionID"]] = j["Reward"]
-                if "KillCount" in j:
-                    kc = j["KillCount"]
-                    state.mission_killcount_map[j["MissionID"]] = kc
                 if "TargetFaction" in j:
                     state.mission_target_faction_map[j["MissionID"]] = j["TargetFaction"]
-                if "Faction" in j:
-                    state.mission_issuing_faction_map[j["MissionID"]] = j["Faction"]
-                # Rebuild faction_kills_remaining and kills_required from current maps
-                recalc_target_kill_totals()
 
                 total_now = len(state.active_missions)
                 emit(
@@ -2001,23 +1960,18 @@ def handle_event(line):
                     not state.in_preload
                     and total_now == full_stack
                     and state.stack_value > 0
-                    and state.target_kill_totals
                 ):
-                    for _t, _n in sorted(state.target_kill_totals.items()):
-                        _credited = state.target_kills_credited.get(_t, 0)
-                        _remaining = max(0, _n - _credited)
-                        _stack_line = (
-                            f"Stack full ({total_now} missions) — "
-                            f"{fmt_credits(state.stack_value)} | "
-                            f"{_remaining:,} kills needed vs {_t}"
-                        )
-                        emit(
-                            msg_term=_stack_line,
-                            msg_discord=f"**{_stack_line}**",
-                            emoji="🏆",  sigil="*  MISS",
-                            timestamp=logtime,
-                            loglevel=notify_levels["MissionUpdate"],
-                        )
+                    _stack_line = (
+                        f"Stack full ({total_now} missions) — "
+                        f"{fmt_credits(state.stack_value)}"
+                    )
+                    emit(
+                        msg_term=_stack_line,
+                        msg_discord=f"**{_stack_line}**",
+                        emoji="🏆",  sigil="*  MISS",
+                        timestamp=logtime,
+                        loglevel=notify_levels["MissionUpdate"],
+                    )
 
             case "MissionAbandoned" | "MissionCompleted" | "MissionFailed" if (
                 state.missions and j["MissionID"] in state.active_missions
@@ -2026,11 +1980,7 @@ def handle_event(line):
                 reward = state.mission_value_map.pop(mid, 0)
                 if reward:
                     state.stack_value -= reward
-                state.mission_killcount_map.pop(mid, None)
                 state.mission_target_faction_map.pop(mid, None)
-                state.mission_issuing_faction_map.pop(mid, None)
-                state.mission_redirected_set.discard(mid)
-                recalc_target_kill_totals()
 
                 state.active_missions.remove(mid)
 
@@ -2297,13 +2247,6 @@ def emit_summary(stats, logtime=None):
             f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
         )
         # Kill counter progress + stack value per target faction
-        if state.target_kill_totals:
-            for target, total_needed in sorted(state.target_kill_totals.items()):
-                credited = state.target_kills_credited.get(target, 0)
-                remaining = max(0, total_needed - credited)
-                summary_text += (
-                    f"- Kills:    {remaining:,} remaining vs {target}\n"
-                )
 
     summary_text += f"- Merits:   {stats.merits:,}{sep}{int(merits_per_hour):,} /hr"
 
@@ -2666,7 +2609,6 @@ def bootstrap_missions():
     state.mission_value_map = {mid: data["reward"] for mid, data in accepted.items()}
     state.stack_value = sum(data["reward"] for data in accepted.values())
     state.missions_complete = len(active_redirected)
-    state.mission_redirected_set = active_redirected  # MissionIDs whose quota is already met
     state.missions = True
 
     print(
@@ -2675,182 +2617,6 @@ def bootstrap_missions():
         f"{state.missions_complete} complete | "
         f"Stack: {fmt_credits(state.stack_value)}"
     )
-
-
-
-def recalc_target_kill_totals():
-    """Rebuild state.target_kill_totals from current mission maps.
-
-    For each target faction T, find every issuing faction I that has OPEN
-    (not yet redirected) missions targeting T, sum their KillCounts, then
-    take the max — that is the bottleneck (the hardest issuer gates completion
-    for T).
-
-    Redirected missions are excluded: their kill quota is already met, so
-    including them would inflate the displayed total beyond what is actually
-    needed to close out the stack.
-
-    Call this after any MissionAccepted, MissionCompleted, MissionAbandoned,
-    MissionFailed, or MissionRedirected event.
-    """
-    from collections import defaultdict
-    # issuer_sums[target][issuer] = sum of killcounts for OPEN (non-redirected) missions only
-    issuer_sums = defaultdict(lambda: defaultdict(int))
-    for mid, kc in state.mission_killcount_map.items():
-        if mid in state.mission_redirected_set:
-            continue  # quota already met — do not inflate the bottleneck
-        target  = state.mission_target_faction_map.get(mid)
-        issuer  = state.mission_issuing_faction_map.get(mid)
-        if target and issuer:
-            issuer_sums[target][issuer] += kc
-
-    new_totals = {}
-    for target, issuers in issuer_sums.items():
-        new_totals[target] = max(issuers.values())
-
-    state.target_kill_totals = new_totals
-    # Prune credited counts for targets that no longer have active open missions
-    for t in list(state.target_kills_credited):
-        if t not in new_totals:
-            del state.target_kills_credited[t]
-
-
-def bootstrap_kill_counts():
-    """Scan journals for MissionAccepted events to populate mission_killcount_map
-    and compute target_kill_totals for all currently active missions.
-
-    Called after Missions bulk event and after bootstrap_missions(), so
-    state.active_missions is already populated.
-
-    target_kill_totals[T] = max issuer sum for target T across all active missions.
-    target_kills_credited[T] = kills against T found in journal history after the
-    kill-credit cutoff for that target faction.
-
-    Kill scan cutoff per target faction (first match wins):
-      1. Latest MissionRedirected timestamp among currently-active redirected
-         missions for that target.  When a mission redirects, its kill quota was
-         satisfied; kills before that point belong to completed work and must not
-         be double-credited to the still-open missions.
-      2. Most recent MissionCompleted timestamp for that faction (covers the case
-         where the entire previous stack was turned in before any new missions
-         redirected in the current stack).
-      3. Earliest MissionAccepted timestamp in the current active stack (fallback
-         when no prior completion or redirect exists — e.g. the very first stack
-         ever run)."""
-    if not state.active_missions:
-        return
-
-    active_set = set(state.active_missions)
-    active_redirected_set = state.mission_redirected_set  # MIDs already quota-met
-    killcount_map = {}
-    earliest_accept_ts_by_target = {}   # TargetFaction -> earliest accept ts in active stack
-    last_completed_ts_by_target = {}    # TargetFaction -> most recent MissionCompleted ts
-    last_redirected_ts_by_target = {}   # TargetFaction -> latest MissionRedirected ts among active-redirected
-
-    journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
-    for jpath in journals:
-        try:
-            with open(jpath, mode="r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        je = json.loads(line)
-                    except ValueError:
-                        continue
-                    ev = je.get("event", "")
-                    mid = je.get("MissionID")
-                    ts = je.get("timestamp", "")
-
-                    if (ev == "MissionAccepted"
-                            and "Mission_Massacre" in je.get("Name", "")
-                            and mid in active_set
-                            and "KillCount" in je):
-                        killcount_map[mid] = je["KillCount"]
-                        tf = je.get("TargetFaction", "")
-                        if tf:
-                            state.mission_target_faction_map[mid] = tf
-                            # Track earliest accept in active stack per target
-                            if tf not in earliest_accept_ts_by_target or ts < earliest_accept_ts_by_target[tf]:
-                                earliest_accept_ts_by_target[tf] = ts
-                        if "Faction" in je:
-                            state.mission_issuing_faction_map[mid] = je["Faction"]
-
-                    elif ev == "MissionCompleted" and ts:
-                        # Track most recent completion per target faction.
-                        tf = je.get("TargetFaction", "")
-                        if tf and (tf not in last_completed_ts_by_target
-                                   or ts > last_completed_ts_by_target[tf]):
-                            last_completed_ts_by_target[tf] = ts
-
-                    elif (ev == "MissionRedirected"
-                            and mid in active_redirected_set
-                            and ts):
-                        # Track latest redirect among currently-active redirected missions.
-                        # This is the real kill-clock reset: kills before this moment
-                        # already satisfied redirected missions and must not count again.
-                        tf = state.mission_target_faction_map.get(mid, "")
-                        if not tf:
-                            # target map may not be populated yet — look it up from je
-                            tf = je.get("TargetFaction", "")
-                        if tf and (tf not in last_redirected_ts_by_target
-                                   or ts > last_redirected_ts_by_target[tf]):
-                            last_redirected_ts_by_target[tf] = ts
-
-        except OSError:
-            continue
-
-    if not killcount_map:
-        return
-
-    state.mission_killcount_map = killcount_map
-    recalc_target_kill_totals()
-
-    # Pre-credit kills from journal history: scan for Bounty/FactionKillBond
-    # events strictly after the kill scan cutoff for each target faction.
-    # Cutoff priority: latest MissionRedirected (active-redirected) > last
-    # MissionCompleted > earliest MissionAccepted in current stack.
-    state.target_kills_credited = {}
-    if state.target_kill_totals:
-        target_factions = set(state.target_kill_totals.keys())
-        # Build per-faction cutoff timestamps
-        cutoff_by_target = {}
-        for tf in target_factions:
-            if tf in last_redirected_ts_by_target:
-                cutoff_by_target[tf] = last_redirected_ts_by_target[tf]
-            elif tf in last_completed_ts_by_target:
-                cutoff_by_target[tf] = last_completed_ts_by_target[tf]
-            elif tf in earliest_accept_ts_by_target:
-                cutoff_by_target[tf] = earliest_accept_ts_by_target[tf]
-            # If neither found, no cutoff — don't credit any kills (safe default)
-
-        for jpath in journals:
-            try:
-                with open(jpath, mode="r", encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            je = json.loads(line)
-                        except ValueError:
-                            continue
-                        if je.get("event") not in ("Bounty", "FactionKillBond"):
-                            continue
-                        vf = je.get("VictimFaction", "")
-                        if vf not in target_factions:
-                            continue
-                        ts = je.get("timestamp", "")
-                        cutoff = cutoff_by_target.get(vf, "")
-                        if cutoff and ts > cutoff:
-                            state.target_kills_credited[vf] = (
-                                state.target_kills_credited.get(vf, 0) + 1
-                            )
-            except OSError:
-                continue
-
-    trace(f"Kill count bootstrap: target_kill_totals={state.target_kill_totals} "
-          f"target_kills_credited={state.target_kills_credited}")
-
-# ----------------------------------------
-# ENTRY POINT
-# ----------------------------------------
-
 
 def monitor_journal(jfile):
     """Preload a journal file then tail it live. Returns when a newer journal
@@ -2882,9 +2648,6 @@ def monitor_journal(jfile):
         # Bootstrap crew hire time from journal history if not already known
         bootstrap_crew()
 
-        # Bootstrap kill counts for active massacre missions
-        bootstrap_kill_counts()
-
         # If session_start_time was not set by journal events but was persisted,
         # restore it now so session duration survives an upgrade restart
         if not state.session_start_time and _session_start_iso:
@@ -2913,15 +2676,8 @@ def monitor_journal(jfile):
                 else f"{_done}/{_total} complete, {_remaining} remaining"
             )
             stack_line = f"  Stack: {fmt_credits(state.stack_value)} ({_status})\n"
-            kill_lines = ""
-            if state.target_kill_totals:
-                for _target, _needed in sorted(state.target_kill_totals.items()):
-                    _credited = state.target_kills_credited.get(_target, 0)
-                    _remaining = max(0, _needed - _credited)
-                    kill_lines += f"  Kills: {_remaining:,} remaining vs {_target}\n"
         else:
             stack_line = ""
-            kill_lines = ""
 
         if state.pilot_system:
             _loc = state.pilot_system
@@ -2947,7 +2703,6 @@ def monitor_journal(jfile):
             f"{pp_line}"
             f"{location_line}"
             f"{stack_line}"
-            f"{kill_lines}"
             f"{term_bar}"
         )
 
@@ -3001,14 +2756,6 @@ def monitor_journal(jfile):
                     value=f"{fmt_credits(state.stack_value)} — {_status}",
                     inline=False,
                 )
-                if state.target_kill_totals:
-                    kill_progress = "\n".join(
-                        f"{state.target_kills_credited.get(t, 0):,}/{n:,} vs {t}"
-                        for t, n in sorted(state.target_kill_totals.items())
-                    )
-                    embed.add_embed_field(
-                        name="Kill Progress", value=kill_progress, inline=False
-                    )
 
             embed.set_footer(text=f"{PROGRAM} v{VERSION}")
             embed.set_timestamp()
