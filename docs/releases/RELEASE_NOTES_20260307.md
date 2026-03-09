@@ -19,6 +19,7 @@ The massacre mission kill counter has been rewritten from scratch to match the c
 Display shows one row per target faction (alphabetically sorted), formatted as `remaining / total` (e.g. `192 / 236`). Header reads **Target Faction | Kills Needed**.
 
 **State model changes:**
+
 - New: `mission_killcount_map` — MissionID → KillCount
 - New: `mission_target_faction_map` — MissionID → TargetFaction
 - New: `mission_issuing_faction_map` — MissionID → IssuingFaction
@@ -42,6 +43,7 @@ Themes have been split into a two-file system:
 **What this means:** Spacing and layout fixes now apply to all themes simultaneously. Creating a custom theme requires only defining colour variables — no knowledge of GTK4 CSS widget selectors needed.
 
 **Spacing tightened** across all themes (~50px total vertical height reduction):
+
 - `right-panel` padding: 10px → 6px
 - `panel-section` margin and padding reduced
 - `section-header` padding-bottom: 4px → 2px
@@ -71,6 +73,7 @@ Six bugs corrected in SLF and NPC crew panel behaviour:
 Fighter type display now shows the full model and variant designation, matching the in-game loadout name.
 
 Examples:
+
 - `GU-97 (Gelid F)` / `GU-97 (Rogue F)` / `GU-97 (Aegis F)`
 - `F63 Condor (Gelid)` / `F63 Condor (Rogue)` / `F63 Condor (Aegis)`
 - `F/A-26 Strike (Gelid F)` / `F/A-26 Strike (Rogue F)` / `F/A-26 Strike (Aegis F)`

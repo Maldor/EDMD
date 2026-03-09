@@ -55,11 +55,10 @@ Session Summary:
 - Kills:    67 | 29.9 /hr | avg 0:53/kill
 - Bounties: 5.61M | 2.50M /hr
 - Missions: 386.32M stack (18/20 complete, 2 remaining)
-- Kills:    188 remaining vs Bhutatani Partnership | 386.32M stack
 - Merits:   1072 | 478 /hr
 ```
 
-The `Kills` line appears for each target faction when massacre missions are active. The `avg X/kill` interval is included once more than one kill has been recorded.
+The `avg X/kill` interval is included once more than one kill has been recorded.
 
 <div align="center">
 <img src="images/discord_periodic_summary.png" alt="Discord periodic session summary" width="560"/>
@@ -236,7 +235,6 @@ On launch, EDMD preloads the current journal, bootstraps mission state, then pri
   A. Lavigny-Duval  Rank 22  (152,198 merits)
   Bhutatani
   Stack: 386.32M (18/20 complete, 2 remaining)
-  Kills: 158 remaining vs Bhutatani Partnership
 ==========================================
 ```
 
@@ -247,7 +245,6 @@ Conditional lines appear only when the relevant data is available:
 | Powerplay allegiance | Only when pledge is active |
 | Location | Only when star system is known |
 | Stack | Only when massacre missions are active |
-| Kills | Only when target kill quotas are tracked |
 
 <div align="center">
 <img src="images/terminal_launch_notice.png" alt="Terminal launch banner" width="660"/>
@@ -401,21 +398,21 @@ GUI.Theme = "default-blue"
 
 ### Custom themes
 
-A ready-to-use template lives at `themes/custom/my-theme.css`. Copy it, rename it, and edit the colour values — that's all that's needed. The `themes/custom/` directory is gitignored so your themes are never overwritten by a pull.
+A ready-to-use template lives at `themes/custom-template.css`. Copy it into `themes/custom/`, rename it, and edit the colour values — that's all that's needed. The `themes/custom/` directory is gitignored so your themes are never overwritten by a pull.
 
 ```
 themes/
-├── base.css              ← structure and layout (do not edit for colours)
-├── default.css           ← palette only
+├── base.css                ← structure and layout (do not edit for colours)
+├── default.css             ← palette only
 ├── default-blue.css
 │   ...
+├── custom-template.css     ← copy this to get started (tracked, never clobbered)
 └── custom/
-    ├── .gitkeep
-    └── my-theme.css      ← start here (gitignored)
+    └── mytheme.css         ← your themes live here (gitignored)
 ```
 
 ```bash
-cp themes/custom/my-theme.css themes/custom/mytheme.css
+cp themes/custom-template.css themes/custom/mytheme.css
 # open themes/custom/mytheme.css and change the colour values
 ```
 
@@ -566,6 +563,60 @@ This means your stack value and completion count are accurate from the moment mo
 | [Linux Setup](docs/guides/LINUX_SETUP.md) | Getting Elite Dangerous running on Linux with Steam, Proton, Minimal ED Launcher, EDMC, and EDMD |
 | [Dual Pilot](docs/guides/DUAL_PILOT.md) | Running two accounts simultaneously with independent journal directories and separate tool instances |
 | [Remote Access](docs/guides/REMOTE_ACCESS.md) | Running the EDMD GUI on a second machine (laptop) as a thin client against your main machine's session |
+
+---
+
+## Plugin Development
+
+EDMD supports user-written plugins. Drop a plugin into `plugins/<name>/plugin.py` and it will be loaded automatically on startup alongside the five built-in modules.
+
+### Minimal plugin
+
+```python
+from core.plugin_loader import BasePlugin
+
+class MyPlugin(BasePlugin):
+    PLUGIN_NAME      = "myplugin"
+    DISPLAY          = "My Plugin"
+    VERSION          = "1.0"
+    SUBSCRIBED_EVENTS = ["Bounty", "FactionKillBond"]
+
+    def on_load(self, core_api) -> None:
+        self.core = core_api
+
+    def on_event(self, j: dict, state) -> None:
+        if j.get("event") == "Bounty":
+            # j contains the parsed journal line
+            # state is the live MonitorState
+            pass
+```
+
+### CoreAPI
+
+Your plugin receives a `CoreAPI` instance in `on_load`. It exposes:
+
+| Attribute / method | Description |
+|---|---|
+| `core.state` | Live `MonitorState` |
+| `core.active_session` | `SessionData` for the current session |
+| `core.cfg` | `ConfigManager` — use `.pcfg(key)` for profile-aware config lookup |
+| `core.emit(msg_term, msg_discord, ...)` | Post an event to terminal, GUI, and Discord |
+| `core.gui_queue` | Thread-safe queue — put `(msg_type, payload)` tuples to update the GUI |
+| `core.plugin_call(name, method, *args)` | Call a method on another loaded plugin; returns `None` if not loaded |
+| `core.fmt_credits(n)` | Format a credit value (e.g. `1.50M`) |
+| `core.fmt_duration(s)` | Format a duration in seconds (e.g. `1:30:00`) |
+
+### Plugin location
+
+```
+plugins/
+└── myplugin/
+    └── plugin.py
+```
+
+The `plugins/` directory is gitignored — your plugins will not be overwritten by `--upgrade`.
+
+> **Note:** The plugin interface is new and may evolve. No stability guarantees until v2.
 
 ---
 

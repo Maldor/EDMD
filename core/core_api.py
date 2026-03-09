@@ -1,0 +1,116 @@
+"""
+core/core_api.py — CoreAPI: the interface every plugin receives via on_load().
+
+Plugins must not import from edmd.py or from each other.
+All shared access goes through this object.
+"""
+
+import queue
+from pathlib import Path
+
+from core.emit import (
+    Emitter,
+    fmt_credits,
+    fmt_duration,
+    rate_per_hour,
+    clip_name,
+)
+
+
+class CoreAPI:
+    """Read-only view of core state and shared services for plugins.
+
+    Attributes (read-only by convention — plugins must not mutate these):
+        state          — MonitorState instance
+        active_session — SessionData for the current session
+        lifetime       — SessionData accumulating lifetime totals
+        cfg            — ConfigManager instance
+        emitter        — Emitter instance (call emitter.emit(...))
+        gui_queue      — thread-safe queue for GUI update messages
+        journal_dir    — Path to the journal directory
+        trace_mode     — bool
+
+    Helper functions (thin wrappers, always available):
+        fmt_credits(n)
+        fmt_duration(s)
+        rate_per_hour(s, precision)
+        clip_name(name, max_len)
+
+    Plugin registration:
+        register_block(plugin)   — register a dashboard block (GUI only)
+        register_alert(plugin)   — register as an alert source
+        plugin_call(name, method, *args, **kwargs)
+                                 — call a method on another loaded plugin by name
+    """
+
+    def __init__(
+        self,
+        state,
+        active_session,
+        lifetime,
+        cfg_mgr,
+        emitter: Emitter,
+        gui_queue: queue.Queue | None,
+        journal_dir: Path,
+        trace_mode: bool = False,
+    ):
+        self.state          = state
+        self.active_session = active_session
+        self.lifetime       = lifetime
+        self.cfg            = cfg_mgr
+        self.emitter        = emitter
+        self.gui_queue      = gui_queue
+        self.journal_dir    = journal_dir
+        self.trace_mode     = trace_mode
+
+        # Formatting helpers — available as core.fmt_credits(...) etc.
+        self.fmt_credits  = fmt_credits
+        self.fmt_duration = fmt_duration
+        self.rate_per_hour = rate_per_hour
+        self.clip_name    = clip_name
+
+        # Plugin registry — populated by PluginLoader after all plugins load
+        self._blocks:  list = []   # plugins with GUI blocks, in priority order
+        self._alerts:  list = []   # plugins that feed the Alerts block
+        self._plugins: dict = {}   # name -> plugin instance
+
+    # ── Plugin-to-plugin calls ────────────────────────────────────────────────
+
+    def plugin_call(self, plugin_name: str, method: str, *args, **kwargs):
+        """Call a method on a named plugin. Returns None if plugin not loaded."""
+        plugin = self._plugins.get(plugin_name)
+        if plugin is None:
+            return None
+        fn = getattr(plugin, method, None)
+        if fn is None:
+            return None
+        return fn(*args, **kwargs)
+
+    # ── Registration (called by plugins during on_load) ───────────────────────
+
+    def register_block(self, plugin, priority: int = 50) -> None:
+        """Register plugin as a dashboard block provider."""
+        self._blocks.append((priority, plugin))
+        self._blocks.sort(key=lambda x: x[0])
+
+    def register_alert(self, plugin) -> None:
+        """Register plugin as an alert source for the Alerts block."""
+        self._alerts.append(plugin)
+
+    # ── Convenience wrappers ──────────────────────────────────────────────────
+
+    def emit(self, **kwargs) -> None:
+        """Shorthand for self.emitter.emit(...)."""
+        self.emitter.emit(**kwargs)
+
+    def load_setting(self, category: str, defaults: dict, warn: bool = True) -> dict:
+        """Shorthand for self.cfg.load_setting(...)."""
+        return self.cfg.load_setting(category, defaults, warn)
+
+    @property
+    def app_settings(self) -> dict:
+        return self.cfg.app_settings
+
+    @property
+    def notify_levels(self) -> dict:
+        return self.cfg.notify_levels

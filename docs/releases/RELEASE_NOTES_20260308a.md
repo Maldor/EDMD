@@ -1,62 +1,29 @@
-# EDMD Release Notes
+# EDMD 20260308a
+
+## What's New
+
+### Kill Counter — Bottleneck Fix
+
+The kill counter was over-counting required kills when missions had already met quota but not yet been turned in (`MissionRedirected`). Those missions were still included in the bottleneck calculation despite requiring no further kills, inflating the displayed total and producing a wrong remaining count.
+
+The counter now correctly excludes redirected missions from the bottleneck sum. Only missions with kills still outstanding contribute to the target total.
 
 ---
 
-## 20260308a
+### Kill Display — Remaining Count Only
 
-**Elite Dangerous Monitor Daemon — EDMD**
-
----
-
-### Bug Fix — Kill Counter Bottleneck Included Completed Missions
-
-**Symptom:** The kill counter displayed an inflated total and consequently a wrong remaining count. For a stack with 20 active missions where 15 had already met quota (pending turn-in), the display showed 255 kills required rather than the correct 129, and reported 147 remaining when the actual figure was closer to 120.
-
-**Root cause:** `recalc_target_kill_totals()` summed the kill requirements of **all** active missions per issuing faction, including missions that had already received a `MissionRedirected` event (kill quota met, awaiting turn-in at the station). Those missions contributed to the bottleneck sum despite requiring no further kills, inflating the displayed total.
-
-**Fix:** A new `mission_redirected_set` is tracked in state. `MissionRedirected` events add to this set and trigger a recalculation. `recalc_target_kill_totals()` now skips any mission whose ID is in `mission_redirected_set` when computing issuer sums, so the bottleneck reflects only missions with kills still outstanding. The set is populated from journal history during the bootstrap phase (via `bootstrap_missions()`) and cleaned up on `MissionCompleted` / `MissionAbandoned` / `MissionFailed`.
+The `credited / total` kill display format has been replaced with a single remaining count across all output channels — GUI sidebar, stack-full announcement, periodic summary, and the startup status block. The remaining count is the only number that matters and is now the only number shown.
 
 ---
 
-### Kill Display — Simplified to Remaining Count Only
+### Not-In-Game Detection
 
-All kill counter display sites have been unified to show only the number of kills remaining, dropping the `credited / total` format.
+EDMD now detects when the player is not in an active session and alerts on Discord (or terminal) at the highest configured notification level.
 
-| Context | Before | After |
-|---------|--------|-------|
-| GUI sidebar row | `108 / 255` | `147 kills` |
-| Stack-full announcement | `255 kills vs Faction` | `147 kills needed vs Faction` |
-| Periodic summary | `Progress: 108/255 kills vs Faction` | `Kills: 147 remaining vs Faction` |
-| Startup status block | `Kills: 108/255 vs Faction` | `Kills: 147 remaining vs Faction` |
-
-The `credited / total` form was confusing in practice because it required knowing what "credited" meant and mentally computing the gap. The remaining count is the only number that drives decisions.
+Detection uses the `Music: MainMenu` journal event as the primary signal, with a `Shutdown` event and a process check as supporting signals. A **5-minute startup grace** prevents false alerts when EDMD launches before the game client. A **15-minute grace after going to menu** covers brief interruptions without generating noise. Re-alerts hourly while the player remains offline. All periodic output is suppressed while not in game.
 
 ---
 
-### Not-In-Game Detection and Output Suppression
+## Upgrading from 20260308
 
-EDMD now detects when the player is not in an active game session and alerts accordingly.
-
-**Triggers:**
-- `Music: MainMenu` journal event — fires when the player exits to the main menu (logout, character select). This is the primary signal; it arrives within seconds and is reliable across all exit paths including force-close-and-relaunch.
-- `Shutdown` journal event — fires on a clean quit to desktop.
-- Process check against `EliteDangerous64.exe` — performed at alert time to distinguish "client not running" from "client running but player at menu."
-
-**Grace periods:**
-- **5 minutes from EDMD startup** — allows the player time to get the game client running and log in before any check fires.
-- **15 minutes from menu / quit** — covers brief interruptions (coffee, phone call, bio break) without generating noise.
-
-**After grace expires:**
-- Emits an alert at the highest loglevel configured across all `[LogLevels]` settings. If any category is configured at level 3, Discord pings the configured user.
-- Re-alerts hourly while the player remains offline.
-- Suppresses all other periodic output (inactivity alerts, kill rate alerts, periodic summaries) while not in game — there is nothing to report.
-
-**Return to game:** `LoadGame` clears all offline state immediately. The next session proceeds normally.
-
----
-
-### Known Limitations (unchanged)
-
-- SLF shield state is not tracked — the game does not expose this via journal or `Status.json`
-- GTK4 GUI is Linux-only; Windows users have terminal and Discord output
-- Theme changes require a restart (no hot-reload for CSS)
+No config changes required. Run `edmd.py --upgrade` or use the Upgrade button in the GUI sidebar.

