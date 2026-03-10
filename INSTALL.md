@@ -8,9 +8,9 @@ EDMD is a Python daemon for real-time Elite Dangerous AFK session monitoring.
 
 EDMD has two types of dependencies:
 
-**System packages** (install via your package manager — do NOT use pip for these):
+**System packages** (install via your package manager — do NOT use pip for these on Linux):
 - `python-psutil` — process and system utilities
-- `python-gobject` + `gtk4` — GTK4 GUI support (Linux only; optional)
+- `python-gobject` + `gtk4` — GTK4 GUI support (Linux and macOS; optional)
 
 **pip packages:**
 - `discord-webhook` — Discord notification support
@@ -71,16 +71,37 @@ pip install discord-webhook cryptography --break-system-packages
 ## Windows
 
 ```bat
-pip install psutil discord-webhook cryptography
-```
-
-Or run the provided installer:
-
-```bat
 install.bat
 ```
 
-EDMD runs in terminal mode on Windows. GTK4 GUI is Linux-only.
+This installs terminal-mode dependencies (`psutil`, `discord-webhook`, `cryptography`) and creates your config file. Terminal mode is fully functional — all monitoring, Discord alerts, and reporting work without the GUI.
+
+**GUI mode on Windows** requires additional setup. Two paths are available:
+
+| Path | Summary |
+|---|---|
+| [MSYS2](docs/guides/WINDOWS_GUI.md#option-a--msys2-recommended) | Recommended. GTK4 via MSYS2's pacman, runs in MSYS2 UCRT64 terminal. |
+| [gvsbuild](docs/guides/WINDOWS_GUI.md#option-b--gvsbuild-advanced) | Advanced. Builds GTK4 natively, runs from standard CMD/PowerShell. |
+
+See **[docs/guides/WINDOWS_GUI.md](docs/guides/WINDOWS_GUI.md)** for full instructions.
+
+> **Developer notice:** EDMD is developed and tested on Linux. Windows GUI support is a best-effort community resource — the developer cannot provide direct troubleshooting for Windows-specific installation issues.
+
+---
+
+## macOS
+
+Elite Dangerous does not run natively on macOS — see [docs/guides/MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) for how to point EDMD at a journal folder from a remote or Wine-based setup.
+
+```bash
+bash install_macos.sh
+```
+
+GTK4 is installed via [Homebrew](https://brew.sh). The GUI is supported on macOS 13 Ventura or newer.
+
+See **[docs/guides/MACOS_SETUP.md](docs/guides/MACOS_SETUP.md)** for full instructions.
+
+> **Developer notice:** EDMD is developed and tested on Linux. macOS support is a best-effort community resource — the developer cannot provide direct troubleshooting for macOS-specific installation issues.
 
 ---
 
@@ -109,15 +130,22 @@ python3 -c "import psutil, discord_webhook, cryptography; print('All dependencie
 
 ---
 
-## GTK4 GUI (Linux only)
+## GTK4 GUI
 
-The GUI requires PyGObject with GTK4 bindings, including Pango (bundled with GTK4 — no separate install needed). If these are not available you can still run EDMD in terminal mode:
+The GUI requires PyGObject with GTK4 bindings. If these are not available EDMD falls back to terminal mode automatically:
 
 ```bash
-./edmd.py    # terminal mode only
+./edmd.py    # terminal mode — always works, no GUI dependencies
+./edmd.py --gui  # GTK4 GUI mode
 ```
 
-GTK4 availability is checked at runtime — if `--gui` is passed but PyGObject cannot be loaded, EDMD will print a clear error and fall back to terminal mode.
+| Platform | GUI support | How to get GTK4 |
+|---|---|---|
+| Linux | ✅ First-class | System package manager — see distro sections above |
+| macOS | ⚠️ Best-effort | Homebrew — see [MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) |
+| Windows | ⚠️ Best-effort | MSYS2 or gvsbuild — see [WINDOWS_GUI.md](docs/guides/WINDOWS_GUI.md) |
+
+GTK4 availability is checked at runtime — if `--gui` is passed but PyGObject cannot be loaded, EDMD prints a clear error and falls back to terminal mode.
 
 ---
 
