@@ -234,6 +234,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
         # Prime last-known size so the first reflow tick is a no-op
         self._last_canvas_w = w
         self._last_canvas_h = h
+        # GTK4 walks children of Gtk.Fixed to compute WM_NORMAL_HINTS minimum
+        # size, ignoring set_size_request(1,1) on the canvas.  Clearing the
+        # window's own size request removes the inflated minimum-size hint that
+        # would otherwise prevent the WM from resizing below block extents.
+        self.set_size_request(-1, -1)
 
     def _on_canvas_realize(self, canvas) -> None:
         # Trigger one poll after realize so we get real dims on first map.
@@ -243,11 +248,14 @@ class EdmdWindow(Gtk.ApplicationWindow):
 
     def _on_canvas_size_changed(self, canvas, _param) -> None:
         """notify::width or notify::height — fires when the canvas allocation changes."""
+        if not self._blocks_placed:
+            return
         self._apply_canvas_size(canvas.get_width(), canvas.get_height())
 
     def _reflow_tick(self) -> bool:
         """Fallback poll every REFLOW_MS — catches tiling WM resizes."""
-        self._apply_canvas_size(self._canvas.get_width(), self._canvas.get_height())
+        if self._blocks_placed:
+            self._apply_canvas_size(self._canvas.get_width(), self._canvas.get_height())
         return True
 
     def _poll_canvas_size(self) -> bool:
