@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260310"
+VERSION = "20260309c"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -280,6 +280,8 @@ class MonitorState:
         self.alerted_no_kills        = None
         self.alerted_kill_rate       = None
         self.fuel_tank_size          = 64
+        self.fuel_current:   "float | None" = None   # FuelMain tons, updated by ReservoirReplenished
+        self.fuel_burn_rate: "float | None" = None   # tons/hr rolling estimate; None until 2+ samples
         self.reward_type             = "credit_total"
         self.fighter_integrity       = 0
         self.logged                  = 0
