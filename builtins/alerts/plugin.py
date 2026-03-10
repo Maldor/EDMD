@@ -102,6 +102,13 @@ class AlertsPlugin(BasePlugin):
                     timestamp=logtime, loglevel=notify["HullEvent"],
                 )
 
+            case "HullDamage" if event.get("Fighter") and not event.get("PlayerPilot"):
+                # Only push when health actually changes — mirrors the dedup guard in
+                # crew_slf/plugin.py which compares against state.fighter_integrity.
+                hullhealth = round(event["Health"] * 100)
+                if state.fighter_integrity != event["Health"]:
+                    self._push("🛩️", f"Fighter hull: {hullhealth}%")
+
             case "FighterDestroyed" if state.prev_event != "StartJump":
                 self._push("💀", "Fighter destroyed!")
 
