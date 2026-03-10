@@ -112,10 +112,17 @@ if errorlevel 1 (
 echo.
 echo -- GUI mode on Windows --
 echo.
-echo [ WARN ] GTK4 GUI mode is not supported on Windows.
-echo [ INFO ] EDMD runs in terminal mode on Windows. This is fully functional
-echo [ INFO ] for all monitoring, Discord alerts, and auto-quit features.
-echo [ INFO ] For GUI support, run EDMD on Linux.
+echo [ INFO ] GTK4 GUI mode on Windows requires additional setup beyond this
+echo [ INFO ] installer. Two approaches are available -- see:
+echo.
+echo     docs\guides\WINDOWS_GUI.md
+echo.
+echo [ INFO ] Option A (MSYS2):  run install_msys2.sh inside the MSYS2 UCRT64 terminal.
+echo [ INFO ] Option B (gvsbuild): build GTK4 natively, then run install_gvsbuild.bat.
+echo.
+echo [ INFO ] Terminal mode installed by this script is fully functional --
+echo [ INFO ] all monitoring, Discord alerts, and reporting work without the GUI.
+echo [ INFO ] The GUI is an optional enhancement.
 
 :: ── Config setup ──────────────────────────────────────────────────────────────
 echo.
@@ -136,13 +143,16 @@ if not exist "%~dp0config.toml" (
 echo.
 echo -- Installation complete --
 echo.
-echo   EDMD is ready to run.
+echo   EDMD is ready to run in terminal mode.
 echo.
 echo   Run in terminal:
 echo     python edmd.py
 echo.
 echo   With a config profile:
 echo     python edmd.py -p YourProfileName
+echo.
+echo   For optional GTK4 GUI support on Windows, see:
+echo     docs\guides\WINDOWS_GUI.md
 echo.
 echo   Edit config.toml to set your journal folder before running:
 echo     JournalFolder = "C:\Users\YourName\Saved Games\Frontier Developments\Elite Dangerous"

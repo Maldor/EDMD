@@ -402,7 +402,13 @@ class EdmdApp(Gtk.Application):
         # gradients so our window control colours actually take effect.
         settings = Gtk.Settings.get_default()
         if settings:
-            settings.set_property("gtk-theme-name", "Default")
+            try:
+                settings.set_property("gtk-theme-name", "Default")
+            except Exception:
+                # Non-Linux GTK backends (macOS Quartz, Windows) may not
+                # recognise this theme name — harmless to ignore, EDMD's
+                # own CSS loads regardless.
+                pass
         apply_theme(self._theme)
         win = EdmdWindow(
             app=self,

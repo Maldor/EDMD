@@ -14,7 +14,7 @@
 by **CMDR CALURSUS**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-informational?style=flat-square)]()
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-informational?style=flat-square)]()
 [![GTK4](https://img.shields.io/badge/GUI-GTK4-4A86CF?style=flat-square&logo=gnome&logoColor=white)]()
 [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square&logo=discord&logoColor=white)]()
 [![License](https://img.shields.io/badge/License-MIT-brightgreen?style=flat-square)]()
@@ -38,7 +38,7 @@ When things go wrong — your fighter blown up, hull taking critical damage, fue
 | 💥 **Kill & Reward Tracking** | Logs every bounty and combat bond with ship type, timing, and credit value |
 | 🎯 **Massacre Mission Stack** | Tracks active missions, stack value, and completion status with full bootstrap on start |
 | 📊 **Periodic Summaries** | Session stats every 15 minutes — to terminal, GUI, and Discord |
-| 🖥️ **GTK4 GUI** | Live graphical interface with commander, crew, SLF, mission, and session panels |
+| 🖥️ **GTK4 GUI** | Live graphical interface with commander, crew, SLF, mission, cargo, and materials panels — Linux first-class; best-effort on Windows and macOS |
 | 🛡️ **Combat Alerts** | Shield drops, hull damage, fighter loss, ship destruction |
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |
 | 🚨 **Security & Cargo Events** | Cargo scans, police scans, security attacks, low-value cargo notices |
@@ -151,6 +151,8 @@ UserID = 123456789012345678
 | [Linux Setup](docs/guides/LINUX_SETUP.md) | Elite Dangerous on Linux with Steam, Proton, Minimal ED Launcher, EDMC, and EDMD |
 | [Dual Pilot](docs/guides/DUAL_PILOT.md) | Two accounts simultaneously with independent journals and tool instances |
 | [Remote Access](docs/guides/REMOTE_ACCESS.md) | EDMD GUI on a second machine as a thin client |
+| [macOS Setup](docs/guides/MACOS_SETUP.md) | GTK4 GUI via Homebrew on macOS — best-effort, community-supported |
+| [Windows GUI](docs/guides/WINDOWS_GUI.md) | GTK4 GUI on Windows via MSYS2 or gvsbuild — best-effort, community-supported |
 
 ---
 
