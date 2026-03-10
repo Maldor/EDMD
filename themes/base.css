@@ -643,6 +643,20 @@ popover arrow {
     padding-top: 2px;
 }
 
+/* ── Materials wide layout (three-column) ────────────────────────────────── */
+
+.mat-col-hdr {
+    background-color: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+}
+
+.mat-col-title {
+    font-size: 0.78em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+}
+
 /* ── Preferences window ──────────────────────────────────────────────────── */
 
 .prefs-window,
