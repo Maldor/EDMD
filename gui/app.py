@@ -34,6 +34,7 @@ from gui.blocks   import (
     AlertsBlock,
     CargoBlock,
     MaterialsBlock,
+    AssetsBlock,
 )
 
 GLib.set_prgname("edmd")
@@ -48,6 +49,7 @@ _BUILTIN_REGISTRY = [
     ("alerts",        AlertsBlock,       "Alerts"),
     ("cargo",         CargoBlock,        "Cargo"),
     ("materials",     MaterialsBlock,    "Materials"),
+    ("assets",        AssetsBlock,       "Assets"),
 ]
 
 

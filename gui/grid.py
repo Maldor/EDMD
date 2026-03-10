@@ -37,11 +37,10 @@ MIN_H    = 1
 # Heights doubled from original values to compensate for halved ROW_PX.
 DEFAULT_LAYOUT = {
     # Strict 3-column layout — each column is 8 grid units (cols 0-8, 8-16, 16-24).
-    # Right column rows 10+ is intentionally empty — reserved for Assets block.
     #
     # Left col:   commander → missions → alerts
     # Mid col:    session_stats → cargo → materials
-    # Right col:  crew_slf → [Assets]
+    # Right col:  crew_slf → assets
     "commander":    {"col": 0,  "row": 0,  "width": 8, "height": 10},
     "session_stats":{"col": 8,  "row": 0,  "width": 8, "height": 10},
     "crew_slf":     {"col": 16, "row": 0,  "width": 8, "height": 10},
@@ -49,6 +48,7 @@ DEFAULT_LAYOUT = {
     "cargo":        {"col": 8,  "row": 10, "width": 8, "height": 8},
     "materials":    {"col": 8,  "row": 18, "width": 8, "height": 12},
     "alerts":       {"col": 0,  "row": 22, "width": 8, "height": 10},
+    "assets":       {"col": 16, "row": 10, "width": 8, "height": 22},
 }
 
 
