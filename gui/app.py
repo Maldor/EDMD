@@ -98,20 +98,14 @@ class EdmdWindow(Gtk.ApplicationWindow):
 
         # Build registry now — plugins are already loaded by this point
         self._registry      = _build_registry(core)
-        # Canvas width is unknown until the window is mapped.  Use a 1x1
-        # placeholder — _build_and_place_blocks is deferred to the map signal.
-        self._grid          = BlockGrid(canvas_width=1, canvas_height=1)
+        self._grid          = BlockGrid(canvas_width=1280, canvas_height=760)
         self._blocks: dict  = {}
         self._is_fullscreen = False
         self._last_canvas_w = 0
         self._last_canvas_h = 0
-        self._blocks_placed = False
 
         self._build_ui()
-        # Do NOT call _build_and_place_blocks here — the window has no real
-        # dimensions yet.  We connect to "map" so placement runs with the
-        # actual canvas size, preventing the initial oversized-then-shrink flash.
-        self.connect("map", self._on_window_map)
+        self._build_and_place_blocks()
         self._refresh_all()
 
         GLib.timeout_add(self.POLL_MS,   self._poll_queue)
@@ -173,12 +167,6 @@ class EdmdWindow(Gtk.ApplicationWindow):
                     self._min_button, self._fs_button):
             hb.pack_end(btn)
 
-        # ── Update notice badge (hidden until update detected) ────────────────
-        self._update_badge = make_label("", css_class="update-badge")
-        self._update_badge.set_visible(False)
-        self._update_badge.set_valign(Gtk.Align.CENTER)
-        hb.pack_end(self._update_badge)
-
         # Keep max button icon in sync with window state
         self.connect("notify::maximized", self._on_maximized_changed)
 
@@ -219,48 +207,22 @@ class EdmdWindow(Gtk.ApplicationWindow):
 
     # ── Canvas resize → reflow ────────────────────────────────────────────────
 
-    def _on_window_map(self, window) -> None:
-        """Fires once when the window is first shown with its real dimensions.
-        We build and place blocks here so the initial placement uses the actual
-        canvas size rather than a hardcoded guess."""
-        w = self._scroll.get_width()
-        h = self._scroll.get_height()
-        if w > 1:
-            self._grid.update_canvas_width(w)
-        if h > 1:
-            self._grid.update_canvas_height(h)
-        self._build_and_place_blocks()
-        self._blocks_placed = True
-        # Prime last-known size so the first reflow tick is a no-op
-        self._last_canvas_w = w
-        self._last_canvas_h = h
-        # GTK4 walks children of Gtk.Fixed to compute WM_NORMAL_HINTS minimum
-        # size, ignoring set_size_request(1,1) on the canvas.  Clearing the
-        # window's own size request removes the inflated minimum-size hint that
-        # would otherwise prevent the WM from resizing below block extents.
-        self.set_size_request(-1, -1)
-
     def _on_canvas_realize(self, canvas) -> None:
         # Trigger one poll after realize so we get real dims on first map.
-        # Skip if blocks haven't been placed yet — _on_window_map handles that.
-        if self._blocks_placed:
-            GLib.timeout_add(50, self._poll_canvas_size)
+        GLib.timeout_add(50, self._poll_canvas_size)
 
     def _on_canvas_size_changed(self, canvas, _param) -> None:
-        """notify::width or notify::height — fires when the canvas allocation changes."""
-        if not self._blocks_placed:
-            return
-        self._apply_canvas_size(canvas.get_width(), canvas.get_height())
+        """notify::width or notify::height — fires when the viewport changes."""
+        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
 
     def _reflow_tick(self) -> bool:
         """Fallback poll every REFLOW_MS — catches tiling WM resizes."""
-        if self._blocks_placed:
-            self._apply_canvas_size(self._canvas.get_width(), self._canvas.get_height())
+        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
         return True
 
     def _poll_canvas_size(self) -> bool:
         """One-shot after realize settle."""
-        self._apply_canvas_size(self._canvas.get_width(), self._canvas.get_height())
+        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
         return False
 
     def _apply_canvas_size(self, w: int, h: int) -> None:
@@ -305,6 +267,7 @@ class EdmdWindow(Gtk.ApplicationWindow):
             cell = self._grid.cell_for(name)
             x, y, w, h = self._grid.pixel_rect(cell)
             self._canvas.put(widget, x, y)
+            widget.set_size_request(max(44, w), max(4, h))
 
     def _replace_all_blocks(self) -> None:
         """Reposition and resize all blocks after canvas resize or layout reset."""
@@ -428,11 +391,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
     # ── Update notice ─────────────────────────────────────────────────────────
 
     def _on_update_notice(self, version: str) -> None:
-        self._update_badge.set_label(f"\u2b06 v{version}")
-        self._update_badge.set_tooltip_text(
-            f"v{version} available — File \u2192 Upgrade to update"
+        self._title_lbl.set_label(
+            f"{self._program}  v{self._version}"
+            f"  ·  \u2b06 v{version} available  (File \u2192 Upgrade)"
         )
-        self._update_badge.set_visible(True)
+        self._title_lbl.add_css_class("update-available")
 
 
 # ── Application ───────────────────────────────────────────────────────────────
