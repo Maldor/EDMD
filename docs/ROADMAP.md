@@ -1,22 +1,17 @@
 # EDMD Roadmap
 
-Last updated: 20260310
+Last updated: 20260310a
 
 ---
 
 ## Active / In Progress
 
-### Inara Integration
-- Waiting on whitelist approval from CMDR Artie — https://inara.cz/elite/cmdr/1/
-- Architecture in place (same pattern as EDDN / EDSM / EDAstro)
-- Will post flight logs, kills, and pull CMDR profile data to supplement local state
-
 ### FDev CAPI Integration
-- Begin after Inara is shipped
 - OAuth2 companion app auth flow
 - Primary benefit: `/profile` endpoint gives full fleet regardless of visited shipyard
   — eliminates StoredShips / StoredModules staleness in the Assets block
 - Also: live market data, shipyard, outfitting, fleet carrier inventory
+- Deferred pending OAuth implementation — non-trivial auth flow
 
 ---
 
@@ -31,9 +26,9 @@ real-estate intelligently depending on what the player is doing.
 - Fuel: `XX%  (~Xh Xm)`
 - Shields | Hull: `XX%  |  XX%`
 
-**On foot (Odyssey)**  
+**On foot (Odyssey)**
 When `VehicleSwitch` To="OnFoot" or equivalent Odyssey boarding events fire:
-- Fuel → Battery: `XX%  (~Xm)`  (suit battery from Status.json `Oxygen` / suit charge)
+- Fuel → Battery: `XX%  (~Xm)`  (suit battery from Status.json)
 - Shields | Hull → Suit Shield | Health: `XX%  |  XX%`
 
 **SRV mode**
@@ -55,6 +50,43 @@ Implementation notes:
 
 ---
 
+## Planned Blocks
+
+### Mining Block
+Track an active mining session in real time. Planned display:
+- Prospected asteroids: material yield distribution, % core/fracture flagging
+- Refined commodities: per-type count and estimated value at last known market price
+- Session efficiency: average yield per asteroid, time per tonne
+- Source: `ProspectedAsteroid`, `MiningRefined`, and `AsteroidCracked` journal events
+
+### ExoBiology Block
+Track organic scan progress across bodies in the current system and session.
+Planned display:
+- Species found/analysed per body, with genus/species name and estimated value
+- Unanalysed samples (first/second/third scan indicators)
+- Session earnings from `SellOrganicData`
+- Source: `ScanOrganic`, `SellOrganicData`, `SAAScanComplete`
+
+### Combat Zone Block
+Real-time CZ session tracking separate from the main Session Stats block.
+Planned display:
+- Active conflict zone (system, faction, intensity)
+- Combat bond earnings, bond rate, and kill count for the current CZ
+- War/civil war progress indicators where available from journal
+- Source: `FactionKillBond`, `ReceiveText` (faction intel), `Location`
+
+### Colonisation Block
+Track colony construction contributions and progress.
+Planned display:
+- Active construction site (system, body, type)
+- Resources delivered vs. required, per commodity
+- Progress toward completion
+- Source: `ColonisationContribution`, `ColonisationSystemClaimed`, `Location`
+- Note: FDev event coverage for colonisation is still evolving — this block
+  will be implemented once the journal schema stabilises
+
+---
+
 ## Deferred / Parked
 
 ### Profile Switcher GUI
@@ -62,13 +94,13 @@ Implementation notes:
 - Create-new-profile dialog writing a fully-defaulted `[PROFILENAME]` section to config.toml
 - Restart with `-p PROFILENAME`
 
-### Inara Builtin (implementation)
-- Blocked on whitelist approval
-- Architecture: same pattern as EDDN/EDSM/EDAstro builtins
-
 ### CAPI OAuth Flow
-- Non-trivial auth flow — defer until after Inara is complete
-- Will inform what additional fields Assets block can show
+- Non-trivial auth flow — defer
+- Will inform what additional fields the Assets block can show once available
+
+### Squadron Carrier Support
+- Fleet carriers belonging to a squadron (not player-owned) are not currently
+  tracked in the Assets block — journal coverage is incomplete
 
 ---
 
@@ -78,3 +110,5 @@ Implementation notes:
   — will be resolved by CAPI `/profile` integration
 - GTK progressbar warning on close (`GtkGizmo min width -2`) — set aside intentionally
 - Block collapse state is not persisted across restarts — intentional for now
+- SLF shield state is not tracked — the game does not expose this via the journal
+  or `Status.json`
