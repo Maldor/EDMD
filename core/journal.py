@@ -26,6 +26,7 @@ from core.state import (
     PIRATE_NOATTACK_MSGS,
     RANK_NAMES,
     RECENT_KILL_WINDOW,
+    normalise_ship_name,
     MonitorState,
     SessionData,
     load_session_state,
@@ -445,7 +446,7 @@ def handle_event(
 
             # ── TARGET SCANNED ────────────────────────────────────────────
             case "ShipTargeted" if "Ship" in j:
-                ship = j.get("Ship_Localised") or j["Ship"].title()
+                ship = normalise_ship_name(j.get("Ship_Localised") or j.get("Ship"))
                 rank = "" if "PilotRank" not in j else f" ({j['PilotRank']})"
                 if (
                     ship != active_session.last_security_ship
@@ -511,7 +512,7 @@ def handle_event(
 
                 if j["event"] == "Bounty":
                     bountyvalue = j["Rewards"][0]["Reward"]
-                    ship        = j.get("Target_Localised") or j["Target"].title()
+                    ship        = normalise_ship_name(j.get("Target_Localised") or j.get("Target"))
                 else:
                     bountyvalue      = j["Reward"]
                     ship             = "Bond"
@@ -719,7 +720,7 @@ def handle_event(
                 state.in_game     = True
                 state.offline_since_mono  = None
                 state.last_offline_alert  = None
-                state.pilot_ship = j.get("Ship_Localised") or j.get("Ship")
+                state.pilot_ship = normalise_ship_name(j.get("Ship_Localised") or j.get("Ship"))
                 if j.get("ShipName"):  state.ship_name  = j["ShipName"]
                 if j.get("ShipIdent"): state.ship_ident = j["ShipIdent"]
                 if "GameMode" in j:
@@ -826,7 +827,7 @@ def handle_event(
                 )
 
             case "EjectCargo" if not j["Abandoned"] and j["Count"] == 1:
-                name = j.get("Type_Localised") or j["Type"].title()
+                name = normalise_ship_name(j.get("Type_Localised") or j.get("Type"))
                 emitter.emit(
                     msg_term=f"{Terminal.BAD}Cargo stolen!{Terminal.END} ({name})",
                     msg_discord=f"**Cargo stolen!** ({name})",
@@ -903,7 +904,7 @@ def handle_event(
                 if gui_queue: gui_queue.put(("cmdr_update", None))
 
             case "ShipyardSwap":
-                state.pilot_ship = j.get("ShipType_Localised") or j["ShipType"].title()
+                state.pilot_ship = normalise_ship_name(j.get("ShipType_Localised") or j.get("ShipType"))
                 emitter.emit(
                     msg_term=f"Swapped ship to {state.pilot_ship}",
                     emoji="🚢", sigil="-  SHIP",

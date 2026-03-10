@@ -13,6 +13,7 @@ Read docs/PLUGIN_DEVELOPMENT.md before writing your own.
 """
 
 from core.plugin_loader import BasePlugin
+from core.state import normalise_ship_name
 
 # GTK4 is optional — guard all GUI imports so the plugin still loads in
 # terminal-only mode.
@@ -57,7 +58,7 @@ if _GTK_AVAILABLE:
 
             # pilot_ship holds the internal localised name from the journal.
             # Strip internal prefixes if present (e.g. "Type_10").
-            ship = ship_raw.replace("_", " ").strip() if ship_raw else "your ship"
+            ship = normalise_ship_name(ship_raw) or "your ship"
 
             self._greeting.set_label(
                 f"Hello CMDR {name}, that's a {ship} you've got there.\n"

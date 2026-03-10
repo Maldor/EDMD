@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.state import normalise_ship_name
+
 
 # ── Data structures ───────────────────────────────────────────────────────────
 
@@ -176,7 +178,7 @@ def report_bounty_breakdown(journal_dir: Path) -> ReportResult:
 
     for ev, _ in _iter_journal_events(journal_dir):
         if ev.get("event") == "Bounty":
-            ship   = ev.get("Target_Localised", ev.get("Target", "Unknown"))
+            ship   = normalise_ship_name(ev.get("Target_Localised") or ev.get("Target")) or "Unknown"
             reward = ev.get("TotalReward", ev.get("Reward", 0))
             by_ship[ship]["kills"]   += 1
             by_ship[ship]["credits"] += reward
@@ -228,7 +230,7 @@ def report_session_history(journal_dir: Path) -> ReportResult:
             cur = {
                 "date":    ev.get("timestamp", "")[:10],
                 "cmdr":    ev.get("Commander", ""),
-                "ship":    ev.get("Ship_Localised", ev.get("Ship", "")),
+                "ship":    normalise_ship_name(ev.get("Ship_Localised") or ev.get("Ship")) or "",
                 "kills":   0,
                 "bounty":  0,
                 "missions":0,

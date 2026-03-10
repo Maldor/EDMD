@@ -6,6 +6,7 @@ GUI block: col=0, row=0, width=8, height=5 (default).
 """
 
 from core.plugin_loader import BasePlugin
+from core.state import normalise_ship_name
 from core.state import RANK_NAMES
 from core.emit import Terminal
 
@@ -56,7 +57,7 @@ class CommanderPlugin(BasePlugin):
                 state.in_game     = True
                 state.offline_since_mono = None
                 state.last_offline_alert = None
-                state.pilot_ship = event.get("Ship_Localised") or event.get("Ship")
+                state.pilot_ship = normalise_ship_name(event.get("Ship_Localised") or event.get("Ship"))
                 if event.get("ShipName"):  state.ship_name  = event["ShipName"]
                 if event.get("ShipIdent"): state.ship_ident = event["ShipIdent"]
                 if "GameMode" in event:
@@ -117,8 +118,8 @@ class CommanderPlugin(BasePlugin):
                 )
 
             case "ShipyardSwap":
-                state.pilot_ship = (
-                    event.get("ShipType_Localised") or event["ShipType"].title()
+                state.pilot_ship = normalise_ship_name(
+                    event.get("ShipType_Localised") or event.get("ShipType")
                 )
                 core.emitter.emit(
                     msg_term=f"Swapped ship to {state.pilot_ship}",

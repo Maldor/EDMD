@@ -8,6 +8,7 @@ GUI block: col=8, row=0, width=8, height=5 (default).
 
 import time
 from core.plugin_loader import BasePlugin
+from core.state import normalise_ship_name
 from core.emit import Terminal, fmt_credits, fmt_duration, rate_per_hour, clip_name
 from core.state import RECENT_KILL_WINDOW
 
@@ -74,7 +75,7 @@ class SessionStatsPlugin(BasePlugin):
 
                 if ev == "Bounty":
                     bountyvalue = event["Rewards"][0]["Reward"]
-                    ship        = event.get("Target_Localised") or event["Target"].title()
+                    ship        = normalise_ship_name(event.get("Target_Localised") or event.get("Target"))
                 else:
                     bountyvalue       = event["Reward"]
                     ship              = "Bond"
@@ -190,7 +191,7 @@ class SessionStatsPlugin(BasePlugin):
                     )
 
             case "ShipTargeted" if "Ship" in event:
-                ship = event.get("Ship_Localised") or event["Ship"].title()
+                ship = normalise_ship_name(event.get("Ship_Localised") or event.get("Ship"))
                 rank = "" if "PilotRank" not in event else f" ({event['PilotRank']})"
                 if (
                     ship != ses.last_security_ship

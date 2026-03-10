@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260310"
+VERSION = "20260309c"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -89,6 +89,156 @@ FIGHTER_LOADOUT_NAMES = {
     ("federation_fighter",  "two"):   "F/A-26 Strike (Rogue F)",
     ("federation_fighter",  "three"): "F/A-26 Strike (Aegis F)",
 }
+
+# ── Ship name normalisation ───────────────────────────────────────────────────
+#
+# The game's journal is inconsistent: some ships arrive with correct casing via
+# the _Localised field, others arrive lowercase (e.g. "adder", "eagle") or as
+# raw internal identifiers (e.g. "CobraMkIII", "Type_9_Military").
+#
+# normalise_ship_name() is the single point of truth for ship display names.
+# Every place in EDMD that resolves a ship name must call this function.
+# Keys are lowercase; the function lowercases its input before lookup.
+
+_SHIP_NAMES: dict[str, str] = {
+    # ── Faulcon DeLacy ────────────────────────────────────────────────────────
+    "sidewinder":               "Sidewinder",
+    "sidewindermkii":           "Sidewinder Mk. II",
+    "eagle":                    "Eagle",
+    "eaglemkii":                "Eagle Mk. II",
+    "cobramkiii":               "Cobra Mk. III",
+    "cobramkiv":                "Cobra Mk. IV",
+    "cobra mk. iii":            "Cobra Mk. III",
+    "cobra mk. iv":             "Cobra Mk. IV",
+    "cobra mkiii":              "Cobra Mk. III",
+    "cobra mkiv":               "Cobra Mk. IV",
+    "python":                   "Python",
+    "pythonmkii":               "Python Mk. II",
+    "anaconda":                 "Anaconda",
+    "mamba":                    "Mamba",
+    # ── Lakon Spaceways ───────────────────────────────────────────────────────
+    "adder":                    "Adder",
+    "asp":                      "Asp Explorer",
+    "asp explorer":             "Asp Explorer",
+    "aspscout":                 "Asp Scout",
+    "asp scout":                "Asp Scout",
+    "hauler":                   "Hauler",
+    "diamondbackscout":         "Diamondback Scout",
+    "diamondback scout":        "Diamondback Scout",
+    "diamondbackxl":            "Diamondback Explorer",
+    "diamondback explorer":     "Diamondback Explorer",
+    "type6":                    "Type-6 Transporter",
+    "type-6 transporter":       "Type-6 Transporter",
+    "type6transporter":         "Type-6 Transporter",
+    "type7":                    "Type-7 Transporter",
+    "type-7 transporter":       "Type-7 Transporter",
+    "type7transporter":         "Type-7 Transporter",
+    "type9":                    "Type-9 Heavy",
+    "type-9 heavy":             "Type-9 Heavy",
+    "type9heavy":               "Type-9 Heavy",
+    "type10":                   "Type-10 Defender",
+    "type-10 defender":         "Type-10 Defender",
+    "type10defender":           "Type-10 Defender",
+    "type_9_military":          "Type-10 Defender",
+    "krait_mkii":               "Krait Mk. II",
+    "krait mkii":               "Krait Mk. II",
+    "krait mk. ii":             "Krait Mk. II",
+    "kraitmkii":                "Krait Mk. II",
+    "krait_light":              "Krait Phantom",
+    "krait light":              "Krait Phantom",
+    "krait phantom":            "Krait Phantom",
+    "manowarinterdictor":       "Mandalay",
+    "mandalay":                 "Mandalay",
+    # ── Saud Kruger ───────────────────────────────────────────────────────────
+    "belugaliner":              "Beluga Liner",
+    "beluga liner":             "Beluga Liner",
+    "beluga":                   "Beluga Liner",
+    "dolphin":                  "Dolphin",
+    "orca":                     "Orca",
+    # ── Core Dynamics ─────────────────────────────────────────────────────────
+    "viper":                    "Viper Mk. III",
+    "vipermkiii":               "Viper Mk. III",
+    "viper mk. iii":            "Viper Mk. III",
+    "vipermkiv":                "Viper Mk. IV",
+    "viper mk. iv":             "Viper Mk. IV",
+    "vulture":                  "Vulture",
+    "federation_dropship":      "Federal Dropship",
+    "federaldropship":          "Federal Dropship",
+    "federal dropship":         "Federal Dropship",
+    "federation_dropship_mkii": "Federal Assault Ship",
+    "federalassaultship":       "Federal Assault Ship",
+    "federal assault ship":     "Federal Assault Ship",
+    "federation_gunship":       "Federal Gunship",
+    "federalgunship":           "Federal Gunship",
+    "federal gunship":          "Federal Gunship",
+    "federation_corvette":      "Federal Corvette",
+    "federalcorvette":          "Federal Corvette",
+    "federal corvette":         "Federal Corvette",
+    # ── Gutamaya ─────────────────────────────────────────────────────────────
+    "empire_eagle":             "Imperial Eagle",
+    "imperialeagle":            "Imperial Eagle",
+    "imperial eagle":           "Imperial Eagle",
+    "empire_courier":           "Imperial Courier",
+    "imperialcourier":          "Imperial Courier",
+    "imperial courier":         "Imperial Courier",
+    "empire_trader":            "Imperial Clipper",
+    "imperialclipper":          "Imperial Clipper",
+    "imperial clipper":         "Imperial Clipper",
+    "empire_fighter":           "Imperial Fighter",
+    "imperial fighter":         "Imperial Fighter",
+    "cutter":                   "Imperial Cutter",
+    "imperialcutter":           "Imperial Cutter",
+    "imperial cutter":          "Imperial Cutter",
+    # ── Alliance / Crusader ───────────────────────────────────────────────────
+    "typex":                    "Alliance Chieftain",
+    "alliance chieftain":       "Alliance Chieftain",
+    "alliancechieftain":        "Alliance Chieftain",
+    "typex_2":                  "Alliance Crusader",
+    "alliance crusader":        "Alliance Crusader",
+    "alliancecrusader":         "Alliance Crusader",
+    "typex_3":                  "Alliance Challenger",
+    "alliance challenger":      "Alliance Challenger",
+    "alliancechallenger":       "Alliance Challenger",
+    # ── Zorgon Peterson ───────────────────────────────────────────────────────
+    "ferdelance":               "Fer-de-Lance",
+    "fer-de-lance":             "Fer-de-Lance",
+    "fer de lance":             "Fer-de-Lance",
+    "asp_sa":                   "Asp Scout",
+    "keelback":                 "Keelback",
+    # ── Misc / Rare ───────────────────────────────────────────────────────────
+    "independant_trader":       "Keelback",
+    "imperial_fighter":         "Imperial Fighter",
+    "independent_fighter":      "F63 Condor",
+    "federation_fighter":       "F/A-26 Strike",
+    "gdn_hybrid_fighter_v1":    "Trident",
+    "gdn_hybrid_fighter_v2":    "Javelin",
+    "gdn_hybrid_fighter_v3":    "Lancer",
+    "testbuggy":                "SRV",
+    "scarab":                   "SRV",
+    "combat_multirole":         "Mamba",
+}
+
+
+def normalise_ship_name(raw: str | None) -> str | None:
+    """Return the correctly-capitalised display name for a ship.
+
+    Accepts both internal journal identifiers (e.g. ``"adder"``,
+    ``"CobraMkIII"``) and pre-localised strings that the game sometimes
+    sends in lowercase (e.g. ``"eagle"``).
+
+    Falls back to ``str.title()`` for names not in the correction map so
+    future or unknown ships still get reasonable capitalisation.
+
+    Returns ``None`` if ``raw`` is ``None`` or empty.
+    """
+    if not raw:
+        return None
+    key = raw.strip().lower()
+    if key in _SHIP_NAMES:
+        return _SHIP_NAMES[key]
+    # Not in map — clean up internal underscores/dots and title-case
+    return raw.replace("_", " ").strip().title()
+
 
 RANK_NAMES = [
     "Harmless", "Mostly Harmless", "Novice", "Competent", "Expert",
