@@ -223,8 +223,8 @@ class EdmdWindow(Gtk.ApplicationWindow):
         """Fires once when the window is first shown with its real dimensions.
         We build and place blocks here so the initial placement uses the actual
         canvas size rather than a hardcoded guess."""
-        w = self._canvas.get_width()
-        h = self._canvas.get_height()
+        w = self._scroll.get_width()
+        h = self._scroll.get_height()
         if w > 1:
             self._grid.update_canvas_width(w)
         if h > 1:
@@ -232,8 +232,8 @@ class EdmdWindow(Gtk.ApplicationWindow):
         self._build_and_place_blocks()
         self._blocks_placed = True
         # Prime last-known size so the first reflow tick is a no-op
-        self._last_canvas_w = self._canvas.get_width()
-        self._last_canvas_h = self._canvas.get_height()
+        self._last_canvas_w = w
+        self._last_canvas_h = h
 
     def _on_canvas_realize(self, canvas) -> None:
         # Trigger one poll after realize so we get real dims on first map.
