@@ -9,6 +9,11 @@
 
 [Settings]
 
+# [RESTART] Set to false on remote/secondary instances (e.g. a monitor PC reading
+# journals over NFS) to prevent duplicate uploads to EDDN, EDSM, and EDAstro.
+# The machine running the game should always be PrimaryInstance = true (default).
+# PrimaryInstance = true
+
 # [RESTART] Path to Elite Dangerous journal folder.
 # Required - no default. Change requires restart as the file handle must reopen.
 # JournalFolder = '\\SOMENETWORKSHARE\Users\me\Saved Games\Frontier Developments\Elite Dangerous'

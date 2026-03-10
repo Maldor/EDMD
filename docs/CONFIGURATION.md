@@ -18,6 +18,7 @@
 | `PirateNames` | `false` | ✅ | Show pirate pilot names in kill and scan messages |
 | `ExtendedStats` | `false` | ✅ | Show running kill counts and per-faction tallies |
 | `MinScanLevel` | `1` | ✅ | Minimum scan stage required to log an outbound scan (0 = all) |
+| `PrimaryInstance` | `true` | ❌ | Set to `false` on secondary/remote instances to suppress uploads to EDDN, EDSM, and EDAstro — monitoring, alerts, and GUI remain fully active |
 | `FullStackSize` | `20` | ✅ | Mission stack size that triggers the "stack full" announcement |
 | `WarnCooldown` | `15` | ✅ | Minutes between repeated inactivity / kill-rate alerts |
 | `WarnNoKillsInitial` | `5` | ✅ | Minutes before the *first* inactivity alert fires (subsequent alerts use `WarnNoKills`) |
@@ -142,6 +143,8 @@ Discord.WebhookURL = 'https://discord.com/api/webhooks/...'
 ## Data Contributions (opt-in)
 
 All data contribution features are **opt-in** and disabled by default.  They are configured in their own `[SECTION]` blocks and all require a restart when changed (❌).  Settings can be managed in the **Preferences → Data & Integrations** tab.
+
+If you run EDMD on multiple machines reading the same journal share (e.g. a remote monitor over NFS), set `PrimaryInstance = false` in `[Settings]` on the secondary machine to prevent duplicate uploads.  See `[Settings]` above.
 
 ---
 

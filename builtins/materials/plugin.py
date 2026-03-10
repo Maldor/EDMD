@@ -32,7 +32,6 @@ class MaterialsPlugin(BasePlugin):
         "EngineerCraft",        # Consumed materials for a blueprint
         "TechnologyBroker",     # Consumed materials for a tech unlock
         "Synthesis",            # Consumed materials for synthesis (ammo, repair, etc.)
-        "LoadGame",             # Session start — Materials snapshot follows
     ]
 
     def on_load(self, core) -> None:
@@ -42,6 +41,15 @@ class MaterialsPlugin(BasePlugin):
         if not hasattr(s, "materials_raw"):          s.materials_raw          = {}
         if not hasattr(s, "materials_manufactured"): s.materials_manufactured = {}
         if not hasattr(s, "materials_encoded"):      s.materials_encoded      = {}
+        # Deferred startup refresh: fires after the GTK main loop is running so
+        # any data set during journal preload is guaranteed to be visible.
+        import threading
+        threading.Timer(3.0, self._startup_refresh).start()
+
+    def _startup_refresh(self) -> None:
+        gq = self.core.gui_queue if self.core else None
+        if gq:
+            gq.put(("plugin_refresh", "materials"))
 
     def on_event(self, event: dict, state) -> None:
         core = self.core
@@ -122,12 +130,6 @@ class MaterialsPlugin(BasePlugin):
                         bucket[key]["count"] -= count
                         if bucket[key]["count"] <= 0:
                             del bucket[key]
-                if gq: gq.put(("plugin_refresh", "materials"))
-
-            case "LoadGame":
-                state.materials_raw          = {}
-                state.materials_manufactured = {}
-                state.materials_encoded      = {}
                 if gq: gq.put(("plugin_refresh", "materials"))
 
 

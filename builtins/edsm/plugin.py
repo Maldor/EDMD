@@ -290,6 +290,9 @@ class EDSMPlugin(BasePlugin):
 
         cfg = core.load_setting("EDSM", CFG_DEFAULTS, warn=False)
 
+        if not bool(core.cfg.app_settings.get("PrimaryInstance", True)):
+            print("  [EDSM] Uploads suppressed (PrimaryInstance = false)")
+            return
         if not cfg["Enabled"]:
             return
         if not cfg["CommanderName"] or not cfg["ApiKey"]:
@@ -350,6 +353,7 @@ class EDSMPlugin(BasePlugin):
         if self._ship_id is not None:
             enriched.setdefault("_shipId", self._ship_id)
 
+        enriched.pop("_logtime", None)
         self._sender.push(enriched)
 
         # Flush batch on key session transitions

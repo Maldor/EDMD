@@ -7,7 +7,7 @@
 
 **Real-time AFK session monitoring for Elite Dangerous**
 
-*Kill tracking · Discord alerts · Session awareness · Mission stack tracking · Reports · GTK4 GUI*
+*Kill tracking · Discord alerts · Session awareness · Mission stack · Cargo & Materials · Data contributions · GTK4 GUI*
 
 ---
 
@@ -48,6 +48,9 @@ When things go wrong — your fighter blown up, hull taking critical damage, fue
 | 📈 **Statistical Reports** | Five journal-wide reports: career overview, bounty breakdown, session history, hunting grounds, and NPC rogues' gallery |
 | 📚 **Native Docs Viewer** | Full documentation browser built into the GUI — no browser needed |
 | 🔌 **Plugin System** | Drop a Python plugin into `plugins/` and it loads automatically with optional dashboard block |
+| 📦 **Cargo Block** | Live ship hold display with tonnage gauge, per-item list, and stolen-goods flagging |
+| ⚗️ **Materials Block** | Engineering materials inventory across Raw, Manufactured, and Encoded categories |
+| 🌐 **Data Contributions** | Opt-in journal uploading to EDDN, EDSM, and EDAstro — with batching, retry queues, and beta detection |
 
 <div align="center">
 <img src="images/gui-screenshot.png" alt="EDMD GTK4 GUI" width="900"/>

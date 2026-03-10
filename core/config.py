@@ -29,6 +29,7 @@ _WARNING = f"{_T.WARN}Warning:{_T.END}"
 CFG_DEFAULTS_SETTINGS = {
     "JournalFolder":  "",
     "UseUTC":         False,
+    "PrimaryInstance": True,   # Set False on remote/secondary instances to suppress data uploads
     "WarnKillRate":   20,
     "WarnNoKills":    20,
     "PirateNames":    False,

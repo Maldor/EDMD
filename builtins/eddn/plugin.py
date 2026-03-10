@@ -319,7 +319,8 @@ class EDDNPlugin(BasePlugin):
             "TestMode":   False,
         }, warn=False)
 
-        self._enabled     = bool(cfg.get("Enabled", False))
+        self._primary     = bool(core.cfg.app_settings.get("PrimaryInstance", True))
+        self._enabled     = bool(cfg.get("Enabled", False)) and self._primary
         self._uploader_id = str(cfg.get("UploaderID", "")).strip()
         self._test_mode   = bool(cfg.get("TestMode", False))
 
@@ -352,6 +353,9 @@ class EDDNPlugin(BasePlugin):
                 f"  [EDDN] Uploader enabled "
                 f"({'TEST MODE' if self._test_mode else 'LIVE'})"
             )
+        elif not self._primary:
+            self._sender = None
+            print("  [EDDN] Uploads suppressed (PrimaryInstance = false)")
         else:
             self._sender = None
             print("  [EDDN] Uploader disabled (set [EDDN] Enabled = true to enable)")

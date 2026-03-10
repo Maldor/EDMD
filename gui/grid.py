@@ -75,7 +75,12 @@ class BlockGrid:
     # ── Layout persistence ────────────────────────────────────────────────────
 
     def _load(self) -> None:
-        """Load layout from disk, falling back to defaults."""
+        """Load layout from disk, falling back to defaults.
+
+        After loading, any block present in DEFAULT_LAYOUT but absent from the
+        saved file (e.g. a newly introduced block) is inserted at its default
+        position and the file is re-saved so the entry persists for next time.
+        """
         try:
             data = json.loads(LAYOUT_FILE.read_text(encoding="utf-8"))
             blocks = data.get("blocks", {})
@@ -86,6 +91,15 @@ class BlockGrid:
                     width=max(MIN_W, int(d["width"])),
                     height=max(MIN_H, int(d["height"])),
                 )
+            # Backfill any blocks that exist in DEFAULT_LAYOUT but are missing
+            # from the saved file — happens when a new block is introduced.
+            added = False
+            for name, d in DEFAULT_LAYOUT.items():
+                if name not in self._cells:
+                    self._cells[name] = GridCell(**d)
+                    added = True
+            if added:
+                self.save()
         except Exception:
             self._apply_defaults()
 

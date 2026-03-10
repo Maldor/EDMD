@@ -240,6 +240,9 @@ class EDAstroPlugin(BasePlugin):
 
         cfg = core.load_setting("EDAstro", CFG_DEFAULTS, warn=False)
 
+        if not bool(core.cfg.app_settings.get("PrimaryInstance", True)):
+            print("  [EDAstro] Uploads suppressed (PrimaryInstance = false)")
+            return
         if not cfg["Enabled"]:
             return
 
@@ -284,7 +287,8 @@ class EDAstroPlugin(BasePlugin):
         if event_name not in self._interest_set:
             return
 
-        self._sender.push(dict(event))
+        ev_clean = {k: v for k, v in event.items() if k != "_logtime"}
+        self._sender.push(ev_clean)
 
         if event_name in ("FSDJump", "CarrierJump", "Docked", "Location"):
             self._sender.flush()

@@ -124,3 +124,26 @@ Preferences → Data & Integrations.
   or `Status.json`
 - GTK4 GUI is Linux-only; Windows users have terminal and Discord output
 - Inara integration is pending whitelist approval
+
+---
+
+### New Feature — PrimaryInstance: Duplicate Upload Prevention
+
+Users running EDMD on a secondary machine (e.g. a monitor PC reading journals
+over NFS/SMB while the game runs on another machine) would previously cause
+duplicate uploads to EDDN, EDSM, and EDAstro from both instances
+simultaneously.
+
+A new `[Settings]` key `PrimaryInstance` (default `true`) controls whether
+a given instance is permitted to send data to community networks. Setting it
+to `false` in the secondary machine's config suppresses all outbound uploads
+from that instance while leaving monitoring, alerting, and the GUI fully
+functional. The startup log will confirm: `Uploads suppressed (PrimaryInstance
+= false)`.
+
+```toml
+[Settings]
+PrimaryInstance = false   # add to config on the remote/secondary machine
+```
+
+No changes are needed on the primary (gaming) machine.

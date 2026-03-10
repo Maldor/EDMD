@@ -4,6 +4,9 @@ gui/blocks/materials.py — Engineering materials inventory block.
 Shows three sections: Raw / Manufactured / Encoded.
 Each section header shows the total item count.
 Items are sorted alphabetically within each section.
+
+Layout: a single ScrolledWindow wraps all three sections so the block
+has one clean scroll region rather than three competing vexpand regions.
 """
 
 try:
@@ -23,6 +26,16 @@ class MaterialsBlock(BlockWidget):
     def build(self, parent: Gtk.Box) -> None:
         body = self._build_section(parent)
 
+        # One scroll region for all three sections
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        body.append(scroll)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        inner.set_vexpand(True)
+        scroll.set_child(inner)
+
         self._sections: dict = {}   # cat → {"count_lbl", "list_box", "empty_lbl", "rows"}
 
         for cat, label in [
@@ -33,6 +46,7 @@ class MaterialsBlock(BlockWidget):
             # Section header: label left, count right
             hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             hdr.add_css_class("materials-section-hdr")
+            hdr.set_margin_top(4)
 
             lbl = Gtk.Label(label=label.upper())
             lbl.set_xalign(0.0)
@@ -44,26 +58,20 @@ class MaterialsBlock(BlockWidget):
             count_lbl.add_css_class("data-key")
             hdr.append(count_lbl)
 
-            body.append(hdr)
+            inner.append(hdr)
 
-            # Scrollable item list
-            scroll = Gtk.ScrolledWindow()
-            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scroll.set_vexpand(True)
-            body.append(scroll)
+            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            sep.add_css_class("menu-sep")
+            inner.append(sep)
 
             list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            list_box.set_vexpand(True)
-            scroll.set_child(list_box)
+            inner.append(list_box)
 
             empty_lbl = Gtk.Label(label="— none —")
             empty_lbl.add_css_class("data-key")
             empty_lbl.set_xalign(0.5)
+            empty_lbl.set_margin_bottom(4)
             list_box.append(empty_lbl)
-
-            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-            sep.add_css_class("menu-sep")
-            body.append(sep)
 
             self._sections[cat] = {
                 "count_lbl": count_lbl,
