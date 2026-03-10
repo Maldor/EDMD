@@ -218,10 +218,7 @@ class EdmdWindow(Gtk.ApplicationWindow):
         GLib.timeout_add(50, self._poll_canvas_size)
 
     def _on_canvas_size_changed(self, canvas, _param) -> None:
-        """notify::width or notify::height — fires when the canvas allocation changes.
-        Read directly from the canvas, not the scroll container: the scroll's
-        reported width can lag the canvas allocation on shrink, causing the
-        reflow to fire with a stale large value and blocks to not shift left."""
+        """notify::width or notify::height — fires when the canvas allocation changes."""
         self._apply_canvas_size(canvas.get_width(), canvas.get_height())
 
     def _reflow_tick(self) -> bool:
@@ -259,6 +256,16 @@ class EdmdWindow(Gtk.ApplicationWindow):
         self._canvas.set_size_request(1, 1)
 
         for name, cls, _display in self._registry:
+            # Honour DEFAULT_COL/ROW/WIDTH/HEIGHT declared on the block class.
+            # Only applies when there is no saved layout entry for this block.
+            if hasattr(cls, "DEFAULT_COL"):
+                self._grid.register_plugin_default(
+                    name,
+                    getattr(cls, "DEFAULT_COL",    0),
+                    getattr(cls, "DEFAULT_ROW",    0),
+                    getattr(cls, "DEFAULT_WIDTH",  8),
+                    getattr(cls, "DEFAULT_HEIGHT", 8),
+                )
             block = cls(self._core)
             widget = block.build_widget(name, self._grid, self)
             self._blocks[name] = (block, widget)

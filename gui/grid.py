@@ -126,6 +126,29 @@ class BlockGrid:
 
     # ── Cell access ───────────────────────────────────────────────────────────
 
+    def register_plugin_default(
+        self,
+        name: str,
+        col: int,
+        row: int,
+        width: int,
+        height: int,
+    ) -> None:
+        """Register a default position for a plugin block.
+
+        Called by the window during block construction when the block class
+        declares DEFAULT_COL / DEFAULT_ROW / DEFAULT_WIDTH / DEFAULT_HEIGHT.
+        Only takes effect when there is no saved layout entry for this block.
+        Has no effect after a layout entry already exists.
+        """
+        if name not in self._cells:
+            self._cells[name] = GridCell(
+                col=max(0, col),
+                row=max(0, row),
+                width=max(MIN_W, width),
+                height=max(MIN_H, height),
+            )
+
     def cell_for(self, name: str) -> GridCell:
         """Return the GridCell for a block, using defaults if unknown."""
         if name not in self._cells:
