@@ -103,6 +103,31 @@ rewrite_links() {
     done
 }
 
+# ── Image path rewriter ───────────────────────────────────────────────────────
+# The wiki is a separate git repo and has no access to the main repo's images/
+# directory.  Rewrite all relative image paths to absolute raw.githubusercontent
+# URLs so images render correctly on every wiki page.
+#
+# Handles:
+#   src="images/foo.png"      (README — same-level path)
+#   src="../images/foo.png"   (docs/* — one level up)
+#   ![alt](images/foo.png)    (markdown style, same-level)
+#   ![alt](../images/foo.png) (markdown style, one level up)
+#
+GITHUB_RAW="https://raw.githubusercontent.com/${GITHUB_REPOSITORY:-drworman/EDMD}/main"
+
+rewrite_images() {
+    local _file="$1"
+    # HTML src attributes — both ../images/ and images/
+    sed -i -E \
+        's|src="(\.\./)?images/([^"]+)"|src="'"$GITHUB_RAW"'/images/\2"|g' \
+        "$_file"
+    # Markdown image syntax — both ../images/ and images/
+    sed -i -E \
+        's|!\[([^]]*)\]\((\.\./)?images/([^)]+)\)|![\1]('"$GITHUB_RAW"'/images/\3)|g' \
+        "$_file"
+}
+
 # ── Copy individual docs ──────────────────────────────────────────────────────
 for src_rel in "${!WIKI_NAMES[@]}"; do
     src="$REPO_DIR/$src_rel"
@@ -111,6 +136,7 @@ for src_rel in "${!WIKI_NAMES[@]}"; do
     if [[ -f "$src" ]]; then
         cp "$src" "$dst"
         rewrite_links "$dst"
+        rewrite_images "$dst"
         echo "  copied: $src_rel → ${wiki_name}.md"
     else
         echo "  WARNING: source not found — $src_rel" >&2
