@@ -279,9 +279,14 @@ progressbar.pp-rank-bar progress > fill {
 
 /* ── Update available notice ─────────────────────────────────────────────── */
 
-.update-available {
-    color: var(--accent);
+.update-badge {
+    font-size: 0.80em;
     font-weight: bold;
+    color: var(--accent);
+    padding: 2px 7px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    margin-right: 4px;
 }
 
 .upgrade-btn {

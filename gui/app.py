@@ -167,6 +167,12 @@ class EdmdWindow(Gtk.ApplicationWindow):
                     self._min_button, self._fs_button):
             hb.pack_end(btn)
 
+        # ── Update notice badge (hidden until update detected) ────────────────
+        self._update_badge = make_label("", css_class="update-badge")
+        self._update_badge.set_visible(False)
+        self._update_badge.set_valign(Gtk.Align.CENTER)
+        hb.pack_end(self._update_badge)
+
         # Keep max button icon in sync with window state
         self.connect("notify::maximized", self._on_maximized_changed)
 
@@ -212,17 +218,20 @@ class EdmdWindow(Gtk.ApplicationWindow):
         GLib.timeout_add(50, self._poll_canvas_size)
 
     def _on_canvas_size_changed(self, canvas, _param) -> None:
-        """notify::width or notify::height — fires when the viewport changes."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
+        """notify::width or notify::height — fires when the canvas allocation changes.
+        Read directly from the canvas, not the scroll container: the scroll's
+        reported width can lag the canvas allocation on shrink, causing the
+        reflow to fire with a stale large value and blocks to not shift left."""
+        self._apply_canvas_size(canvas.get_width(), canvas.get_height())
 
     def _reflow_tick(self) -> bool:
         """Fallback poll every REFLOW_MS — catches tiling WM resizes."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
+        self._apply_canvas_size(self._canvas.get_width(), self._canvas.get_height())
         return True
 
     def _poll_canvas_size(self) -> bool:
         """One-shot after realize settle."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
+        self._apply_canvas_size(self._canvas.get_width(), self._canvas.get_height())
         return False
 
     def _apply_canvas_size(self, w: int, h: int) -> None:
@@ -378,11 +387,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
     # ── Update notice ─────────────────────────────────────────────────────────
 
     def _on_update_notice(self, version: str) -> None:
-        self._title_lbl.set_label(
-            f"{self._program}  v{self._version}"
-            f"  ·  \u2b06 v{version} available  (File \u2192 Upgrade)"
+        self._update_badge.set_label(f"\u2b06 v{version}")
+        self._update_badge.set_tooltip_text(
+            f"v{version} available — File \u2192 Upgrade to update"
         )
-        self._title_lbl.add_css_class("update-available")
+        self._update_badge.set_visible(True)
 
 
 # ── Application ───────────────────────────────────────────────────────────────
@@ -402,13 +411,7 @@ class EdmdApp(Gtk.Application):
         # gradients so our window control colours actually take effect.
         settings = Gtk.Settings.get_default()
         if settings:
-            try:
-                settings.set_property("gtk-theme-name", "Default")
-            except Exception:
-                # Non-Linux GTK backends (macOS Quartz, Windows) may not
-                # recognise this theme name — harmless to ignore, EDMD's
-                # own CSS loads regardless.
-                pass
+            settings.set_property("gtk-theme-name", "Default")
         apply_theme(self._theme)
         win = EdmdWindow(
             app=self,
