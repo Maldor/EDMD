@@ -21,10 +21,11 @@ class SessionStatsBlock(BlockWidget):
 
     def build(self, parent: Gtk.Box) -> None:
         body = self._build_section(parent)
+        scroll_body = self._make_scroll_body(body)
 
         # Duration on its own row
         row, self._stat_duration = self.make_row("Duration")
-        body.append(row)
+        scroll_body.append(row)
 
         # Three stat rows — each a monospace label spanning full width,
         # right-aligned. _refresh formats them with padded columns so the
@@ -45,7 +46,7 @@ class SessionStatsBlock(BlockWidget):
             lbl.set_xalign(1.0)
             row.append(lbl)
             setattr(self, attr, lbl)
-            body.append(row)
+            scroll_body.append(row)
 
     def refresh(self) -> None:
         s   = self.state
@@ -55,7 +56,10 @@ class SessionStatsBlock(BlockWidget):
         if s.session_start_time and s.event_time:
             duration = (s.event_time - s.session_start_time).total_seconds()
 
-        self._stat_duration.set_label(self.fmt_duration(duration))
+        # Show "—" when no active session (e.g. between jumps), not "0:00"
+        self._stat_duration.set_label(
+            self.fmt_duration(duration) if duration > 0 else "—"
+        )
 
         # Compute raw totals and rates
         kills_total = str(ses.kills)

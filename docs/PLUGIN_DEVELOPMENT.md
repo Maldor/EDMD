@@ -3,7 +3,7 @@
 EDMD supports user-written plugins. Drop a plugin into `plugins/<n>/plugin.py`
 and it will be loaded automatically on startup alongside the built-in modules.
 
-> **Stability note:** The plugin API and block system interfaces are stable as of v20260310.
+> **Stability note:** The plugin API and block system interfaces are stable as of v20260310b.
 
 The `plugins/` directory is gitignored — your work survives `--upgrade`.
 
@@ -230,6 +230,7 @@ Methods and attributes available inside your `BlockWidget` subclass:
 | Method / Attribute | Returns | Description |
 |--------------------|---------|-------------|
 | `self._build_section(parent, title)` | `Gtk.Box` | Sets up section header and separator; returns inner content box. Must be called at the start of `build()`. |
+| `self._make_scroll_body(parent)` | `Gtk.Box` | Creates a standard scrollable content area and appends it to `parent`. Returns the inner `Gtk.Box` to populate. Applies `mat-tab-scroll` CSS class, `NEVER/AUTOMATIC` scroll policy, vexpand, and `margin_end(12)` to keep content clear of the GTK4 overlay scrollbar track. Use this instead of constructing `ScrolledWindow` manually. |
 | `self.make_label(text, css_class, xalign)` | `Gtk.Label` | Create a styled label. |
 | `self.make_row(key_text, value_text)` | `Gtk.Box` | Create a key / value row. |
 | `self.footer()` | `Gtk.Box` | Footer gutter box. Prepend status items here (before the spacer). |
@@ -272,6 +273,13 @@ Your plugin receives a `CoreAPI` instance via `on_load`:
 | `core.fmt_credits(n)` | Format a credit value — e.g. `1.50M` |
 | `core.fmt_duration(s)` | Format seconds — e.g. `1h 30m` |
 
+### Notable MonitorState fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `state.pilot_reputation` | `dict[str, float]` | Major faction standings from the journal `Reputation` event: Federation, Empire, Alliance, Independent. Values are 0–100 floats. Populated on first login replay; `None` or empty dict before that. |
+| `state.pilot_minor_reputation` | `dict[str, float]` | Local / minor faction standings from `Factions[].MyReputation` in `FSDJump` and `Location` events. Reflects the current system only; replaced on each jump. |
+
 ---
 
 ## GUI queue message types
@@ -285,7 +293,7 @@ Your plugin receives a `CoreAPI` instance via `on_load`:
 | `mission_update` | `None` | Refreshes Mission Stack block |
 | `crew_update` / `slf_update` | `None` | Refreshes Crew / SLF block |
 | `alerts_update` | `None` | Refreshes Alerts block |
-| `update_notice` | version string | Shows update badge in the header bar |
+| `update_notice` | `tuple[str, str]` — `("release", "20260310b")` or `("commits", "3")` | Shows update badge in the header bar. First element is `"release"` for a new tagged release or `"commits"` for unpulled git commits; second element is the display string. |
 
 ---
 
@@ -332,6 +340,7 @@ Read it alongside this document.
 - [ ] `BLOCK_WIDGET_CLASS = MyBlock if _GTK else None`
 - [ ] `DEFAULT_COL`, `DEFAULT_ROW`, `DEFAULT_WIDTH`, `DEFAULT_HEIGHT` are all declared
 - [ ] `build()` calls `self._build_section(parent)` first
+- [ ] Scrollable content areas use `self._make_scroll_body(parent)` — do not construct `ScrolledWindow` manually
 - [ ] `refresh()` is side-effect safe — it fires every second
 - [ ] `on_resize()` calls `super().on_resize(w, h)` first if overridden
 - [ ] Plugin is tested with GUI disabled (terminal-only mode)

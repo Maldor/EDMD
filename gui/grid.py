@@ -43,6 +43,7 @@ DEFAULT_LAYOUT = {
     # Right col:  crew_slf → assets
     #
     # Commander is 13 rows to accommodate the vitals strip + ambient rows.
+    # Ranks and Rep live in separate tabs, so height is unchanged.
     "commander":    {"col": 0,  "row": 0,  "width": 8, "height": 13},
     "session_stats":{"col": 8,  "row": 0,  "width": 8, "height": 10},
     "crew_slf":     {"col": 16, "row": 0,  "width": 8, "height": 10},

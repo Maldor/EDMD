@@ -235,6 +235,7 @@ class AssetsPlugin(BasePlugin):
         super().on_load(core)
         s = core.state
         if not hasattr(s, "assets_balance"):        s.assets_balance        = None
+        if not hasattr(s, "assets_total_wealth"):   s.assets_total_wealth   = None
         if not hasattr(s, "assets_current_ship"):   s.assets_current_ship   = None
         if not hasattr(s, "assets_stored_ships"):   s.assets_stored_ships   = []
         if not hasattr(s, "assets_stored_modules"): s.assets_stored_modules = []
@@ -567,11 +568,14 @@ class AssetsPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "Statistics":
-                # Statistics has a "Bank_Account" sub-object with Current_Wealth
+                # Bank_Account.Current_Wealth is TOTAL wealth — liquid credits +
+                # value of all ships + modules + carrier balance.  It must NOT be
+                # used as the liquid credit balance.  We store it separately so the
+                # wallet tab can display it as "Net Worth" for context.
                 bank = event.get("Bank_Account", {})
-                bal  = bank.get("Current_Wealth")
-                if bal is not None:
-                    state.assets_balance = float(bal)
+                total = bank.get("Current_Wealth")
+                if total is not None:
+                    state.assets_total_wealth = float(total)
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "Loadout":

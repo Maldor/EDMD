@@ -21,10 +21,11 @@ class MissionsBlock(BlockWidget):
 
     def build(self, parent: Gtk.Box) -> None:
         body = self._build_section(parent)
+        scroll_body = self._make_scroll_body(body)
 
         # Stack value row
         row, self._miss_value = self.make_row("Stack Value")
-        body.append(row)
+        scroll_body.append(row)
 
         # Progress row — key label changes between "Completed" / "Complete"
         row_p = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -36,7 +37,7 @@ class MissionsBlock(BlockWidget):
         self._miss_progress.set_hexpand(True)
         self._miss_progress.set_xalign(1.0)
         row_p.append(self._miss_progress)
-        body.append(row_p)
+        scroll_body.append(row_p)
 
 
 

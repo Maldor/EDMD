@@ -126,23 +126,73 @@ print(f"{Terminal.CYAN}{'=' * len(title)}\n{title}\n{'=' * len(title)}{Terminal.
 
 
 # ── Background update check ───────────────────────────────────────────────────
+# Checks two things in order of severity:
+#   1. New tagged release on GitHub   → "release" notice
+#   2. New commits on origin/main     → "commits" notice (only if git is present
+#      and _HERE is a git working tree)
+#
+# _update_notice  = ("release", version_str)   — a tagged release is available
+# _update_notice  = ("commits", N_str)          — N new commits ahead of local
+# _update_notice  = None                        — nothing new
+#
+# In both cases File → Upgrade runs the same git-pull path.
 
-_update_notice: str | None = None
+_update_notice: tuple[str, str] | None = None
 
 def _check_for_update() -> None:
     global _update_notice
+    import re as _re
+    import shutil
+
+    # ── 1. Check for a newer tagged release via GitHub API ────────────────────
+    new_release: str | None = None
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         with urlopen(url, timeout=4) as resp:
             if resp.status == 200:
-                import re as _re
                 tag = json.loads(resp.read()).get("tag_name", "").lstrip("v").strip()
                 if tag and tag != VERSION:
                     def _vkey(v):
                         m = _re.match(r"^(\d+)([a-z]*)$", v)
                         return (int(m.group(1)), m.group(2)) if m else (0, "")
                     if _vkey(tag) > _vkey(VERSION):
-                        _update_notice = tag
+                        new_release = tag
+    except Exception:
+        pass
+
+    if new_release:
+        _update_notice = ("release", new_release)
+        return  # release notice takes priority; no need to count commits
+
+    # ── 2. Check for new commits on origin/main via git ───────────────────────
+    # Only attempted when: git is on PATH and _HERE is inside a git work tree.
+    if not shutil.which("git"):
+        return
+
+    try:
+        in_tree = _sp.run(
+            ["git", "-C", str(_HERE), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=4,
+        )
+        if in_tree.returncode != 0:
+            return
+
+        # Fetch quietly so the count is current (--dry-run to avoid network
+        # noise; fall back to a real fetch on failure)
+        _sp.run(
+            ["git", "-C", str(_HERE), "fetch", "--quiet", "origin", "main"],
+            capture_output=True, timeout=8,
+        )
+
+        # Count commits on origin/main that are not in HEAD
+        ahead = _sp.run(
+            ["git", "-C", str(_HERE), "rev-list", "--count", "HEAD..origin/main"],
+            capture_output=True, text=True, timeout=4,
+        )
+        if ahead.returncode == 0:
+            n = ahead.stdout.strip()
+            if n.isdigit() and int(n) > 0:
+                _update_notice = ("commits", n)
     except Exception:
         pass
 
@@ -285,16 +335,28 @@ bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
 
 _update_thread.join(timeout=2)
 if _update_notice:
-    _releases_url = f"https://github.com/{GITHUB_REPO}/releases"
-    if not gui_mode:
-        print(
-            f"{Terminal.YELL}\u26a0 Update available: v{_update_notice}{Terminal.END}"
-            f"  {Terminal.WHITE}{_releases_url}{Terminal.END}\n"
+    _kind, _value = _update_notice
+    _repo_url = f"https://github.com/{GITHUB_REPO}"
+    if _kind == "release":
+        _term_msg = (
+            f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
+            f"  {Terminal.WHITE}{_repo_url}/releases{Terminal.END}\n"
             f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to update and restart automatically.\n"
         )
+        _gui_payload = ("release", _value)
+    else:  # "commits"
+        _term_msg = (
+            f"{Terminal.YELL}\u26a0 {_value} new commit(s) available on main{Terminal.END}"
+            f"  {Terminal.WHITE}{_repo_url}/commits/main{Terminal.END}\n"
+            f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to pull and restart automatically.\n"
+        )
+        _gui_payload = ("commits", _value)
+
+    if not gui_mode:
+        print(_term_msg)
     if gui_mode:
-        gui_queue.put(("update_notice", _update_notice))
-    emitter.set_update_notice(_update_notice)
+        gui_queue.put(("update_notice", _gui_payload))
+    emitter.set_update_notice(_value if _kind == "release" else f"+{_value} commits")
 
 
 # ── Session restore + startup banner ─────────────────────────────────────────

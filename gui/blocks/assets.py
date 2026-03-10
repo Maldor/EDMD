@@ -137,6 +137,18 @@ class AssetsBlock(BlockWidget):
         bal_row.append(self._balance_lbl)
         box.append(bal_row)
 
+        # Net Worth (Statistics.Bank_Account.Current_Wealth — liquid + ships + modules + carrier)
+        nw_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        nw_key = self.make_label("Net Worth", css_class="data-key")
+        self._net_worth_lbl = self.make_label("—", css_class="data-value")
+        self._net_worth_lbl.set_hexpand(True)
+        self._net_worth_lbl.set_xalign(1.0)
+        nw_row.append(nw_key)
+        nw_row.append(self._net_worth_lbl)
+        self._net_worth_row = nw_row
+        nw_row.set_visible(False)   # hidden until Statistics event fires
+        box.append(nw_row)
+
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
         sc_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -241,11 +253,18 @@ class AssetsBlock(BlockWidget):
         state = self.core.state
 
         bal            = getattr(state, "assets_balance",        None)
+        total_wealth   = getattr(state, "assets_total_wealth",   None)
         current_ship   = getattr(state, "assets_current_ship",   None)
         stored_ships   = getattr(state, "assets_stored_ships",   [])
         stored_modules = getattr(state, "assets_stored_modules", [])
 
         self._balance_lbl.set_label(_fmt_credits(bal))
+
+        if total_wealth is not None:
+            self._net_worth_lbl.set_label(_fmt_credits(total_wealth))
+            self._net_worth_row.set_visible(True)
+        else:
+            self._net_worth_row.set_visible(False)
 
         # Filter stored ships: remove any entry whose ShipID matches the
         # current ship (it was stored at some earlier point; it's here now).
@@ -278,7 +297,7 @@ class AssetsBlock(BlockWidget):
         if not has:
             return
 
-        fuel_pct = int(carrier.get("fuel", 0) / 10)  # 0–1000 → 0–100%
+        fuel_pct = int(int(carrier.get("fuel", 0) or 0) / 10)  # 0–1000 → 0–100%
         self._carrier_rows["name"].set_label(carrier.get("name", "—"))
         self._carrier_rows["callsign"].set_label(carrier.get("callsign", "—"))
         self._carrier_rows["system"].set_label(carrier.get("system", "—"))

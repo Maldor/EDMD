@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260310"
+VERSION = "20260310b"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -309,6 +309,62 @@ RANK_NAMES = [
     "Harmless", "Mostly Harmless", "Novice", "Competent", "Expert",
     "Master", "Dangerous", "Deadly", "Elite",
     "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
+RANK_NAMES_TRADE = [
+    "Penniless", "Mostly Penniless", "Peddler", "Dealer", "Merchant",
+    "Broker", "Entrepreneur", "Tycoon", "Elite",
+    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
+RANK_NAMES_EXPLORE = [
+    "Aimless", "Mostly Aimless", "Scout", "Surveyor", "Trailblazer",
+    "Pathfinder", "Ranger", "Pioneer", "Elite",
+    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
+RANK_NAMES_CQC = [
+    "Helpless", "Mostly Helpless", "Amateur", "Semi-Professional",
+    "Professional", "Champion", "Hero", "Legend", "Elite",
+    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
+RANK_NAMES_SOLDIER = [   # Mercenary
+    "Defenceless", "Mostly Defenceless", "Rookie", "Soldier",
+    "Gunslinger", "Warrior", "Gladiator", "Deadeye", "Elite",
+    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
+RANK_NAMES_EXOBIO = [
+    "Directionless", "Mostly Directionless", "Compiler", "Collector",
+    "Cataloguer", "Taxonomist", "Ecologist", "Geneticist", "Elite",
+    "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V",
+]
+
+RANK_NAMES_FEDERATION = [
+    "None",
+    "Recruit", "Cadet", "Midshipman", "Petty Officer", "Chief Petty Officer",
+    "Warrant Officer", "Ensign", "Lieutenant", "Lieutenant Commander",
+    "Post Commander", "Post Captain", "Rear Admiral", "Vice Admiral", "Admiral",
+]
+
+RANK_NAMES_EMPIRE = [
+    "None",
+    "Outsider", "Serf", "Master", "Squire", "Knight",
+    "Lord", "Baron", "Viscount", "Count", "Earl",
+    "Marquis", "Duke", "Prince", "King",
+]
+
+# (CAPI key — lowercase as returned by /profile, display label, rank name table)
+CAPI_RANK_SKILLS = [
+    ("combat",       "Combat",       RANK_NAMES),
+    ("explore",      "Explorer",     RANK_NAMES_EXPLORE),
+    ("trade",        "Trade",        RANK_NAMES_TRADE),
+    ("cqc",          "CQC",          RANK_NAMES_CQC),
+    ("soldier",      "Mercenary",    RANK_NAMES_SOLDIER),
+    ("exobiologist", "Exobiologist", RANK_NAMES_EXOBIO),
+    ("federation",   "Federation",   RANK_NAMES_FEDERATION),
+    ("empire",       "Empire",       RANK_NAMES_EMPIRE),
 ]
 
 

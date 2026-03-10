@@ -84,6 +84,10 @@ CFG_DEFAULTS_INARA = {
     "CommanderName": "",
 }
 
+CFG_DEFAULTS_CAPI = {
+    "Enabled": False,   # set True automatically after first successful auth
+}
+
 
 CFG_DEFAULTS_NOTIFY = {
     "InboundScan":      1,
@@ -245,6 +249,7 @@ class ConfigManager:
         self.discord_cfg   = {}
         self.notify_levels = {}
         self.gui_cfg       = {}
+        self.capi_cfg      = {}
         self._resolve_all(warn=True)
 
     def _resolve_all(self, warn: bool = False):
@@ -259,6 +264,7 @@ class ConfigManager:
         self.edsm_cfg      = self.load_setting("EDSM",      CFG_DEFAULTS_EDSM,     False)
         self.edastro_cfg   = self.load_setting("EDAstro",   CFG_DEFAULTS_EDASTRO,  False)
         self.inara_cfg     = self.load_setting("Inara",     CFG_DEFAULTS_INARA,    False)
+        self.capi_cfg      = self.load_setting("CAPI",      CFG_DEFAULTS_CAPI,     False)
 
     def load_setting(
         self,

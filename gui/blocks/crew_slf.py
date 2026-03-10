@@ -43,6 +43,7 @@ class CrewSlfBlock(BlockWidget):
         hdr_outer.append(self._crew_rank_hdr)
 
         body = self._build_section(parent, title_widget=hdr_outer)
+        scroll_body = self._make_scroll_body(body)
 
         # ── SLF vitals strip — most urgent information ─────────────────────────
         row_slf = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -54,13 +55,13 @@ class CrewSlfBlock(BlockWidget):
         self._crew_slf_status.set_hexpand(True)
         self._crew_slf_status.set_xalign(1.0)
         row_slf.append(self._crew_slf_status)
-        body.append(row_slf)
+        scroll_body.append(row_slf)
         self._crew_slf_row = row_slf
 
         # ── Separator — vitals above, crew context below ──────────────────────
         vitals_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         vitals_sep.add_css_class("vitals-sep")
-        body.append(vitals_sep)
+        scroll_body.append(vitals_sep)
 
         # ── Ambient rows — crew context ───────────────────────────────────────
         for lbl_text, attr in [
@@ -70,7 +71,7 @@ class CrewSlfBlock(BlockWidget):
         ]:
             row, val = self.make_row(lbl_text)
             setattr(self, attr, val)
-            body.append(row)
+            scroll_body.append(row)
 
         # Hidden by default until crew is active
         self.set_visible(False)

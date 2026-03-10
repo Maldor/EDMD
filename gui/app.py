@@ -392,10 +392,21 @@ class EdmdWindow(Gtk.ApplicationWindow):
 
     # ── Update notice ─────────────────────────────────────────────────────────
 
-    def _on_update_notice(self, version: str) -> None:
+    def _on_update_notice(self, payload) -> None:
+        # payload is ("release", version_str) or ("commits", count_str)
+        if isinstance(payload, tuple):
+            kind, value = payload
+        else:
+            # Legacy string format fallback
+            kind, value = "release", payload
+
+        if kind == "release":
+            label = f"\u2b06 v{value} available  (File \u2192 Upgrade)"
+        else:
+            label = f"\u2b06 {value} new commit(s) on main  (File \u2192 Upgrade)"
+
         self._title_lbl.set_label(
-            f"{self._program}  v{self._version}"
-            f"  ·  \u2b06 v{version} available  (File \u2192 Upgrade)"
+            f"{self._program}  v{self._version}  ·  {label}"
         )
         self._title_lbl.add_css_class("update-available")
 

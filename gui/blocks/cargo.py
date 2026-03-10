@@ -36,15 +36,8 @@ class CargoBlock(BlockWidget):
 
         body = self._build_section(parent, title_widget=hdr_box)
 
-        # Scrollable inner box for item rows
-        self._scroll = Gtk.ScrolledWindow()
-        self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._scroll.set_vexpand(True)
-        body.append(self._scroll)
-
-        self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self._list_box.set_vexpand(True)
-        self._scroll.set_child(self._list_box)
+        # Scrollable inner box — margin_end(12) clears GTK4 overlay scrollbar
+        self._list_box = self._make_scroll_body(body, spacing=0)
 
         # Placeholder shown when hold is empty
         self._empty_lbl = Gtk.Label(label="— empty —")

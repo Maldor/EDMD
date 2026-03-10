@@ -342,6 +342,34 @@ class BlockWidget:
         self._section_body = inner
         return inner
 
+    def _make_scroll_body(
+        self,
+        parent: Gtk.Box,
+        spacing: int = 3,
+        margin_end: int = 12,
+        css_class: str = "mat-tab-scroll",
+    ) -> Gtk.Box:
+        """Return a vexpand-scrollable Box appended to *parent*.
+
+        This is the standard scrollable content area used by all blocks.
+        The inner box carries set_margin_end(12) to keep text clear of the
+        GTK4 overlay scrollbar track.  Blocks that previously built their own
+        ScrolledWindow should call this instead.
+
+        Returns the inner Gtk.Box to populate with content rows.
+        """
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.add_css_class(css_class)
+        parent.append(scroll)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
+        inner.set_vexpand(True)
+        inner.set_margin_end(margin_end)
+        scroll.set_child(inner)
+        return inner
+
     # ── Visibility ────────────────────────────────────────────────────────────
 
     def set_visible(self, visible: bool) -> None:
@@ -389,3 +417,4 @@ class BlockWidget:
         if self._collapsed and self._frame:
             hdr_h = self._header_height if self._header_height > 0 else 26
             self._frame.set_size_request(w, hdr_h + 6)
+# NOTE: _make_scroll_body helper appended below existing content — no edits needed above

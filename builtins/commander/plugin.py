@@ -16,7 +16,7 @@ class CommanderPlugin(BasePlugin):
     PLUGIN_VERSION = "1.0.0"
 
     SUBSCRIBED_EVENTS = [
-        "Commander", "LoadGame", "Rank", "Progress",
+        "Commander", "LoadGame", "Rank", "Progress", "Reputation",
         "Location", "Docked", "Undocked",
         "FSDJump", "SupercruiseEntry",
         "ShipyardSwap", "Loadout",
@@ -69,6 +69,20 @@ class CommanderPlugin(BasePlugin):
 
             case "Progress":
                 state.pilot_rank_progress = event["Combat"]
+
+            case "Reputation":
+                # Major faction standing 0-100 floats from Journal.
+                # Stored as-is; display layer formats as percentages.
+                rep = {}
+                for faction in ("Federation", "Empire", "Alliance", "Independent"):
+                    val = event.get(faction)
+                    if val is not None:
+                        rep[faction] = float(val)
+                if rep:
+                    if not hasattr(state, "pilot_reputation"):
+                        state.pilot_reputation = {}
+                    state.pilot_reputation.update(rep)
+                    if gq: gq.put(("cmdr_update", None))
 
             case "LoadGame":
                 state.crew_active = False
@@ -190,6 +204,17 @@ class CommanderPlugin(BasePlugin):
                     state.pilot_body = event["StationName"]
                 elif event.get("Docked") and not event.get("StationName"):
                     state.pilot_body = None
+                # Harvest local faction standings
+                factions = event.get("Factions", [])
+                if factions:
+                    minor_rep = {}
+                    for f in factions:
+                        name = f.get("Name") or f.get("FactionName")
+                        val  = f.get("MyReputation")
+                        if name and val is not None:
+                            minor_rep[name] = float(val)
+                    if minor_rep:
+                        state.pilot_minor_reputation = minor_rep
                 if gq: gq.put(("cmdr_update", None))
 
             case "Docked":
@@ -204,6 +229,17 @@ class CommanderPlugin(BasePlugin):
             case "FSDJump":
                 state.pilot_system = event.get("StarSystem", state.pilot_system)
                 state.pilot_body   = None
+                # Harvest local faction standings for the Rep tab
+                factions = event.get("Factions", [])
+                if factions:
+                    minor_rep = {}
+                    for f in factions:
+                        name = f.get("Name") or f.get("FactionName")
+                        val  = f.get("MyReputation")
+                        if name and val is not None:
+                            minor_rep[name] = float(val)
+                    if minor_rep:
+                        state.pilot_minor_reputation = minor_rep
                 if gq: gq.put(("cmdr_update", None))
                 core.emitter.emit(
                     msg_term=f"FSD jump to {event['StarSystem']}",

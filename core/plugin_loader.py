@@ -63,7 +63,7 @@ class PluginStorage:
 
     # Allowed bare filenames — no path separators permitted.
     _ALLOWED_NAMES = frozenset({
-        "data.json", "config.json", "state.json",
+        "data.json", "config.json", "state.json", "tokens.json",
         "config.toml", "state.toml",
     })
 

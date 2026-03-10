@@ -351,14 +351,15 @@ class InaraPlugin(BasePlugin):
                         self._rank_progress[inara_key] = event[journal_key] / 100.0
 
             case "Statistics":
-                bank = event.get("Bank_Account", {})
-                credits = bank.get("Current_Wealth")
-                assets  = bank.get("Assets_Total") or bank.get("Current_Wealth")
-                if credits is not None and credits >= 0:
-                    data: dict = {"commanderCredits": int(credits)}
-                    if assets is not None and assets >= 0:
-                        data["commanderAssets"] = int(assets)
-                    self._push(ts, "setCommanderCredits", data)
+                # Bank_Account.Current_Wealth is total wealth (liquid + ship/module
+                # values + carrier balance), NOT liquid credits.  Report it only as
+                # commanderAssets.  Liquid commanderCredits come from LoadGame.Credits
+                # or a post-CAPI-poll update (assets_balance), never from Statistics.
+                bank   = event.get("Bank_Account", {})
+                assets = bank.get("Assets_Total") or bank.get("Current_Wealth")
+                if assets is not None and assets >= 0:
+                    self._push(ts, "setCommanderCredits",
+                               {"commanderAssets": int(assets)})
 
             case "Reputation":
                 # Post major faction reputations
@@ -604,6 +605,15 @@ class InaraPlugin(BasePlugin):
                 self._ship_type = ship_type
             if ship_id is not None:
                 self._ship_id = int(ship_id)
+
+    def push_credits(self, credits: int) -> None:
+        """Push an authoritative liquid credit balance to Inara.
+        Called by the CAPI plugin after a successful /profile poll.
+        Uses current time as the event timestamp.
+        """
+        import time
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._push(ts, "setCommanderCredits", {"commanderCredits": int(credits)})
 
     def _push(self, timestamp: str, event_name: str, event_data) -> None:
         """Enqueue a single Inara API event."""

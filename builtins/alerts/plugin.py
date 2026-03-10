@@ -27,6 +27,9 @@ class AlertsPlugin(BasePlugin):
         "ReservoirReplenished",
         "EjectCargo",
         "Died",
+        # Auto-clear stale alerts on new game load or docking anywhere
+        "LoadGame",
+        "Docked",
     ]
 
     DEFAULT_COL    = 0
@@ -172,6 +175,14 @@ class AlertsPlugin(BasePlugin):
                     emoji="💀", sigil="!! DEAD",
                     timestamp=logtime, loglevel=notify["Died"],
                 )
+
+            case "LoadGame" | "Docked":
+                # Stale alerts from a previous session or location are no
+                # longer actionable — clear silently on new load or docking.
+                if not state.in_preload and self.alert_queue:
+                    self.alert_queue.clear()
+                    if core.gui_queue:
+                        core.gui_queue.put(("alerts_update", None))
 
     def get_alerts(self) -> list[dict]:
         """Return current alerts list for the GUI block renderer."""

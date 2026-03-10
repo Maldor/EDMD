@@ -24,6 +24,7 @@ class AlertsBlock(BlockWidget):
 
     def build(self, parent: Gtk.Box) -> None:
         body = self._build_section(parent)
+        scroll_body = self._make_scroll_body(body)
 
         # Pre-build MAX_ROWS label rows; show/hide and update in refresh()
         self._alert_rows: list[Gtk.Label] = []
@@ -33,14 +34,15 @@ class AlertsBlock(BlockWidget):
             lbl.set_hexpand(True)
             lbl.add_css_class("alert-entry")
             lbl.set_visible(False)
-            body.append(lbl)
+            scroll_body.append(lbl)
             self._alert_rows.append(lbl)
 
-        # Clear button — pinned below the alert rows
+        # Clear button — pinned below the scrolled alert rows
         clear_btn = Gtk.Button(label="Clear")
         clear_btn.add_css_class("alerts-clear-btn")
         clear_btn.set_halign(Gtk.Align.END)
         clear_btn.set_margin_top(4)
+        clear_btn.set_margin_end(12)
         clear_btn.connect("clicked", self._on_clear)
         body.append(clear_btn)
 

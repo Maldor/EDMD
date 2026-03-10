@@ -359,6 +359,7 @@ class PreferencesWindow(Gtk.Window):
         "EDSM":     {"Enabled", "CommanderName", "ApiKey"},
         "EDAstro":  {"Enabled", "UploadCarrierEvents"},
         "Inara":    {"Enabled", "ApiKey", "CommanderName"},
+        "CAPI":     set(),   # no restart-required keys; managed live
     }
 
     def _record(self, section: str, key: str, value) -> None:
@@ -393,6 +394,9 @@ class PreferencesWindow(Gtk.Window):
 
     def _track_inara(self, key: str, value) -> None:
         self._record("Inara", key, value)
+
+    def _track_capi(self, key: str, value) -> None:
+        self._record("CAPI", key, value)
 
     # ── Data & Integrations tab ───────────────────────────────────────────────
 
@@ -560,6 +564,136 @@ class PreferencesWindow(Gtk.Window):
             "changed", lambda w: self._track_inara("ApiKey", w.get_text().strip())
         )
         box.append(self._row("Inara API Key", inara_key_entry, restart_required=True))
+
+        # ── CAPI ──────────────────────────────────────────────────────────────
+        self._build_capi_section(box)
+
+    # ── CAPI section ─────────────────────────────────────────────────────────
+
+    def _build_capi_section(self, box: "Gtk.Box") -> None:
+        """Frontier Companion API auth UI — Connect button + status row."""
+        box.append(self._section_label("Frontier CAPI"))
+
+        note = Gtk.Label(
+            label=(
+                "Provides authoritative fleet data directly from Frontier.\n"
+                "Authenticates via your Frontier account in a browser window.\n"
+                "Tokens are stored locally and never sent anywhere else."
+            )
+        )
+        note.set_xalign(0.0)
+        note.set_wrap(True)
+        note.add_css_class("prefs-note")
+        box.append(note)
+
+        # Status label — updated live by _capi_refresh_status()
+        self._capi_status_lbl = Gtk.Label(label="Checking…")
+        self._capi_status_lbl.set_xalign(0.0)
+        self._capi_status_lbl.add_css_class("prefs-note")
+
+        # Connect / Disconnect button
+        self._capi_btn = Gtk.Button(label="Connect")
+        self._capi_btn.set_valign(Gtk.Align.CENTER)
+        self._capi_btn.connect("clicked", self._on_capi_connect)
+
+        # Disconnect button (shown when connected)
+        self._capi_disc_btn = Gtk.Button(label="Disconnect")
+        self._capi_disc_btn.set_valign(Gtk.Align.CENTER)
+        self._capi_disc_btn.add_css_class("destructive-action")
+        self._capi_disc_btn.connect("clicked", self._on_capi_disconnect)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_box.append(self._capi_btn)
+        btn_box.append(self._capi_disc_btn)
+        btn_box.set_valign(Gtk.Align.CENTER)
+
+        box.append(self._row("Status", self._capi_status_lbl))
+        box.append(self._row("Account", btn_box))
+
+        # Poll status once now, then schedule periodic refresh while window is open
+        self._capi_refresh_status()
+        GLib.timeout_add(2000, self._capi_poll_status)
+
+    def _capi_refresh_status(self) -> None:
+        """Pull current auth status from the CAPI plugin and update labels."""
+        plugin = None
+        try:
+            plugin = self._core._plugins.get("capi")
+        except AttributeError:
+            pass
+
+        if plugin is None:
+            self._capi_status_lbl.set_label("CAPI plugin not loaded")
+            self._capi_btn.set_sensitive(False)
+            self._capi_disc_btn.set_visible(False)
+            return
+
+        status = plugin.auth_status()
+        state  = status.get("state", "none")
+        cmdr   = status.get("cmdr")
+        expiry = status.get("expiry")
+        last   = status.get("last_poll")
+
+        import time
+        if state == "connected":
+            exp_str = ""
+            if expiry:
+                mins = max(0, int((expiry - time.time()) / 60))
+                exp_str = f"  (token refreshes in {mins}m)"
+            lbl = f"Connected{(' — CMDR ' + cmdr) if cmdr else ''}{exp_str}"
+            if last:
+                import datetime
+                t = datetime.datetime.fromtimestamp(last).strftime("%H:%M:%S")
+                lbl += f"  ·  last poll {t}"
+            self._capi_status_lbl.set_label(lbl)
+            self._capi_btn.set_label("Re-authenticate")
+            self._capi_disc_btn.set_visible(True)
+        elif state == "expired":
+            self._capi_status_lbl.set_label(
+                "Token expired — click Re-authenticate to reconnect."
+            )
+            self._capi_btn.set_label("Re-authenticate")
+            self._capi_disc_btn.set_visible(True)
+        elif state == "auth_running":
+            self._capi_status_lbl.set_label("Waiting for browser authentication…")
+            self._capi_btn.set_sensitive(False)
+            self._capi_disc_btn.set_visible(False)
+        else:
+            self._capi_status_lbl.set_label("Not connected")
+            self._capi_btn.set_label("Connect")
+            self._capi_btn.set_sensitive(True)
+            self._capi_disc_btn.set_visible(False)
+
+    def _capi_poll_status(self) -> bool:
+        """GLib timer callback — refresh status every 2 s while window is open."""
+        try:
+            if self.get_visible():
+                self._capi_refresh_status()
+                return True   # keep timer running
+        except Exception:
+            pass
+        return False   # window gone, stop timer
+
+    def _on_capi_connect(self, *_) -> None:
+        plugin = None
+        try:
+            plugin = self._core._plugins.get("capi")
+        except AttributeError:
+            pass
+        if plugin:
+            plugin.start_auth_flow()
+            self._capi_btn.set_sensitive(False)
+            self._capi_status_lbl.set_label("Waiting for browser authentication…")
+
+    def _on_capi_disconnect(self, *_) -> None:
+        plugin = None
+        try:
+            plugin = self._core._plugins.get("capi")
+        except AttributeError:
+            pass
+        if plugin:
+            plugin.disconnect()
+        self._capi_refresh_status()
 
     # ── Apply & Save ──────────────────────────────────────────────────────────
 

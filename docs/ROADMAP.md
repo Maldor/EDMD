@@ -1,6 +1,6 @@
 # EDMD Roadmap
 
-Last updated: 20260310a
+Last updated: 20260310b
 
 ---
 
@@ -12,6 +12,12 @@ Last updated: 20260310a
   — eliminates StoredShips / StoredModules staleness in the Assets block
 - Also: live market data, shipyard, outfitting, fleet carrier inventory
 - Deferred pending OAuth implementation — non-trivial auth flow
+
+**Note:** Faction reputation and pilot skill ranks do not require CAPI. Reputation
+is sourced from the journal `Reputation` event (major factions) and `FSDJump`/
+`Location` events (local factions). Ranks are sourced from the journal `Rank`
+event. CAPI `/profile` rank data is also consumed where available but is not the
+primary source.
 
 ---
 
@@ -108,7 +114,12 @@ Planned display:
 
 - `StoredShips` and `StoredModules` data is stale between shipyard / outfitting visits
   — will be resolved by CAPI `/profile` integration
+- Carrier finance and capacity field paths are hardened with multiple fallbacks but
+  the exact `/fleetcarrier` JSON structure has not been confirmed in production —
+  run with `--trace` after docking at a carrier if values are missing
 - GTK progressbar warning on close (`GtkGizmo min width -2`) — set aside intentionally
 - Block collapse state is not persisted across restarts — intentional for now
 - SLF shield state is not tracked — the game does not expose this via the journal
   or `Status.json`
+- Minor faction reputation reflects only the current system and is replaced on each
+  jump; it is absent between sessions

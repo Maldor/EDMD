@@ -216,14 +216,22 @@ class Emitter:
         if self._discord_update_pending and self._discord_up and not self.notify_test:
             self._discord_update_pending = False
             from core.state import GITHUB_REPO
-            releases_url = f"https://github.com/{GITHUB_REPO}/releases"
+            repo_url = f"https://github.com/{GITHUB_REPO}"
+            # _update_version is either "1.23" (release) or "+5 commits" (commits)
+            if self._update_version and self._update_version.startswith("+"):
+                content = (
+                    f":arrow_up: **{self._update_version} available on main**"
+                    f"  —  {repo_url}/commits/main"
+                )
+            else:
+                content = (
+                    f":arrow_up: **Update available: v{self._update_version}**"
+                    f"  —  {repo_url}/releases"
+                )
             try:
                 upd_hook = DiscordWebhook(
                     url=dc.get("WebhookURL", ""),
-                    content=(
-                        f":arrow_up: **Update available: v{self._update_version}**"
-                        f"  —  {releases_url}"
-                    ),
+                    content=content,
                     username="Elite Dangerous Monitor Daemon" if dc.get("Identity") else None,
                     avatar_url=AVATAR_URL if dc.get("Identity") else None,
                 )
