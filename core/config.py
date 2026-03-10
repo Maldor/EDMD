@@ -205,7 +205,7 @@ def load_setting(
 def pcfg(config: dict, config_profile: str | None, key: str, default=False):
     """Read a key from the active profile only, never from global config.
 
-    These keys are profile-gated by design (e.g. _adv_session_mgmt).
+    These keys are profile-gated by design — they are never read from global config.
     """
     if config_profile:
         v = _safe_section(config, config_profile).get(key)

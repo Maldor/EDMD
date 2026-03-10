@@ -2,7 +2,7 @@
 
 This guide explains how to run EDMD's graphical interface on a secondary machine
 (e.g. a laptop) while the game runs on your main machine. The game machine handles
-all monitoring, Discord notifications, and killswitch logic. The secondary machine
+all monitoring, Discord notifications, and session control logic. The secondary machine
 connects as a read-only GUI front-end.
 
 ---

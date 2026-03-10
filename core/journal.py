@@ -380,7 +380,7 @@ def handle_event(
         return
 
     # Legacy path: no plugin_dispatch provided.
-    # plugin_call is a no-op so KSW call sites degrade gracefully.
+    # plugin_call is a no-op in this path — plugin calls become no-ops.
     def plugin_call(_name, _method, *_a, **_kw):  # noqa: E306
         return None
 
@@ -588,17 +588,6 @@ def handle_event(
                     emoji="⛽", sigil="+  FUEL",
                     timestamp=logtime, loglevel=fuel_loglevel,
                 )
-                if cfg_mgr.pcfg("QuitOnLowFuel"):
-                    _fp = cfg_mgr.pcfg("QuitOnLowFuelPercent", 20)
-                    _fm = cfg_mgr.pcfg("QuitOnLowFuelMinutes", 30)
-                    _pt = fuel_pct <= _fp; _tt = False
-                    if (
-                        active_session.fuel_check_time and state.session_start_time
-                        and 'fuel_hour' in dir() and fuel_hour > 0
-                    ):
-                        _tt = (j["FuelMain"] / fuel_hour) * 60 <= _fm
-                    if _pt or _tt:
-                        plugin_call("ksw", "flush_session")
 
             # ── FIGHTER EVENTS ────────────────────────────────────────────
             case "FighterDestroyed" if state.prev_event != "StartJump":
@@ -614,7 +603,6 @@ def handle_event(
                     emoji="💀", sigil="!! SLF ",
                     timestamp=logtime, loglevel=notify["FighterLost"],
                 )
-                if cfg_mgr.pcfg("QuitOnSLFDead"): plugin_call("ksw", "flush_session")
 
             case "LaunchFighter" if not j["PlayerControlled"]:
                 state.slf_deployed = True
@@ -704,11 +692,6 @@ def handle_event(
                         emoji="⚠️", sigil="^  HULL",
                         timestamp=logtime, loglevel=notify["HullEvent"],
                     )
-                    if (
-                        cfg_mgr.pcfg("QuitOnLowHull")
-                        and hullhealth <= cfg_mgr.pcfg("QuitOnLowHullThreshold", 10)
-                    ):
-                        plugin_call("ksw", "flush_session")
 
             case "Died":
                 emitter.emit(
