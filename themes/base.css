@@ -657,6 +657,16 @@ popover arrow {
     letter-spacing: 0.04em;
 }
 
+/* Count badge in the wide column header — pad away from the separator line */
+.mat-col-count {
+    margin-end: 8px;
+}
+
+/* Row list inside each wide column — right margin clears the overlay scrollbar */
+.mat-tab-scroll > * {
+    margin-end: 10px;
+}
+
 /* ── Preferences window ──────────────────────────────────────────────────── */
 
 .prefs-window,

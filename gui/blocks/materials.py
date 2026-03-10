@@ -155,6 +155,7 @@ class MaterialsBlock(BlockWidget):
 
             count_lbl = Gtk.Label(label="0")
             count_lbl.add_css_class("data-key")
+            count_lbl.add_css_class("mat-col-count")
             hdr.append(count_lbl)
 
             col.append(hdr)
