@@ -8,7 +8,7 @@ GUI block: col=16, row=0, width=8, height=5 (default).
 import re
 from core.plugin_loader import BasePlugin
 from core.emit import Terminal
-from core.state import FIGHTER_LOADOUT_NAMES, FIGHTER_TYPE_NAMES
+from core.state import FIGHTER_LOADOUT_NAMES, FIGHTER_TYPE_NAMES, resolve_fighter_name
 
 
 class CrewSlfPlugin(BasePlugin):
@@ -93,6 +93,11 @@ class CrewSlfPlugin(BasePlugin):
                 state.slf_hull     = 100
                 state.slf_orders   = "Defend"
                 state.slf_loadout  = event.get("Loadout")
+                # Set type from this event — resolves to "F/A-26 Strike (Rogue F)" etc.
+                _ft = event.get("Type", "")
+                _lo = event.get("Loadout", "")
+                if _ft:
+                    state.slf_type = resolve_fighter_name(_ft, _lo)
                 if gq: gq.put(("slf_update", None))
                 core.emitter.emit(
                     msg_term="Fighter launched",
@@ -103,13 +108,7 @@ class CrewSlfPlugin(BasePlugin):
             case "RestockVehicle":
                 ft   = event.get("Type", "")
                 lo   = event.get("Loadout", "")
-                lkey = (ft, lo)
-                if lkey in FIGHTER_LOADOUT_NAMES:
-                    state.slf_type = FIGHTER_LOADOUT_NAMES[lkey]
-                elif ft in FIGHTER_TYPE_NAMES:
-                    state.slf_type = FIGHTER_TYPE_NAMES[ft]
-                elif ft:
-                    state.slf_type = ft.replace("_", " ").title()
+                state.slf_type = resolve_fighter_name(ft, lo)
                 state.slf_destroyed_count = 0
                 state.slf_docked          = True
                 state.slf_deployed        = False
