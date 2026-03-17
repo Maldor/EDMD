@@ -37,8 +37,9 @@ class CommanderBlock(BlockWidget):
         # ── Two-line header ───────────────────────────────────────────────────
         hdr_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
 
+        # Line 1: CMDR NAME — RANK (left)  |  SHIP TYPE (right)
         hdr_line1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._cmdr_header_lbl = Gtk.Label(label="Commander")
+        self._cmdr_header_lbl = Gtk.Label(label="COMMANDER")
         self._cmdr_header_lbl.set_xalign(0.0)
         self._cmdr_header_lbl.set_hexpand(True)
         hdr_line1.append(self._cmdr_header_lbl)
@@ -47,10 +48,19 @@ class CommanderBlock(BlockWidget):
         hdr_line1.append(self._cmdr_ship_type_hdr)
         hdr_outer.append(hdr_line1)
 
+        # Line 2: SQUADRON NAME [TAG] (left)  |  SHIP NAME | IDENT (right)
+        hdr_line2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._cmdr_squadron_lbl = Gtk.Label(label="")
+        self._cmdr_squadron_lbl.set_xalign(0.0)
+        self._cmdr_squadron_lbl.set_hexpand(True)
+        self._cmdr_squadron_lbl.set_visible(False)
+        hdr_line2.append(self._cmdr_squadron_lbl)
         self._cmdr_ship_ident_hdr = Gtk.Label(label="")
         self._cmdr_ship_ident_hdr.set_xalign(1.0)
         self._cmdr_ship_ident_hdr.set_visible(False)
-        hdr_outer.append(self._cmdr_ship_ident_hdr)
+        hdr_line2.append(self._cmdr_ship_ident_hdr)
+        self._hdr_line2 = hdr_line2
+        hdr_outer.append(hdr_line2)
 
         body = self._build_section(parent, title_widget=hdr_outer)
 
@@ -224,6 +234,25 @@ class CommanderBlock(BlockWidget):
 
             self._rank_rows[capi_key] = (row, v, bar, bar_wrap)
 
+        # Engineer ranks section (dynamic rows built in refresh)
+        eng_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        eng_sep.set_margin_top(6)
+        box.append(eng_sep)
+        self._eng_hdr = Gtk.Label(label="ENGINEERS")
+        self._eng_hdr.add_css_class("data-key")
+        self._eng_hdr.set_xalign(0.0)
+        self._eng_hdr.set_margin_top(4)
+        self._eng_hdr.set_margin_bottom(2)
+        self._eng_hdr.set_visible(False)
+        box.append(self._eng_hdr)
+        self._eng_none_lbl = Gtk.Label(label="No engineers unlocked yet")
+        self._eng_none_lbl.add_css_class("data-key")
+        self._eng_none_lbl.set_xalign(0.5)
+        self._eng_none_lbl.set_margin_top(4)
+        box.append(self._eng_none_lbl)
+        self._eng_rows: dict = {}   # name -> (row_box, val_lbl, bar, bar_wrap)
+        self._eng_box  = box
+
         return scroll
 
     # ── Rep tab ────────────────────────────────────────────────────────────────
@@ -323,13 +352,22 @@ class CommanderBlock(BlockWidget):
         s = self.state
 
         # ── Header ────────────────────────────────────────────────────────────
+        sq_rank = getattr(s, "pilot_squadron_rank", "")
+        sq_name = getattr(s, "pilot_squadron_name", "")
+        sq_tag  = getattr(s, "pilot_squadron_tag",  "")
+
         if s.pilot_name:
-            lbl = (f"CMDR {s.pilot_name}  [In Fighter]"
-                   if s.cmdr_in_slf else f"CMDR {s.pilot_name}")
+            # Line 1: full caps — "CMDR NAME — SQUADRON RANK"
+            if sq_rank:
+                lbl = f"CMDR {s.pilot_name}  —  {sq_rank.upper()}"
+            elif s.cmdr_in_slf:
+                lbl = f"CMDR {s.pilot_name}  [IN FIGHTER]"
+            else:
+                lbl = f"CMDR {s.pilot_name}"
             self._cmdr_header_lbl.set_label(lbl)
         else:
-            self._cmdr_header_lbl.set_label("Commander")
-        self._cmdr_ship_type_hdr.set_label(s.pilot_ship or "")
+            self._cmdr_header_lbl.set_label("COMMANDER")
+        self._cmdr_ship_type_hdr.set_label((s.pilot_ship or "").upper())
 
         parts = [p for p in [s.ship_name, s.ship_ident] if p]
         if parts:
@@ -337,6 +375,19 @@ class CommanderBlock(BlockWidget):
             self._cmdr_ship_ident_hdr.set_visible(True)
         else:
             self._cmdr_ship_ident_hdr.set_visible(False)
+
+        # Line 2 visibility: show if squadron or ship ident is present
+        if sq_name:
+            tag_str = f"  [{sq_tag.upper()}]" if sq_tag else ""
+            self._cmdr_squadron_lbl.set_label(f"{sq_name.upper()}{tag_str}")
+            self._cmdr_squadron_lbl.set_visible(True)
+        else:
+            self._cmdr_squadron_lbl.set_visible(False)
+        # Show line2 box if either child is visible
+        self._hdr_line2.set_visible(
+            self._cmdr_squadron_lbl.get_visible() or
+            self._cmdr_ship_ident_hdr.get_visible()
+        )
 
         # ── Info tab: Mode ────────────────────────────────────────────────────
         self._cmdr_mode.set_label(s.pilot_mode or "—")
@@ -462,8 +513,66 @@ class CommanderBlock(BlockWidget):
                     bar_wrap.set_visible(False)
 
         # ── Rep tab ───────────────────────────────────────────────────────────
-        # Major faction standing: Journal Reputation event (fired at login)
-        pilot_rep = getattr(s, "pilot_reputation", None)
+        # Engineer ranks (from CAPI capi_engineer_ranks)
+        # Journal EngineerProgress (pilot_engineer_ranks) is primary — fires at every
+        # login with full data. Fall back to CAPI if journal hasn't fired yet.
+        eng_data = getattr(s, "pilot_engineer_ranks", None) or \
+                   getattr(s, "capi_engineer_ranks", None) or []
+        unlocked = [e for e in eng_data if e.get("unlocked")]
+        self._eng_hdr.set_visible(bool(unlocked))
+        self._eng_none_lbl.set_visible(not bool(unlocked))
+        seen_eng: set = set()
+        for eng in sorted(unlocked, key=lambda e: (-(e.get("rank") or 0), e.get("name", ""))):
+            name = eng.get("name", "")
+            if not name:
+                continue
+            seen_eng.add(name)
+            rank    = eng.get("rank") or 0
+            prog    = eng.get("progress")
+            val_str = f"G{rank}" if rank else "Invited"
+            if prog is not None and rank < 5:
+                val_str += f" +{prog}%"
+            if name not in self._eng_rows:
+                erow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                erow.add_css_class("data-row")
+                ek = self.make_label(name, css_class="data-key")
+                ek.set_hexpand(False)
+                erow.append(ek)
+                evl = self.make_label("—", css_class="data-value")
+                evl.set_hexpand(True)
+                evl.set_xalign(1.0)
+                erow.append(evl)
+                ebar = Gtk.ProgressBar()
+                ebar.set_fraction(0.0)
+                ebar.add_css_class("pp-rank-bar")
+                ebar.set_show_text(False)
+                ebar.set_size_request(40, 3)
+                ebar.set_hexpand(True)
+                ebw = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+                ebw.add_css_class("pp-rank-bar-row")
+                ebw.append(ebar)
+                ebw.set_visible(False)
+                self._eng_box.append(erow)
+                self._eng_box.append(ebw)
+                self._eng_rows[name] = (erow, evl, ebar, ebw)
+            _, evl, ebar, ebw = self._eng_rows[name]
+            evl.set_label(val_str)
+            if prog is not None and rank < 5:
+                ebar.set_fraction(min(prog / 100.0, 1.0))
+                ebw.set_visible(True)
+            else:
+                ebw.set_visible(False)
+        for name, (erow, _evl, _eb, ebw) in self._eng_rows.items():
+            erow.set_visible(name in seen_eng)
+            if name not in seen_eng:
+                ebw.set_visible(False)
+
+    # Major faction standing: Journal Reputation event is primary;
+        # fall back to capi_reputation when journal not yet available.
+        pilot_rep = getattr(s, "pilot_reputation", None) or {}
+        if not pilot_rep:
+            _capi_rep = getattr(s, "capi_reputation", None) or {}
+            pilot_rep = {k.title(): v for k, v in _capi_rep.items()}
         has_rep   = bool(pilot_rep)
         self._no_rep_lbl.set_visible(not has_rep)
         self._major_hdr.set_visible(has_rep)
@@ -515,5 +624,9 @@ class CommanderBlock(BlockWidget):
             self._pp_rank_bar.set_visible(False)
         if hasattr(self, "_rank_rows"):
             for _row, _lbl, bar, bar_wrap in self._rank_rows.values():
+                bar.set_fraction(0.0)
+                bar_wrap.set_visible(False)
+        if hasattr(self, "_eng_rows"):
+            for _row, _lbl, bar, bar_wrap in self._eng_rows.values():
                 bar.set_fraction(0.0)
                 bar_wrap.set_visible(False)
