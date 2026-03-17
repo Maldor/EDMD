@@ -71,6 +71,7 @@ _MODULE_TYPES: dict[str, str] = {
     "multican":                     "Multi-cannon",
     "cannon":                       "Cannon",
     "railgun":                      "Rail Gun",
+    "railgun_burst":                "Burst Fire Rail Gun",
     "plasmaaccelerator":            "Plasma Accelerator",
     "mininglaser":                  "Mining Laser",
     "slugshot":                     "Fragment Cannon",
@@ -110,7 +111,60 @@ _MODULE_TYPES: dict[str, str] = {
     "colonisation":                 "Colonisation Suite",
     "stellarbodydiscoveryscanner":  "Discovery Scanner",
     "shipdatalinkscanner":          "Data Link Scanner",
+    # Limpet controllers — internal key uses "dronecontrol_" prefix
+    "dronecontrol_prospector":      "Prospect Limpet Controller",
+    "dronecontrol_collection":      "Collector Limpet Controller",
+    "dronecontrol_fueltransfer":    "Fuel Transfer Limpet Controller",
+    "dronecontrol_repair":          "Repair Limpet Controller",
+    "dronecontrol_recon":           "Recon Limpet Controller",
+    "dronecontrol_resourcesiphon":  "Resource Siphon Limpet Controller",
+    "dronecontrol_decontamination": "Decontamination Limpet Controller",
+    # Guardian tech
+    "guardianpowerplant":           "Guardian Power Plant",
+    "guardianpowerdistributor":     "Guardian Power Distributor",
+    "guardianfsdbooster":           "Guardian FSD Booster",
+    "guardianmodulereinforcementpackage": "Guardian Module Reinf.",
+    "guardianshieldreinforcement":  "Guardian Shield Reinf.",
+    "guardianhullreinforcement":    "Guardian Hull Reinf.",
+    # Meta-alloy
+    "metaalloyhullreinforcement":   "Meta-Alloy Hull Reinf.",
+    # Additional internals
+    "electronicscountermeasure":    "ECM",
+    "xenoscanner":                  "Xeno Scanner",
+    "pulsewavescanner":             "Pulse Wave Analyser",
+    "subsurfaceextractionmissile":  "Sub-surface Extraction Missile",
+    "mininglance":                  "Mining Lance",
+    # Hardpoint weapons — additional
+    "mkiiplasmashockautocannon":     "Plasma Shock Cannon Mk.II",
+    "plasmashockautocannon":         "Plasma Shock Cannon",
+    "flakmortar":                    "Remote Release Flak Launcher",
+    "railgun_fixed_medium_burst":    "Burst Fire Rail Gun",
+    "railgun_fixed_small_burst":     "Burst Fire Rail Gun",
+    "minelauncher":                  "Mine Launcher",
+    "minelauncher_davs":             "AX Mine Launcher",
+    "sentinelweaponcontroller":      "Guardian Sentinel Weapon",
+    "crimescanner":                  "Kill Warrant Scanner",
+    "antiunknownshutdown":           "Shutdown Field Neutraliser",
+    "causticchafflauncher":          "Caustic Sink Launcher",
+    "drunkmissilerack_advanced":     "Adv. Multi-Target Missiles",
+    "dumbfiremissilerack_advanced":  "Adv. Dumbfire Missiles",
+    "guardian_gausscannon":          "Guardian Gauss Cannon",
+    "guardian_plasmacarbine":        "Guardian Plasma Charger",
+    "guardian_shardcannon":          "Guardian Shard Cannon",
+    # Multi-limpet controllers
+    "multidronecontrol_universal":   "Universal Multi-Limpet Controller",
+    "multidronecontrol_mining":      "Mining Multi-Limpet Controller",
+    "multidronecontrol_operations":  "Operations Multi-Limpet Controller",
+    "multidronecontrol_xeno":        "Xeno Multi-Limpet Controller",
+    # Guardian optional internals
+    "guardian_fsdbooster":           "Guardian FSD Booster",
+    "guardian_powerdistributor":     "Guardian Power Distributor",
+    "guardian_powerplant":           "Guardian Power Plant",
+    "guardian_modulereinforcement":  "Guardian Module Reinf.",
+    # Misc
+    "colonisationmodule":            "Colonisation Module",
 }
+
 
 _MOUNT_MAP = {
     "fixed":    "Fixed",
@@ -140,6 +194,29 @@ def normalise_module_name(internal: str) -> str:
     if not internal:
         return "—"
     raw = internal.lower().strip()
+    _is_hardpoint = raw.startswith("hpt_")
+
+    # ── Armour detection ─────────────────────────────────────────────────
+    # Internal: {shiptype}_armour_grade{n}  (no int_ prefix)
+    # grade1=Lightweight, grade2=Reinforced, grade3=Military, grade4=Mirrored, grade5=Reactive
+    _ARMOUR_GRADES = {
+        "grade1": "Lightweight Alloy",
+        "grade2": "Reinforced Alloy",
+        "grade3": "Military Grade Composite",
+        "grade4": "Mirrored Surface Composite",
+        "grade5": "Reactive Surface Composite",
+    }
+    import re as _armre
+    _am = _armre.match(r'^.+_armour_(grade\d)$', raw)
+    if _am:
+        return _ARMOUR_GRADES.get(_am.group(1), "Armour")
+
+    # Strip $..._name; localisation wrapper if present
+    # (StoredModules journal event uses "$int_engine_size7_class5_name;" format)
+    import re as _re
+    _wrap = _re.match(r'^\$(.+)_name;$', raw)
+    if _wrap:
+        raw = _wrap.group(1)
 
     # Strip prefix (int_ / hpt_ / etc.)
     for prefix in ("int_", "hpt_", "ext_"):
@@ -198,14 +275,61 @@ def normalise_module_name(internal: str) -> str:
         type_name = " ".join(p.title() for p in parts)
 
     # Assemble
-    prefix_part = f"{size_str}{class_str}" if (size_str or class_str) else ""
+    # Hardpoints: in-game never shows a size number prefix (size is conveyed
+    # by the slot name). Utility mounts similarly show no size.
+    # Core/Optional internals: show SIZE+CLASS prefix (e.g. "8A", "5D").
     suffix_part = f" ({mount})" if mount else ""
+    if _is_hardpoint:
+        # No size prefix for hardpoints/utility — just name and mount type
+        return f"{type_name}{suffix_part}"
+    prefix_part = f"{size_str}{class_str}" if (size_str or class_str) else ""
     if prefix_part:
         return f"{prefix_part} {type_name}{suffix_part}"
     return f"{type_name}{suffix_part}"
 
 
 # ── Plugin ────────────────────────────────────────────────────────────────────
+
+def _build_loadout_from_capi_modules(modules_dict: dict) -> list:
+    """Build a display-ready loadout list from a CAPI /profile ship modules dict.
+
+    CAPI structure per slot:
+      {"module": {name, locName, health, on, priority, value},
+       "engineer": {recipeName, recipeLocName, recipeLevel},
+       "WorkInProgress_modifications": {stat: {value, LessIsGood, locName}},
+       "specialModifications": {effect_key: effect_key}}
+    """
+    result = []
+    for slot, sm in (modules_dict or {}).items():
+        mod  = sm.get("module") or sm  # handle both nested and flat
+        mi   = mod.get("name", "")
+        if not mi:
+            continue
+        disp    = mod.get("locName") or normalise_module_name(mi)
+        eng_raw = sm.get("engineer") or {}
+        exp_raw = sm.get("specialModifications") or {}
+        eng = {}
+        if eng_raw.get("recipeName"):
+            eng = {
+                "BlueprintName":    eng_raw["recipeName"],
+                "Level":            int(eng_raw.get("recipeLevel", 0)),
+                "Quality":          1.0,
+                "BlueprintLocName": eng_raw.get("recipeLocName", ""),
+            }
+            if exp_raw:
+                eng["ExperimentalEffect"] = next(iter(exp_raw))
+        result.append({
+            "slot":          slot,
+            "name_internal": mi,
+            "name_display":  disp,
+            "on":            bool(mod.get("on", True)),
+            "priority":      int(mod.get("priority", 0)),
+            "value":         int(mod.get("value", 0)),
+            "health":        int(mod.get("health", 1000000)),
+            "engineering":   eng,
+        })
+    return result
+
 
 class AssetsPlugin(BasePlugin):
     PLUGIN_NAME        = "assets"
@@ -219,6 +343,7 @@ class AssetsPlugin(BasePlugin):
         "Commander",
         # Ships
         "Loadout",
+        "ModulesInfo",
         "StoredShips",
         # Modules
         "StoredModules",
@@ -226,6 +351,7 @@ class AssetsPlugin(BasePlugin):
         "CarrierStats",
         "CarrierJump",
         "CarrierFinance",
+        "FCMaterials",
         # Session boundaries
         "LoadGame",
     ]
@@ -240,7 +366,14 @@ class AssetsPlugin(BasePlugin):
         if not hasattr(s, "assets_stored_ships"):   s.assets_stored_ships   = []
         if not hasattr(s, "assets_stored_modules"): s.assets_stored_modules = []
         if not hasattr(s, "assets_carrier"):        s.assets_carrier        = None
+        if not hasattr(s, "assets_fc_materials"):   s.assets_fc_materials   = None
+        # Bootstrap carrier materials from FCMaterials.json if present
+        _bootstrap_fc_materials(s, core.journal_dir)
+        # Bootstrap fitted module summary from ModulesInfo.json
+        _bootstrap_modules_info(s, core.journal_dir)
         self._shiptype_cache: dict[str, str] = {}
+        # Per-ShipID loadout cache — persisted to storage, same approach as Inara
+        self._ship_loadout_cache: dict = {}
 
         # ── Step 1: build ShipType→localised name cache from Shipyard.json ────
         # Must happen before any parsing in the background scan thread.
@@ -248,6 +381,11 @@ class AssetsPlugin(BasePlugin):
 
         # ── Step 2: restore last-known fleet from plugin storage ──────────────
         self._restore_from_storage()
+
+        # ── Step 2b: load persisted CAPI profile (synchronous, no delay) ─────
+        # CAPI writes capi_profile.json after every poll. Reading it here gives
+        # immediate complete fleet data before the scan thread or CAPI re-poll.
+        self._load_capi_profile_from_disk()
 
         # ── Step 3: scan recent journals for StoredShips/StoredModules ────────
         # Also scans Shipyard journal events to extend the name cache with
@@ -312,50 +450,212 @@ class AssetsPlugin(BasePlugin):
         # 3. Fallback: clean up underscores + title-case
         return ship_type.replace("_", " ").strip().title()
 
+    def _load_capi_profile_from_disk(self) -> None:
+        """Read persisted CAPI data from disk and populate fleet + carrier state.
+
+        CAPI writes capi_profile.json and capi_fleetcarrier.json after every poll.
+        Reading them here gives the complete fleet with loadouts on startup with
+        zero delay — no journal scanning, no 10-second CAPI re-poll wait.
+        Falls back gracefully when files don't exist (CAPI disabled / first run).
+        """
+        # ── Profile → current ship + stored fleet ─────────────────────────
+        try:
+            profile_data = self.storage.read_sibling_json("capi", "capi_profile.json")
+            if profile_data:
+                state = self.core.state
+                ship_raw  = profile_data.get("ship")  or {}
+                ships_raw = profile_data.get("ships") or {}
+
+                if ship_raw:
+                    ship_type   = ship_raw.get("name", "")
+                    ship_type_l = (ship_raw.get("nameLocalized")
+                                   or normalise_ship_name(ship_type)
+                                   or ship_type)
+                    health_obj  = ship_raw.get("health", {})
+                    value_obj   = ship_raw.get("value",  {})
+                    hf = float(health_obj.get("hull", 1000000))
+                    hull_pct = round(hf / 10000) if hf > 1.0 else round(hf * 100)
+                    state.assets_current_ship = {
+                        "_key":         "current",
+                        "current":      True,
+                        "ship_id":      ship_raw.get("id"),
+                        "type":         ship_type,
+                        "type_display": ship_type_l,
+                        "name":         ship_raw.get("shipName",  ""),
+                        "ident":        ship_raw.get("shipIdent", ""),
+                        "system":       (ship_raw.get("starsystem") or {}).get("name", "—"),
+                        "value":        value_obj.get("hull", 0),
+                        "hull":         hull_pct,
+                        "rebuy":        value_obj.get("free", 0),
+                        "loadout":      _build_loadout_from_capi_modules(
+                                            ship_raw.get("modules") or {}),
+                        "capi":         True,
+                    }
+
+                current_id = (state.assets_current_ship or {}).get("ship_id")
+                stored = []
+                for sid_str, sv in ships_raw.items():
+                    try:    sid = int(sid_str)
+                    except: sid = sid_str
+                    if sid == current_id:
+                        continue
+                    val  = sv.get("value") or {}
+                    svh  = sv.get("health") or {}
+                    svhf = float(svh.get("hull", 1000000))
+                    loc  = sv.get("starsystem") or {}
+                    stored.append({
+                        "_key":         f"ship_{sid}",
+                        "ship_id":      sid,
+                        "current":      False,
+                        "type":         sv.get("name", ""),
+                        "type_display": (sv.get("nameLocalized")
+                                             or normalise_ship_name(sv.get("name", ""))
+                                             or sv.get("name", "")),
+                        "name":         sv.get("shipName",  ""),
+                        "ident":        sv.get("shipIdent", ""),
+                        "system":       loc.get("name", "—") if isinstance(loc, dict) else "—",
+                        "value":        val.get("hull", 0),
+                        "rebuy":        val.get("free", 0),
+                        "hull":         round(svhf / 10000) if svhf > 1.0 else round(svhf * 100),
+                        "hot":          False,
+                        "loadout":      _build_loadout_from_capi_modules(
+                                            sv.get("modules") or {}),
+                        "capi":         True,
+                    })
+                if stored:
+                    state.assets_stored_ships = stored
+
+                # Commander balance + squadron from CAPI profile
+                cmdr = profile_data.get("commander") or {}
+                bal = cmdr.get("credits")
+                if bal is not None:
+                    state.assets_balance = float(bal)
+                sq = profile_data.get("squadron") or {}
+                if sq:
+                    state.pilot_squadron_name = sq.get("name", "")
+                    state.pilot_squadron_tag  = sq.get("tag", "")
+                    state.pilot_squadron_rank = sq.get("rank", "")
+                else:
+                    state.pilot_squadron_name = ""
+                    state.pilot_squadron_tag  = ""
+                    state.pilot_squadron_rank = ""
+        except Exception:
+            pass
+
+        # ── Fleet carrier ─────────────────────────────────────────────────
+        try:
+            fc_data = self.storage.read_sibling_json("capi", "capi_fleetcarrier.json")
+            if fc_data:
+                from builtins.assets.plugin import AssetsPlugin as _AP
+                # Reuse the existing carrier parser
+                carrier = self._parse_carrier_stats_from_capi(fc_data)
+                if carrier:
+                    self.core.state.assets_carrier = carrier
+        except Exception:
+            pass
+
+    def _parse_carrier_stats_from_capi(self, fc: dict) -> dict | None:
+        """Parse capi_fleetcarrier.json into the assets_carrier state dict."""
+        try:
+            name_obj  = fc.get("name") or {}
+            callsign  = name_obj.get("callsign", "")
+            vanity_hex = name_obj.get("filteredVanityName", "")
+            # vanityName is hex-encoded ASCII
+            try:
+                vanity = bytes.fromhex(vanity_hex).decode("ascii").strip()
+            except Exception:
+                vanity = ""
+            cap   = fc.get("capacity") or {}
+            fin   = fc.get("finance")  or {}
+            mkt   = fc.get("market")   or {}
+            svcs  = mkt.get("services") or {}
+            space = cap
+            services: dict = {}
+            for svc, status in svcs.items():
+                services[svc] = status
+            return {
+                "callsign":     callsign,
+                "name":         vanity,
+                "system":       fc.get("currentStarSystem", "—"),
+                "state":        fc.get("state", ""),
+                "theme":        "",
+                "balance":      int(fin.get("bankBalance", 0)),
+                "fuel":         int(fc.get("fuel", 0)),
+                "debt":         0,
+                "cargo_used":   int(cap.get("cargoNotForSale", 0)),
+                "ship_packs":   int(cap.get("shipPacks", 0)),
+                "module_packs": int(cap.get("modulePacks", 0)),
+                "micro_total":  int(cap.get("microresourceCapacityTotal", 0)),
+                "micro_free":   int(cap.get("microresourceCapacityFree", 0)),
+                "micro_used":   int(cap.get("microresourceCapacityUsed", 0)),
+                "services":     services,
+            }
+        except Exception:
+            return None
+
     def _restore_from_storage(self) -> None:
-        """Load last-persisted ship and module lists from plugin storage."""
+        """Load last-persisted module list from plugin storage.
+
+        Ships are always rebuilt from journal scan on startup — we do not
+        restore the ship list from storage because previous sessions may have
+        persisted CAPI-sourced data that includes non-owned ships.
+        StoredModules is safe to restore since it only changes when the player
+        opens outfitting.
+        """
         try:
             saved = self.storage.read_json("data.json") or {}
             s = self.core.state
-            ships   = saved.get("stored_ships")
             modules = saved.get("stored_modules")
-            if isinstance(ships, list):
-                s.assets_stored_ships   = ships
             if isinstance(modules, list):
                 s.assets_stored_modules = modules
+            lc = saved.get("ship_loadout_cache")
+            if isinstance(lc, dict):
+                self._ship_loadout_cache = {
+                    int(k): v for k, v in lc.items()
+                    if str(k).lstrip("-").isdigit()
+                }
         except Exception:
             pass
 
     def _scan_and_refresh(self) -> None:
-        """Scan recent journals to rebuild fleet state on startup.
+        """Rebuild fleet state on startup.
 
-        Strategy:
-          1. Collect every unique hull from Loadout events (newest first).
-             The most recent Loadout = current ship.  All other unique ShipIDs
-             are ships the player owns — this is reliable because a Loadout event
-             fires every time you board a ship.
-          2. Merge StoredShips data on top for location and hot-goods status.
-             StoredShips supplements Loadout; it is NOT the primary fleet source.
-             (StoredShips always omits whichever ship was active at the time it
-             was written, making it unreliable as a sole source.)
-          3. Scan for StoredModules, CarrierStats while we're here.
+        Roster authority
+        ----------------
+        CAPI /profile ships{} is the authoritative owned-ship list — Frontier
+        maintains it server-side and it only includes ships you actually own.
+        When CAPI has polled, we build the roster exclusively from those ShipIDs.
+
+        When CAPI has NOT polled (disabled or not yet authenticated), we fall
+        back to journal data: the most recent StoredShips event for stored ships
+        plus the most recent Loadout for the current ship.  We do NOT scan
+        multiple journal files for Loadout events, because that picks up ships
+        you've since sold.
+
+        Additional journal passes collect StoredModules and CarrierStats.
         """
         try:
             journal_dir = Path(self.core.journal_dir)
             journals    = sorted(journal_dir.glob("Journal*.log"), reverse=True)
+            state       = self.core.state
 
-            # --- Pass 1: build fleet from Loadout events ----------------------
-            # Key: ShipID.  Value: ship dict built from the most recent Loadout
-            # for that hull (first seen when iterating newest-first).
-            loadout_by_id: dict[int, dict] = {}
-            current_ship: dict | None      = None
+            # ── Phase 0a: load persisted CAPI fleet ─────────────────────
+            # CAPI writes capi/fleet.json after every profile poll.
+            # Loading it here gives immediate fleet + full loadouts on startup.
+            try:
+                # If _load_capi_profile_from_disk already ran, fleet is populated.
+                # Skip — nothing to do here.
+                pass
+            except Exception:
+                pass
 
+            # ── Phase 0b: build Shipyard/Shipyard-event name cache ───────
             for jpath in journals[:SCAN_JOURNALS]:
                 try:
                     lines = jpath.read_text(encoding="utf-8").splitlines()
                 except OSError:
                     continue
-                for line in reversed(lines):
+                for line in lines:
                     try:
                         ev = json.loads(line)
                     except ValueError:
@@ -366,44 +666,260 @@ class AssetsPlugin(BasePlugin):
                             loc = entry.get("ShipType_Localised", "")
                             if st and loc:
                                 self._shiptype_cache[st] = loc
-                    elif ev.get("event") == "Loadout":
+
+            # ── Phase 1: determine authoritative ShipID set ───────────────────
+            # CAPI /profile ships{} is the definitive owned-fleet source.
+            # Fall back to the most recent StoredShips journal event when CAPI
+            # hasn't polled (disabled / unauthenticated).
+            # capi_raw is empty at startup (CAPI polls 10s later).
+            # Read capi_profile.json directly so we have the validated
+            # roster immediately — same file _load_capi_profile_from_disk used.
+            capi_raw = getattr(state, "capi_raw", {})
+            capi_ships_raw = (capi_raw.get("profile") or {}).get("ships") or {}
+            if not capi_ships_raw:
+                try:
+                    _pdata = self.storage.read_sibling_json("capi", "capi_profile.json")
+                    capi_ships_raw = (_pdata.get("ships") or {})
+                except Exception:
+                    pass
+            capi_owned_ids: set = set()
+            if capi_ships_raw:
+                for sid_str in capi_ships_raw:
+                    try:    capi_owned_ids.add(int(sid_str))
+                    except: capi_owned_ids.add(sid_str)
+
+            # ── Phase 2: most recent Loadout → current ship identity ──────────
+            current_ship: dict | None = None
+            current_sid = None
+            for jpath in journals[:SCAN_JOURNALS]:
+                if current_ship is not None:
+                    break
+                try:
+                    lines = jpath.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for line in reversed(lines):
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    if ev.get("event") == "Loadout":
                         sid = ev.get("ShipID")
-                        if sid is None or sid in loadout_by_id:
-                            continue
                         ship_type   = ev.get("Ship", "")
                         ship_type_l = (ev.get("Ship_Localised")
                                        or self._localised_ship_name(ship_type))
                         if ship_type_l and ship_type:
                             self._shiptype_cache[ship_type.lower()] = ship_type_l
-                        rec = {
-                            "_key":         f"ship_{sid}",
+                        current_sid = sid
+                        # Parse loadout from this event for immediate use
+                        _p2_lo = []
+                        for _m in (ev.get("Modules") or []):
+                            _sl = _m.get("Slot", ""); _it = _m.get("Item", "")
+                            if not _sl or not _it: continue
+                            _er = _m.get("Engineering") or {}
+                            _eng = {}
+                            if _er.get("BlueprintName"):
+                                _eng = {"BlueprintName": _er["BlueprintName"],
+                                        "Level": int(_er.get("Level",0)),
+                                        "Quality": float(_er.get("Quality",0)),
+                                        "ExperimentalEffect": _er.get("ExperimentalEffect",""),
+                                        "Modifiers": _er.get("Modifiers") or []}
+                            _p2_lo.append({"slot": _sl, "name_internal": _it,
+                                            "name_display": normalise_module_name(_it),
+                                            "on": bool(_m.get("On",True)),
+                                            "priority": int(_m.get("Priority",0)),
+                                            "value": int(_m.get("Value",0)),
+                                            "engineering": _eng})
+                        current_ship = {
+                            "_key":         "current",
                             "ship_id":      sid,
-                            "current":      False,
+                            "current":      True,
                             "type":         ship_type,
                             "type_display": ship_type_l,
                             "name":         ev.get("ShipName", ""),
                             "ident":        ev.get("ShipIdent", ""),
-                            "system":       "—",
+                            "system":       getattr(state, "pilot_system", None) or "—",
                             "value":        ev.get("HullValue", 0),
+                            "rebuy":        ev.get("Rebuy", 0),
+                            "hull":         100,
                             "hot":          False,
+                            "loadout":      _p2_lo,
                         }
-                        loadout_by_id[sid] = rec
-                        if current_ship is None:
-                            # Most recent Loadout = what the player is flying now
-                            current_ship = rec
+                        break
 
-            # Mark and separate current ship
             if current_ship is not None:
-                current_ship["current"] = True
-                current_ship["_key"]    = "current"
-                self.core.state.assets_current_ship = current_ship
+                state.assets_current_ship = current_ship
 
-            # --- Pass 2: merge StoredShips for location + hot status ----------
-            # Also picks up any hull not seen in Loadout events within the window.
-            found_modules = False
-            found_carrier = False
+            # ── Phase 2b: populate loadout cache from journal history ─────────
+            # Scan all Loadout events (newest-first, one per ShipID) and cache
+            # the fitted modules. Skips ships already in cache.
+            # This is the same data Inara accumulates over time.
+            # Scan ALL journals (uncapped) — ships not boarded recently need
+            # their Loadout event found wherever it appears in history.
+            # Ships already in the persistent cache are skipped immediately.
+            # Only look for loadouts for ships we know we currently own.
+            # capi_owned_ids is the validated roster from Frontier's servers.
+            # If CAPI is unavailable, scan for any ShipID (fallback behaviour).
+            _target_sids = (capi_owned_ids | ({int(current_sid)} if current_sid else set()))\
+                           if capi_owned_ids else None
+            # seen_sids: already have loadout for these — skip
+            seen_sids: set = set(self._ship_loadout_cache.keys())
+            for jpath in journals:
+                try:
+                    lines = jpath.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for line in reversed(lines):
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    if ev.get("event") != "Loadout":
+                        continue
+                    ev_sid = ev.get("ShipID")
+                    if ev_sid is None:
+                        continue
+                    ev_sid_i = int(ev_sid)
+                    if ev_sid_i in seen_sids:
+                        continue  # already have loadout for this ship
+                    if _target_sids is not None and ev_sid_i not in _target_sids:
+                        continue  # not in our validated roster — skip
+                    seen_sids.add(ev_sid_i)
+                    _mods = ev.get("Modules") or []
+                    _lo = []
+                    for _m in _mods:
+                        _slot = _m.get("Slot", "")
+                        _item = _m.get("Item", "")
+                        if not _slot or not _item:
+                            continue
+                        _er = _m.get("Engineering") or {}
+                        _eng = {}
+                        if _er.get("BlueprintName"):
+                            _eng = {
+                                "BlueprintName":      _er["BlueprintName"],
+                                "Level":              int(_er.get("Level", 0)),
+                                "Quality":            float(_er.get("Quality", 0)),
+                                "ExperimentalEffect": _er.get("ExperimentalEffect", ""),
+                                "Modifiers":          _er.get("Modifiers") or [],
+                            }
+                        _lo.append({
+                            "slot":          _slot,
+                            "name_internal": _item,
+                            "name_display":  normalise_module_name(_item),
+                            "on":            bool(_m.get("On", True)),
+                            "priority":      int(_m.get("Priority", 0)),
+                            "value":         int(_m.get("Value", 0)),
+                            "engineering":   _eng,
+                        })
+                    if _lo:
+                        self._ship_loadout_cache[ev_sid_i] = _lo
+            # Prune cache of sold/disposed ships (CAPI is authoritative roster)
+            if capi_owned_ids:
+                # Add current ship to the valid set
+                valid_ids = capi_owned_ids | ({int(current_sid)} if current_sid else set())
+                orphans = [k for k in self._ship_loadout_cache if k not in valid_ids]
+                for k in orphans:
+                    del self._ship_loadout_cache[k]
+            # Persist any newly-discovered loadouts (and pruning)
+            self._save_to_storage()
 
+            # ── Phase 3: build stored fleet ───────────────────────────────────
+            # Source A: CAPI ships{} — authoritative set, enriched by journal.
+            # Source B (fallback): most recent StoredShips journal event.
+            loadout_by_id: dict = {}
+
+            if capi_owned_ids:
+                # Build complete ships from CAPI — includes fitted loadout.
+                for sid_str, sv in capi_ships_raw.items():
+                    try:    sid = int(sid_str)
+                    except: sid = sid_str
+                    if sid == current_sid:
+                        continue
+                    ship_type = sv.get("name", "")
+                    disp = sv.get("nameLocalized") or self._localised_ship_name(ship_type)
+                    loc  = sv.get("starsystem") or {}
+                    sys_n = loc.get("name", "—") if isinstance(loc, dict) else "—"
+                    val  = sv.get("value") or {}
+                    sv_h = sv.get("health") or {}
+                    sv_hr = float(sv_h.get("hull", 1000000))
+                    hull_pct = round(sv_hr / 10000) if sv_hr > 1.0 else round(sv_hr * 100)
+                    sv_loadout = []
+                    for sl, sm in (sv.get("modules") or {}).items():
+                        mi = sm.get("name", "")
+                        disp_m = sm.get("nameLocalized") or normalise_module_name(mi)
+                        eng_raw = sm.get("engineering") or {}
+                        eng = {}
+                        if eng_raw.get("BlueprintName"):
+                            eng = {
+                                "BlueprintName": eng_raw["BlueprintName"],
+                                "Level":         int(eng_raw.get("Level", 0)),
+                                "ExperimentalEffect": eng_raw.get("ExperimentalEffect", ""),
+                                "Modifiers":     eng_raw.get("Modifiers") or [],
+                            }
+                        sv_loadout.append({
+                            "slot": sl, "name_internal": mi, "name_display": disp_m,
+                            "on": bool(sm.get("on", True)),
+                            "priority": int(sm.get("priority", 0)),
+                            "value": int(sm.get("value", 0)),
+                            "engineering": eng,
+                        })
+                    loadout_by_id[sid] = {
+                        "_key":         f"ship_{sid}",
+                        "ship_id":      sid,
+                        "current":      False,
+                        "type":         ship_type,
+                        "type_display": disp,
+                        "name":         sv.get("shipName",  ""),
+                        "ident":        sv.get("shipIdent", ""),
+                        "system":       sys_n,
+                        "value":        val.get("hull", 0),
+                        "rebuy":        val.get("free", 0),
+                        "hull":         hull_pct,
+                        "hot":          False,
+                        "loadout":      sv_loadout,
+                    }
+            else:
+                # Fallback: most recent StoredShips event only
+                for jpath in journals[:SCAN_JOURNALS]:
+                    if loadout_by_id:
+                        break
+                    try:
+                        lines = jpath.read_text(encoding="utf-8").splitlines()
+                    except OSError:
+                        continue
+                    for line in reversed(lines):
+                        try:
+                            ev = json.loads(line)
+                        except ValueError:
+                            continue
+                        if ev.get("event") == "StoredShips":
+                            for section in ("ShipsHere", "ShipsRemote"):
+                                for s in ev.get(section, []):
+                                    sid = s.get("ShipID")
+                                    if sid is None or sid == current_sid:
+                                        continue
+                                    ship_type = s.get("ShipType", "")
+                                    disp = (s.get("ShipType_Localised")
+                                            or self._localised_ship_name(ship_type))
+                                    loadout_by_id[sid] = {
+                                        "_key":         f"ship_{sid}",
+                                        "ship_id":      sid,
+                                        "current":      False,
+                                        "type":         ship_type,
+                                        "type_display": disp,
+                                        "name":         s.get("Name", ""),
+                                        "ident":        s.get("Ident", ""),
+                                        "system":       s.get("StarSystem", "—"),
+                                        "value":        s.get("Value", 0),
+                                        "hot":          s.get("Hot", False),
+                                        "loadout":      self._ship_loadout_cache.get(int(sid) if isinstance(sid, int) else sid, []),
+                                    }
+                            break   # stop after first StoredShips event
+
+            # ── Phase 4: enrich stored ships from journal StoredShips ─────────
+            # (Adds location/hot when CAPI was the roster source)
             for jpath in journals[:SCAN_JOURNALS]:
+                found_stored = False
                 try:
                     lines = jpath.read_text(encoding="utf-8").splitlines()
                 except OSError:
@@ -418,43 +934,74 @@ class AssetsPlugin(BasePlugin):
                         for section in ("ShipsHere", "ShipsRemote"):
                             for s in ev.get(section, []):
                                 sid = s.get("ShipID")
-                                if sid is None:
-                                    continue
                                 if sid in loadout_by_id:
-                                    # Fill location if we don't have one yet
                                     if loadout_by_id[sid]["system"] == "—":
                                         loadout_by_id[sid]["system"] = s.get("StarSystem", "—")
                                     loadout_by_id[sid]["hot"] = s.get("Hot", False)
-                                else:
-                                    # Hull not in Loadout window — add from StoredShips
-                                    ship_type = s.get("ShipType", "")
-                                    disp = (s.get("ShipType_Localised")
-                                            or self._localised_ship_name(ship_type))
-                                    loadout_by_id[sid] = {
-                                        "_key":         f"ship_{sid}",
-                                        "ship_id":      sid,
-                                        "current":      False,
-                                        "type":         ship_type,
-                                        "type_display": disp,
-                                        "name":         s.get("Name", ""),
-                                        "ident":        "",
-                                        "system":       s.get("StarSystem", "—"),
-                                        "value":        s.get("Value", 0),
-                                        "hot":          s.get("Hot", False),
-                                    }
-                    elif not found_modules and name == "StoredModules":
-                        self.core.state.assets_stored_modules = self._parse_stored_modules(ev)
+                                    if not loadout_by_id[sid].get("ident"):
+                                        loadout_by_id[sid]["ident"] = s.get("Ident", "")
+                                    # Apply cached loadout if not already present
+                                    if not loadout_by_id[sid].get("loadout"):
+                                        _cached = self._ship_loadout_cache.get(
+                                            int(sid) if isinstance(sid, int) else sid, [])
+                                        if _cached:
+                                            loadout_by_id[sid]["loadout"] = _cached
+                        found_stored = True
+                        break
+                if found_stored:
+                    break
+
+            # ── Phase 5: StoredModules + CarrierStats ─────────────────────────
+            # StoredModules only fires when the player opens outfitting —
+            # this could be in any journal, not just recent ones.
+            found_modules = False
+            found_carrier = False
+            for jpath in journals:  # scan all — StoredModules may be old
+                if found_modules and found_carrier:
+                    break
+                try:
+                    lines = jpath.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for line in reversed(lines):
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    name = ev.get("event")
+                    if not found_modules and name == "StoredModules":
+                        state.assets_stored_modules = self._parse_stored_modules(ev)
                         found_modules = True
                     elif not found_carrier and name == "CarrierStats":
-                        self.core.state.assets_carrier = self._parse_carrier_stats(ev)
+                        state.assets_carrier = self._parse_carrier_stats(ev)
                         found_carrier = True
 
-            # Commit the complete fleet to state.
-            # Do NOT strip the current ship here — state holds all hulls.
-            # The block's refresh() filters out the current ship at render
-            # time, so it is displayed exactly once (via assets_current_ship).
-            self.core.state.assets_stored_ships = list(loadout_by_id.values())
-
+            # Commit: prefer the CAPI-loaded roster (set by _load_capi_profile_from_disk).
+            # If it exists, apply loadout cache + journal location/hot to those ships.
+            # Only replace roster entirely if it is still empty.
+            existing = state.assets_stored_ships
+            if existing:
+                # Patch existing CAPI-sourced ships with loadout + journal data
+                for ship in existing:
+                    sid = ship.get("ship_id")
+                    if sid is None:
+                        continue
+                    sid_i = int(sid) if isinstance(sid, int) else sid
+                    # Apply loadout from cache if ship has none
+                    if not ship.get("loadout"):
+                        ship["loadout"] = self._ship_loadout_cache.get(sid_i, [])
+                    # Apply location/hot from journal scan if available
+                    journal_ship = loadout_by_id.get(sid_i)
+                    if journal_ship:
+                        if ship.get("system", "—") == "—" and journal_ship.get("system", "—") != "—":
+                            ship["system"] = journal_ship["system"]
+                        if journal_ship.get("hot"):
+                            ship["hot"] = True
+                        if not ship.get("ident") and journal_ship.get("ident"):
+                            ship["ident"] = journal_ship["ident"]
+            else:
+                # No CAPI data — use journal-sourced roster
+                state.assets_stored_ships = list(loadout_by_id.values())
             self._save_to_storage()
         except Exception:
             pass
@@ -491,18 +1038,40 @@ class AssetsPlugin(BasePlugin):
         mods = []
         for i, m in enumerate(event.get("Items", [])):
             internal = m.get("Name", "")
-            disp = (m.get("Name_Localised") or normalise_module_name(internal))
+            # normalise_module_name produces "8A Shield Generator" (with size/class).
+            # Name_Localised only gives "Shield Generator" (no size/class).
+            # Prefer the normalised name; fall back to localised if normaliser
+            # produces a raw title-case string (unrecognised module type).
+            _norm = normalise_module_name(internal)
+            _loc  = m.get("Name_Localised", "")
+            # If normaliser produced a recognised name (contains digit or known word),
+            # use it. Otherwise fall back to localised name.
+            import re as _re2
+            _has_class = bool(_re2.match(r"^\d+[A-E] ", _norm))
+            disp = _norm if _has_class else (_loc or _norm)
             system = m.get("StarSystem", "—")
             key    = f"{i}_{internal}_{system}"
+            # StoredModules journal uses flat EngineerModifications/Level/Quality fields
+            # (NOT a nested "Engineering" dict like Loadout uses)
+            eng = {}
+            bp = m.get("EngineerModifications", "")
+            if bp:
+                eng["BlueprintName"] = bp
+                lv = m.get("Level")
+                if lv is not None: eng["Level"] = int(lv)
+                qu = m.get("Quality")
+                if qu is not None: eng["Quality"] = round(float(qu), 2)
             mods.append({
                 "_key":         key,
                 "name_internal":internal,
                 "name_display": disp,
-                "slot":         m.get("Slot", ""),
+                "slot":         m.get("Slot", "") or internal,
+                "storage_slot": m.get("StorageSlot", 0),
                 "system":       system,
                 "mass":         m.get("Mass", 0.0),
-                "value":        m.get("Value", 0),
+                "value":        m.get("BuyPrice", m.get("Value", 0)),
                 "hot":          m.get("Hot", False),
+                "engineering":  eng,
             })
         return mods
 
@@ -560,12 +1129,12 @@ class AssetsPlugin(BasePlugin):
         }
 
     def _save_to_storage(self) -> None:
-        """Persist current ship and module lists to plugin storage."""
+        """Persist module list and per-ship loadout cache to plugin storage."""
         try:
             s = self.core.state
             self.storage.write_json({
-                "stored_ships":   getattr(s, "assets_stored_ships",   []),
-                "stored_modules": getattr(s, "assets_stored_modules", []),
+                "stored_modules":     getattr(s, "assets_stored_modules", []),
+                "ship_loadout_cache": {str(k): v for k, v in self._ship_loadout_cache.items()},
             }, "data.json")
         except Exception:
             pass
@@ -621,18 +1190,60 @@ class AssetsPlugin(BasePlugin):
                 # Also prime the name cache from this event's localised name
                 if ship_type_l and ship_type:
                     self._shiptype_cache[ship_type.lower()] = ship_type_l
+                # Parse fitted modules with engineering for popover display
+                _raw_mods = event.get("Modules") or []
+                _loadout  = []
+                for _m in _raw_mods:
+                    _slot = _m.get("Slot", "")
+                    _item = _m.get("Item", "")
+                    if not _slot or not _item:
+                        continue
+                    _eng_raw = _m.get("Engineering") or {}
+                    _eng = {}
+                    if _eng_raw.get("BlueprintName"):
+                        _eng["BlueprintName"] = _eng_raw["BlueprintName"]
+                        _eng["Level"]         = int(_eng_raw.get("Level", 0))
+                        _eng["Quality"]       = float(_eng_raw.get("Quality", 0))
+                        if _eng_raw.get("ExperimentalEffect"):
+                            _eng["ExperimentalEffect"] = _eng_raw["ExperimentalEffect"]
+                        _eng["Modifiers"] = _eng_raw.get("Modifiers") or []
+                    _loadout.append({
+                        "slot":          _slot,
+                        "name_internal": _item,
+                        "name_display":  normalise_module_name(_item),
+                        "on":            bool(_m.get("On", True)),
+                        "priority":      int(_m.get("Priority", 0)),
+                        "value":         int(_m.get("Value", 0)),
+                        "engineering":   _eng,
+                    })
+                # Before replacing current ship, apply its cached loadout
+                # to its entry in stored_ships (it's about to become stored).
+                _prev_id = (state.assets_current_ship or {}).get("ship_id")
+                _new_sid = event.get("ShipID")
+                if _prev_id is not None and _prev_id != _new_sid:
+                    _prev_lo = self._ship_loadout_cache.get(int(_prev_id), [])
+                    for _s in getattr(state, "assets_stored_ships", []):
+                        if _s.get("ship_id") == _prev_id:
+                            _s["loadout"] = _prev_lo
+                            break
                 state.assets_current_ship = {
                     "_key":         "current",
                     "current":      True,
-                    "ship_id":      event.get("ShipID"),     # used to dedupe StoredShips
+                    "ship_id":      _new_sid,
                     "type":         ship_type,
                     "type_display": ship_type_l,
                     "name":         event.get("ShipName", ""),
                     "ident":        event.get("ShipIdent", ""),
                     "system":       getattr(state, "pilot_system", None) or "—",
                     "value":        event.get("HullValue", 0),
+                    "rebuy":        event.get("Rebuy", 0),
                     "hull":         100,
+                    "loadout":      _loadout,
                 }
+                # Cache this loadout by ShipID — persists across sessions
+                if _new_sid is not None and _loadout:
+                    self._ship_loadout_cache[int(_new_sid)] = _loadout
+                    self._save_to_storage()
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "StoredShips":
@@ -681,3 +1292,64 @@ class AssetsPlugin(BasePlugin):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+
+# ── FCMaterials JSON helpers ───────────────────────────────────────────────────
+
+def _bootstrap_fc_materials(state, journal_dir) -> None:
+    """Bootstrap fleet carrier materials from FCMaterials.json on startup."""
+    if journal_dir is None:
+        return
+    import json as _json
+    from pathlib import Path as _Path
+    import builtins as _bi
+    path = _Path(journal_dir) / "FCMaterials.json"
+    try:
+        data = _json.load(_bi.open(path, encoding="utf-8"))
+    except Exception:
+        return
+    items = data.get("Items", [])
+    if isinstance(items, list) and items:
+        state.assets_fc_materials = [
+            {
+                "name":      i.get("Name", ""),
+                "name_local": i.get("Name_Localised") or i.get("Name", ""),
+                "price":     int(i.get("Price",  0)),
+                "stock":     int(i.get("Stock",  0)),
+                "demand":    int(i.get("Demand", 0)),
+                "buy_order": bool(i.get("BuyOrder", False)),
+            }
+            for i in items if i.get("Name")
+        ]
+
+# ── ModulesInfo JSON helpers ───────────────────────────────────────────────────
+
+def _bootstrap_modules_info(state, journal_dir) -> None:
+    """Bootstrap lightweight fitted module list from ModulesInfo.json on startup.
+    Only used before CAPI poll and Loadout event arrive; superseded by capi_loadout.
+    """
+    if journal_dir is None:
+        return
+    import json as _json
+    from pathlib import Path as _Path
+    import builtins as _bi
+    path = _Path(journal_dir) / "ModulesInfo.json"
+    try:
+        data = _json.load(_bi.open(path, encoding="utf-8"))
+    except Exception:
+        return
+    modules = data.get("Modules", [])
+    if isinstance(modules, list) and modules:
+        # Store as {slot: {name, power, priority}} for quick access
+        fitted = {}
+        for m in modules:
+            slot = m.get("Slot", "")
+            if slot:
+                fitted[slot] = {
+                    "name":     m.get("Item", ""),
+                    "power":    float(m.get("Power", 0.0)),
+                    "priority": int(m.get("Priority", 0)),
+                }
+        if fitted and not getattr(state, "capi_loadout", None):
+            state.capi_loadout = fitted
