@@ -23,6 +23,8 @@ class CommanderPlugin(BasePlugin):
         "Powerplay", "PowerplayJoin", "PowerplayLeave",
         "PowerplayDefect", "PowerplayRank", "PowerplayMerits",
         "VehicleSwitch", "Shutdown", "Music",
+        "NavRoute",
+        "EngineerProgress",
         "ReservoirReplenished",   # fuel level updates
     ]
 
@@ -145,6 +147,39 @@ class CommanderPlugin(BasePlugin):
                     emoji="🚪", sigil="-  INFO",
                     timestamp=event.get("_logtime"), loglevel=2,
                 )
+
+
+            case "EngineerProgress":
+                # Full engineer list fires at every login — authoritative source
+                engineers = event.get("Engineers", [])
+                if engineers:
+                    parsed = []
+                    for e in engineers:
+                        name  = e.get("Engineer", "")
+                        rank  = e.get("Rank")           # int or None
+                        prog  = e.get("Progress", "")   # "Unlocked"/"Invited"/"Known"/etc.
+                        rprog = e.get("RankProgress")   # 0-100 or None
+                        if not name:
+                            continue
+                        parsed.append({
+                            "name":           name,
+                            "rank":           rank,
+                            "progress":       rprog,
+                            "progress_stage": prog,
+                            "unlocked":       rank is not None,
+                        })
+                    if parsed:
+                        state.pilot_engineer_ranks = parsed
+                if gq: gq.put(("cmdr_update", None))
+
+            case "NavRoute":
+                # Full route plotted — read NavRoute.json for waypoints
+                route = _read_nav_route_json(self.core.journal_dir)
+                if route is not None:
+                    state.nav_route = route
+                elif event.get("Route"):
+                    state.nav_route = event["Route"]
+                if gq: gq.put(("vessel_update", None))
 
             case "Shutdown":
                 state.in_game = False
