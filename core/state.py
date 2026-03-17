@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260310b"
+VERSION = "20260316"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -79,15 +79,45 @@ FIGHTER_TYPE_NAMES = {
 }
 
 FIGHTER_LOADOUT_NAMES = {
+    # Empire
     ("empire_fighter",      "one"):   "GU-97 (Gelid F)",
     ("empire_fighter",      "two"):   "GU-97 (Rogue F)",
     ("empire_fighter",      "three"): "GU-97 (Aegis F)",
+    ("empire_fighter",      "one_g1"):   "GU-97 (Gelid F G1)",
+    ("empire_fighter",      "one_g2"):   "GU-97 (Gelid F G2)",
+    ("empire_fighter",      "one_g3"):   "GU-97 (Gelid F G3)",
+    ("empire_fighter",      "two_g1"):   "GU-97 (Rogue F G1)",
+    ("empire_fighter",      "two_g2"):   "GU-97 (Rogue F G2)",
+    ("empire_fighter",      "two_g3"):   "GU-97 (Rogue F G3)",
+    ("empire_fighter",      "three_g1"): "GU-97 (Aegis F G1)",
+    ("empire_fighter",      "three_g2"): "GU-97 (Aegis F G2)",
+    ("empire_fighter",      "three_g3"): "GU-97 (Aegis F G3)",
+    # Independent (F63 Condor)
     ("independent_fighter", "at"):    "F63 Condor (Aegis)",
     ("independent_fighter", "df"):    "F63 Condor (Rogue)",
     ("independent_fighter", "four"):  "F63 Condor (Gelid)",
+    ("independent_fighter", "at_g1"):   "F63 Condor (Aegis G1)",
+    ("independent_fighter", "at_g2"):   "F63 Condor (Aegis G2)",
+    ("independent_fighter", "at_g3"):   "F63 Condor (Aegis G3)",
+    ("independent_fighter", "df_g1"):   "F63 Condor (Rogue G1)",
+    ("independent_fighter", "df_g2"):   "F63 Condor (Rogue G2)",
+    ("independent_fighter", "df_g3"):   "F63 Condor (Rogue G3)",
+    ("independent_fighter", "four_g1"): "F63 Condor (Gelid G1)",
+    ("independent_fighter", "four_g2"): "F63 Condor (Gelid G2)",
+    ("independent_fighter", "four_g3"): "F63 Condor (Gelid G3)",
+    # Federation (F/A-26 Strike)
     ("federation_fighter",  "one"):   "F/A-26 Strike (Gelid F)",
     ("federation_fighter",  "two"):   "F/A-26 Strike (Rogue F)",
     ("federation_fighter",  "three"): "F/A-26 Strike (Aegis F)",
+    ("federation_fighter",  "one_g1"):   "F/A-26 Strike (Gelid F G1)",
+    ("federation_fighter",  "one_g2"):   "F/A-26 Strike (Gelid F G2)",
+    ("federation_fighter",  "one_g3"):   "F/A-26 Strike (Gelid F G3)",
+    ("federation_fighter",  "two_g1"):   "F/A-26 Strike (Rogue F G1)",
+    ("federation_fighter",  "two_g2"):   "F/A-26 Strike (Rogue F G2)",
+    ("federation_fighter",  "two_g3"):   "F/A-26 Strike (Rogue F G3)",
+    ("federation_fighter",  "three_g1"): "F/A-26 Strike (Aegis F G1)",
+    ("federation_fighter",  "three_g2"): "F/A-26 Strike (Aegis F G2)",
+    ("federation_fighter",  "three_g3"): "F/A-26 Strike (Aegis F G3)",
 }
 
 # ── Ship name normalisation ───────────────────────────────────────────────────
@@ -305,6 +335,32 @@ def normalise_ship_name(raw: str | None) -> str | None:
 
 
 
+
+
+def resolve_fighter_name(fighter_type: str, loadout: str) -> str:
+    """Return display name for a fighter given type + loadout key.
+
+    Handles engineered grade variants (e.g. "df_g1") gracefully.
+    Falls back to stripping grade suffix, then type name, then raw string.
+    """
+    import re as _re
+    ft = (fighter_type or "").lower().strip()
+    lo = (loadout or "").lower().strip()
+    key = (ft, lo)
+    if key in FIGHTER_LOADOUT_NAMES:
+        return FIGHTER_LOADOUT_NAMES[key]
+    # Try stripping grade suffix: "df_g1" -> ("df", "G1")
+    m = _re.match(r"^(.+)_(g\d+)$", lo, _re.IGNORECASE)
+    if m:
+        base_lo = m.group(1)
+        grade   = m.group(2).upper()
+        base_key = (ft, base_lo)
+        if base_key in FIGHTER_LOADOUT_NAMES:
+            return f"{FIGHTER_LOADOUT_NAMES[base_key]} {grade}"
+    if ft in FIGHTER_TYPE_NAMES:
+        return FIGHTER_TYPE_NAMES[ft]
+    return ft.replace("_", " ").title() if ft else "SLF"
+
 RANK_NAMES = [
     "Harmless", "Mostly Harmless", "Novice", "Competent", "Expert",
     "Master", "Dangerous", "Deadly", "Elite",
@@ -417,6 +473,9 @@ class MonitorState:
         self.dup_suppressed          = False
         self.in_preload              = True
         self.pilot_name              = None
+        self.pilot_squadron_name     = ""
+        self.pilot_squadron_tag      = ""
+        self.pilot_squadron_rank     = ""
         self.pilot_ship              = None
         self.pilot_rank              = None
         self.pilot_rank_progress     = None
