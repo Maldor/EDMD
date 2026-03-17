@@ -205,9 +205,8 @@ class SpanshPlugin(BasePlugin):
             }
 
 
-        # Persist query for next startup
-        query = f"{stn_name},{sys_name}" if sys_name else stn_name
-        self.storage.write_json({"target_station": query})
+        # Persist station name only — including system name breaks Spansh fuzzy search
+        self.storage.write_json({"target_station": stn_name})
 
         s = self.core.state
         s.cargo_target_market = {
