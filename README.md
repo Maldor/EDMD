@@ -7,7 +7,7 @@
 
 **Real-time AFK session monitoring for Elite Dangerous**
 
-*Kill tracking · Discord alerts · Session awareness · Mission stack · Fleet assets · Data contributions · GTK4 GUI*
+*Kill tracking · Discord alerts · Session awareness · Mission stack · Fleet assets · CAPI integration · Data contributions · GTK4 GUI*
 
 ---
 
@@ -50,7 +50,9 @@ When things go wrong — your fighter blown up, hull taking critical damage, fue
 | 🔌 **Plugin System** | Drop a Python plugin into `plugins/` and it loads automatically with optional dashboard block |
 | 📦 **Cargo Block** | Live ship hold display with tonnage gauge, per-item list, and stolen-goods flagging |
 | ⚗️ **Engineering Block** | Engineering materials inventory across Raw, Manufactured, and Encoded categories |
-| 🚀 **Assets Block** | Full fleet overview — current ship, stored ships, stored modules, and fleet carrier status |
+| 🚀 **Assets Block** | Full fleet overview — current ship, stored ships with fitted loadouts, stored modules, fleet carrier status, and CAPI-sourced hull/rebuy data |
+| 🛡️ **CAPI Integration** | Frontier Companion API for authoritative fleet data, live market prices, squadron identity, and community goal tracking. Data persisted locally so it is available immediately on restart |
+| 🎖️ **Squadron Identity** | Squadron name, tag, and rank displayed in the Commander block header when CAPI is enabled |
 | 🌐 **Data Contributions** | Opt-in journal uploading to EDDN, EDSM, EDAstro, and Inara — with batching, retry queues, and beta detection |
 
 <div align="center">
