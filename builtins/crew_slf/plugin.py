@@ -20,7 +20,7 @@ class CrewSlfPlugin(BasePlugin):
         "CrewAssign", "NpcCrewPaidWage", "NpcCrewRank",
         "LaunchFighter", "DockFighter", "FighterDestroyed",
         "FighterRebuilt", "FighterOrders", "RestockVehicle",
-        "HullDamage", "Loadout",
+        "HullDamage", "Loadout", "ShipyardSwap",
     ]
 
     DEFAULT_COL    = 16
@@ -28,11 +28,76 @@ class CrewSlfPlugin(BasePlugin):
     DEFAULT_WIDTH  = 8
     DEFAULT_HEIGHT = 5
 
-    _FIGHTERBAY_CAPACITY = {"3": 1, "5": 4, "6": 6}
+    _FIGHTERBAY_CAPACITY = {"3": 1, "5": 4, "6": 6, "7": 9, "8": 12}
 
     def on_load(self, core) -> None:
         super().on_load(core)
         core.register_block(self, priority=15)
+        s = core.state
+        if not hasattr(s, "slf_ship_id"): s.slf_ship_id = None
+
+
+    def _bootstrap_type_from_journals(self) -> None:
+        """Scan journals for the most recent RestockVehicle for the CURRENT ship.
+
+        Scans newest-first, tracking which ShipID was active at each point via
+        Loadout events. Only accepts a RestockVehicle that occurred while the
+        current ship was active — avoids picking up fighter types from other
+        ships the player owns.
+        """
+        try:
+            import json as _j, pathlib as _pl
+            from core.state import resolve_fighter_name as _rfn
+            # Identify current ship from the ShipID stored by the last Loadout event.
+            # This is set directly from the journal and doesn't depend on assets plugin.
+            current_sid = getattr(self.core.state, "slf_ship_id", None)
+            if current_sid is None:
+                # No ShipID known yet — don't guess, leave slf_type=None
+                return
+
+            jdir     = _pl.Path(self.core.journal_dir)
+            journals = sorted(jdir.glob("Journal*.log"), reverse=True)
+
+            # Track which ShipID was active as we walk backwards through events
+            active_sid: int | None = current_sid
+
+            for jp in journals:
+                try:
+                    lines = jp.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for line in reversed(lines):
+                    try:
+                        ev = _j.loads(line)
+                    except ValueError:
+                        continue
+                    evt = ev.get("event")
+
+                    # Walking backwards: a Loadout event tells us which ship
+                    # was active at this point in time
+                    if evt == "Loadout":
+                        try:
+                            active_sid = int(ev.get("ShipID", 0)) or None
+                        except (TypeError, ValueError):
+                            pass
+
+                    if evt == "RestockVehicle":
+                        ft = ev.get("Type", "")
+                        lo = ev.get("Loadout", "")
+                        ts = ev.get("timestamp", "?")
+                        if not ft:
+                            continue
+                        # Only use if this restock happened on the current ship
+                        if current_sid is None or active_sid == current_sid:
+                            result = _rfn(ft, lo)
+                            self.core.state.slf_type = result
+                            gq = self.core.gui_queue
+                            if gq:
+                                gq.put(("slf_update", None))
+                            return
+        except Exception:
+            pass
+
 
     def on_event(self, event: dict, state) -> None:
         core    = self.core
@@ -44,7 +109,18 @@ class CrewSlfPlugin(BasePlugin):
 
         match ev:
 
+            case "ShipyardSwap":
+                # Switching ships: clear fighter type so stale data from
+                # another ship's bay doesn't persist.
+                state.slf_type     = None
+                state.slf_deployed = False
+                state.slf_docked   = False
+                if gq: gq.put(("plugin_refresh", "crew_slf"))
+
             case "Loadout":
+                # Track which ship we're on — used by bootstrap to avoid
+                # picking up RestockVehicle events from other ships.
+                state.slf_ship_id = event.get("ShipID")
                 # Fighter bay detection — drives crew and SLF visibility
                 slf_found = False
                 slf_cap   = 0
@@ -63,6 +139,14 @@ class CrewSlfPlugin(BasePlugin):
                     state.slf_type     = None
                     state.slf_deployed = False
                     state.slf_docked   = False
+                elif state.slf_type is None:
+                    # Fighter bay present but type unknown — schedule a
+                    # bootstrap scan to recover from RestockVehicle history.
+                    import threading as _thr
+                    _thr.Thread(
+                        target=self._bootstrap_type_from_journals,
+                        daemon=True,
+                    ).start()
                     state.slf_hull     = 100
                     state.slf_loadout  = None
                     state.crew_active  = False
@@ -93,14 +177,19 @@ class CrewSlfPlugin(BasePlugin):
                 state.slf_hull     = 100
                 state.slf_orders   = "Defend"
                 state.slf_loadout  = event.get("Loadout")
-                # Set type — Frontier omits Type when only one fighter type
-                # is stocked. slf_type retains last known value from
-                # RestockVehicle (set at restock/buy time, always has Type).
+                # Frontier omits Type when only one type is stocked.
+                # Use Type if present; otherwise keep existing slf_type
+                # (set by RestockVehicle). If still None, schedule recovery.
                 _ft = event.get("Type", "")
                 _lo = event.get("Loadout", "")
                 if _ft:
                     state.slf_type = resolve_fighter_name(_ft, _lo)
-                # else: keep existing slf_type set by RestockVehicle
+                elif state.slf_type is None:
+                    import threading as _thr
+                    _thr.Thread(
+                        target=self._bootstrap_type_from_journals,
+                        daemon=True,
+                    ).start()
                 if gq: gq.put(("slf_update", None))
                 core.emitter.emit(
                     msg_term="Fighter launched",
