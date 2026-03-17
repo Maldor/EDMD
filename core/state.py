@@ -16,9 +16,9 @@ from pathlib import Path
 # ── Program identity ──────────────────────────────────────────────────────────
 
 PROGRAM = "Elite Dangerous Monitor Daemon"
-DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
+DESC    = "Continuous monitoring of Elite Dangerous sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260316"
+VERSION = "20260316a"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
