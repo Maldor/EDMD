@@ -16,9 +16,9 @@ from pathlib import Path
 # ── Program identity ──────────────────────────────────────────────────────────
 
 PROGRAM = "Elite Dangerous Monitor Daemon"
-DESC    = "Continuous monitoring of Elite Dangerous sessions."
+DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260316a"
+VERSION = "20260317"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -70,62 +70,118 @@ PIRATE_NOATTACK_MSGS = [
 ]
 
 FIGHTER_TYPE_NAMES = {
-    "independent_fighter":   "F63 Condor",
-    "empire_fighter":        "GU-97",
-    "federation_fighter":    "F/A-26 Strike",
-    "gdn_hybrid_fighter_v1": "Trident",
-    "gdn_hybrid_fighter_v2": "Javelin",
-    "gdn_hybrid_fighter_v3": "Lancer",
+    "independent_fighter":   "Taipan",      # Faulcon DeLacy — Independent/Alliance
+    "empire_fighter":        "GU-97",        # Gutamaya — Imperial
+    "federation_fighter":    "F63 Condor",   # Core Dynamics — Federal
+    "gdn_hybrid_fighter_v1": "XG7 Trident",  # Guardian hybrid
+    "gdn_hybrid_fighter_v2": "XG8 Javelin",  # Guardian hybrid
+    "gdn_hybrid_fighter_v3": "XG9 Lance",    # Guardian hybrid
 }
 
 FIGHTER_LOADOUT_NAMES = {
-    # Base/stock loadout — no engineering variant, Frontier sends "zero"
-    # when only one fighter type is stocked (Type field is also absent).
-    ("independent_fighter", "zero"):  "F63 Condor",
-    ("federation_fighter",  "zero"):  "F/A-26 Strike",
-    ("empire_fighter",      "zero"):  "GU-97",
-    ("gdn_hybrid_fighter_v1", "zero"): "Trident",
-    ("gdn_hybrid_fighter_v2", "zero"): "Javelin",
-    ("gdn_hybrid_fighter_v3", "zero"): "Lancer",
-    # Empire
-    ("empire_fighter",      "one"):   "GU-97 (Gelid F)",
-    ("empire_fighter",      "two"):   "GU-97 (Rogue F)",
-    ("empire_fighter",      "three"): "GU-97 (Aegis F)",
-    ("empire_fighter",      "one_g1"):   "GU-97 (Gelid F G1)",
-    ("empire_fighter",      "one_g2"):   "GU-97 (Gelid F G2)",
-    ("empire_fighter",      "one_g3"):   "GU-97 (Gelid F G3)",
-    ("empire_fighter",      "two_g1"):   "GU-97 (Rogue F G1)",
-    ("empire_fighter",      "two_g2"):   "GU-97 (Rogue F G2)",
-    ("empire_fighter",      "two_g3"):   "GU-97 (Rogue F G3)",
-    ("empire_fighter",      "three_g1"): "GU-97 (Aegis F G1)",
-    ("empire_fighter",      "three_g2"): "GU-97 (Aegis F G2)",
-    ("empire_fighter",      "three_g3"): "GU-97 (Aegis F G3)",
-    # Independent (F63 Condor)
-    ("independent_fighter", "at"):    "F63 Condor (Aegis)",
-    ("independent_fighter", "df"):    "F63 Condor (Rogue)",
-    ("independent_fighter", "four"):  "F63 Condor (Gelid)",
-    ("independent_fighter", "at_g1"):   "F63 Condor (Aegis G1)",
-    ("independent_fighter", "at_g2"):   "F63 Condor (Aegis G2)",
-    ("independent_fighter", "at_g3"):   "F63 Condor (Aegis G3)",
-    ("independent_fighter", "df_g1"):   "F63 Condor (Rogue G1)",
-    ("independent_fighter", "df_g2"):   "F63 Condor (Rogue G2)",
-    ("independent_fighter", "df_g3"):   "F63 Condor (Rogue G3)",
-    ("independent_fighter", "four_g1"): "F63 Condor (Gelid G1)",
-    ("independent_fighter", "four_g2"): "F63 Condor (Gelid G2)",
-    ("independent_fighter", "four_g3"): "F63 Condor (Gelid G3)",
-    # Federation (F/A-26 Strike)
-    ("federation_fighter",  "one"):   "F/A-26 Strike (Gelid F)",
-    ("federation_fighter",  "two"):   "F/A-26 Strike (Rogue F)",
-    ("federation_fighter",  "three"): "F/A-26 Strike (Aegis F)",
-    ("federation_fighter",  "one_g1"):   "F/A-26 Strike (Gelid F G1)",
-    ("federation_fighter",  "one_g2"):   "F/A-26 Strike (Gelid F G2)",
-    ("federation_fighter",  "one_g3"):   "F/A-26 Strike (Gelid F G3)",
-    ("federation_fighter",  "two_g1"):   "F/A-26 Strike (Rogue F G1)",
-    ("federation_fighter",  "two_g2"):   "F/A-26 Strike (Rogue F G2)",
-    ("federation_fighter",  "two_g3"):   "F/A-26 Strike (Rogue F G3)",
-    ("federation_fighter",  "three_g1"): "F/A-26 Strike (Aegis F G1)",
-    ("federation_fighter",  "three_g2"): "F/A-26 Strike (Aegis F G2)",
-    ("federation_fighter",  "three_g3"): "F/A-26 Strike (Aegis F G3)",
+    # ── Base / stock (Frontier omits Type when only one type stocked) ─────────
+    ("independent_fighter",   "zero"):  "Taipan",
+    ("federation_fighter",    "zero"):  "F63 Condor",
+    ("empire_fighter",        "zero"):  "GU-97",
+    ("gdn_hybrid_fighter_v1", "zero"):  "XG7 Trident",
+    ("gdn_hybrid_fighter_v2", "zero"):  "XG8 Javelin",
+    ("gdn_hybrid_fighter_v3", "zero"):  "XG9 Lance",
+
+    # ── GU-97  (empire_fighter — Gutamaya, Imperial) ──────────────────────────
+    # Loadout order: 1=Gelid F, 2=Rogue F, 3=Aegis F, 4=Gelid G, 5=Rogue G
+    # F = Fixed weapons, G = Gimballed weapons
+    ("empire_fighter", "one"):       "GU-97 (Gelid F)",     # 2× fixed beam laser
+    ("empire_fighter", "two"):       "GU-97 (Rogue F)",     # 2× fixed plasma repeater
+    ("empire_fighter", "three"):     "GU-97 (Aegis F)",     # 2× fixed pulse laser
+    ("empire_fighter", "four"):      "GU-97 (Gelid G)",     # 2× gimballed beam laser
+    ("empire_fighter", "five"):      "GU-97 (Rogue G)",     # 2× gimballed pulse laser
+    # Grade variants (engineering tier on top of loadout variant)
+    ("empire_fighter", "one_g1"):    "GU-97 (Gelid F G1)",
+    ("empire_fighter", "one_g2"):    "GU-97 (Gelid F G2)",
+    ("empire_fighter", "one_g3"):    "GU-97 (Gelid F G3)",
+    ("empire_fighter", "two_g1"):    "GU-97 (Rogue F G1)",
+    ("empire_fighter", "two_g2"):    "GU-97 (Rogue F G2)",
+    ("empire_fighter", "two_g3"):    "GU-97 (Rogue F G3)",
+    ("empire_fighter", "three_g1"):  "GU-97 (Aegis F G1)",
+    ("empire_fighter", "three_g2"):  "GU-97 (Aegis F G2)",
+    ("empire_fighter", "three_g3"):  "GU-97 (Aegis F G3)",
+    ("empire_fighter", "four_g1"):   "GU-97 (Gelid G G1)",
+    ("empire_fighter", "four_g2"):   "GU-97 (Gelid G G2)",
+    ("empire_fighter", "four_g3"):   "GU-97 (Gelid G G3)",
+    ("empire_fighter", "five_g1"):   "GU-97 (Rogue G G1)",
+    ("empire_fighter", "five_g2"):   "GU-97 (Rogue G G2)",
+    ("empire_fighter", "five_g3"):   "GU-97 (Rogue G G3)",
+    # Slot 6 (rare — 8E bay has 6 slots)
+    ("empire_fighter", "six"):       "GU-97 (Aegis F)",
+    ("empire_fighter", "six_g1"):    "GU-97 (Aegis F G1)",
+    ("empire_fighter", "six_g2"):    "GU-97 (Aegis F G2)",
+    ("empire_fighter", "six_g3"):    "GU-97 (Aegis F G3)",
+
+    # ── F63 Condor  (federation_fighter — Core Dynamics, Federal) ────────────
+    # Loadout order: 1=Gelid F, 2=Rogue F, 3=Aegis F, 4=Gelid G, 5=Rogue G
+    # Note: Rogue F on Condor = 2× fixed multi-cannon (unique kinetic weapon)
+    #       Aegis F on Condor = 2× fixed plasma repeater (not pulse like GU-97)
+    ("federation_fighter", "one"):      "F63 Condor (Gelid F)",    # 2× fixed pulse laser
+    ("federation_fighter", "two"):      "F63 Condor (Rogue F)",    # 2× fixed multi-cannon
+    ("federation_fighter", "three"):    "F63 Condor (Aegis F)",    # 2× fixed plasma repeater
+    ("federation_fighter", "four"):     "F63 Condor (Gelid G)",    # 2× gimballed beam laser
+    ("federation_fighter", "five"):     "F63 Condor (Rogue G)",    # 2× gimballed pulse laser
+    ("federation_fighter", "df"):       "F63 Condor (Rogue F)",    # legacy key — double-fixed MC
+    ("federation_fighter", "at"):       "F63 Condor (Aegis F)",    # legacy key
+    ("federation_fighter", "one_g1"):   "F63 Condor (Gelid F G1)",
+    ("federation_fighter", "one_g2"):   "F63 Condor (Gelid F G2)",
+    ("federation_fighter", "one_g3"):   "F63 Condor (Gelid F G3)",
+    ("federation_fighter", "two_g1"):   "F63 Condor (Rogue F G1)",
+    ("federation_fighter", "two_g2"):   "F63 Condor (Rogue F G2)",
+    ("federation_fighter", "two_g3"):   "F63 Condor (Rogue F G3)",
+    ("federation_fighter", "three_g1"): "F63 Condor (Aegis F G1)",
+    ("federation_fighter", "three_g2"): "F63 Condor (Aegis F G2)",
+    ("federation_fighter", "three_g3"): "F63 Condor (Aegis F G3)",
+    ("federation_fighter", "four_g1"):  "F63 Condor (Gelid G G1)",
+    ("federation_fighter", "four_g2"):  "F63 Condor (Gelid G G2)",
+    ("federation_fighter", "four_g3"):  "F63 Condor (Gelid G G3)",
+    ("federation_fighter", "five_g1"):  "F63 Condor (Rogue G G1)",
+    ("federation_fighter", "five_g2"):  "F63 Condor (Rogue G G2)",
+    ("federation_fighter", "five_g3"):  "F63 Condor (Rogue G G3)",
+    ("federation_fighter", "six"):      "F63 Condor (Aegis F)",
+    ("federation_fighter", "six_g1"):   "F63 Condor (Aegis F G1)",
+    ("federation_fighter", "six_g2"):   "F63 Condor (Aegis F G2)",
+    ("federation_fighter", "six_g3"):   "F63 Condor (Aegis F G3)",
+
+    # ── Taipan  (independent_fighter — Faulcon DeLacy, Independent/Alliance) ─
+    # Loadout order: 1=Gelid F, 2=Rogue F, 3=Aegis F, 4=Gelid G, 5=Rogue G, at=AX1 F
+    # Note: AX1 F is anti-xeno only; ineffective against human ships
+    ("independent_fighter", "one"):      "Taipan (Gelid F)",    # 2× fixed beam laser
+    ("independent_fighter", "two"):      "Taipan (Rogue F)",    # 2× fixed plasma repeater
+    ("independent_fighter", "three"):    "Taipan (Aegis F)",    # 2× fixed pulse laser
+    ("independent_fighter", "four"):     "Taipan (Gelid G)",    # 2× gimballed beam laser
+    ("independent_fighter", "five"):     "Taipan (Rogue G)",    # 2× gimballed pulse laser
+    ("independent_fighter", "at"):       "Taipan (AX1 F)",      # 2× fixed AX multi-cannon
+    ("independent_fighter", "df"):       "Taipan (Rogue F)",    # legacy key
+    ("independent_fighter", "one_g1"):   "Taipan (Gelid F G1)",
+    ("independent_fighter", "one_g2"):   "Taipan (Gelid F G2)",
+    ("independent_fighter", "one_g3"):   "Taipan (Gelid F G3)",
+    ("independent_fighter", "two_g1"):   "Taipan (Rogue F G1)",
+    ("independent_fighter", "two_g2"):   "Taipan (Rogue F G2)",
+    ("independent_fighter", "two_g3"):   "Taipan (Rogue F G3)",
+    ("independent_fighter", "three_g1"): "Taipan (Aegis F G1)",
+    ("independent_fighter", "three_g2"): "Taipan (Aegis F G2)",
+    ("independent_fighter", "three_g3"): "Taipan (Aegis F G3)",
+    ("independent_fighter", "four_g1"):  "Taipan (Gelid G G1)",
+    ("independent_fighter", "four_g2"):  "Taipan (Gelid G G2)",
+    ("independent_fighter", "four_g3"):  "Taipan (Gelid G G3)",
+    ("independent_fighter", "five_g1"):  "Taipan (Rogue G G1)",
+    ("independent_fighter", "five_g2"):  "Taipan (Rogue G G2)",
+    ("independent_fighter", "five_g3"):  "Taipan (Rogue G G3)",
+    ("independent_fighter", "six"):      "Taipan (Aegis F)",
+    ("independent_fighter", "six_g1"):   "Taipan (Aegis F G1)",
+    ("independent_fighter", "six_g2"):   "Taipan (Aegis F G2)",
+    ("independent_fighter", "six_g3"):   "Taipan (Aegis F G3)",
+
+    # ── Guardian hybrid SLFs (single loadout each, no variants) ───────────────
+    ("gdn_hybrid_fighter_v1", "one"):    "XG7 Trident",
+    ("gdn_hybrid_fighter_v2", "one"):    "XG8 Javelin",
+    ("gdn_hybrid_fighter_v3", "one"):    "XG9 Lance",
 }
 
 # ── Ship name normalisation ───────────────────────────────────────────────────
@@ -482,6 +538,9 @@ class MonitorState:
         self.in_preload              = True
         self.pilot_name              = None
         self.pilot_squadron_name     = ""
+        self.cargo_target_market     = {}
+        self.cargo_target_market_name= ""
+        self.cargo_target_market_ts  = 0.0
         self.slf_capi_type           = None  # type from CAPI launchBays
         self.pilot_squadron_tag      = ""
         self.pilot_squadron_rank     = ""
