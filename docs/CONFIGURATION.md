@@ -148,6 +148,57 @@ If you run EDMD on multiple machines reading the same journal share (e.g. a remo
 
 ---
 
+
+---
+
+## CAPI Integration
+
+EDMD can connect to Frontier's Companion API (CAPI) to retrieve authoritative
+fleet data, market prices, carrier state, and squadron information.
+
+### Enabling CAPI
+
+Use **File → CAPI Authentication** to complete the OAuth2 flow. You will be
+redirected to Frontier's login page in your browser. On success, tokens are
+stored in `~/.local/share/EDMD/plugins/capi/tokens.json`.
+
+### What CAPI provides (vs journal-only)
+
+| Data | CAPI enabled | CAPI disabled |
+|------|-------------|---------------|
+| Fleet roster | Authoritative — Frontier server | Most recent `StoredShips` event |
+| Sold ship exclusion | Automatic | May show sold ships until next dock |
+| Stored ship hull % | ✓ | ✗ |
+| Stored ship rebuy cost | ✓ | ✗ |
+| Current ship loadout | ✓ (immediate) | ✓ (from journal) |
+| Stored ship loadout | ✓ (from journal, CAPI-validated) | ✓ (from journal, unvalidated) |
+| Market prices | ✓ (live on dock) | From `Market.json` |
+| Squadron identity | ✓ | ✗ |
+| Community Goals | ✓ | ✗ |
+
+### Persisted CAPI data
+
+After each poll, raw endpoint responses are written to
+`~/.local/share/EDMD/plugins/capi/`. These files are read at startup so full
+fleet data is available immediately without waiting for a re-poll:
+
+| File | Source | Updated |
+|------|--------|---------|
+| `capi_profile.json` | `/profile` | Every dock |
+| `capi_market.json` | `/market` | Every dock (outfitting station) |
+| `capi_shipyard.json` | `/shipyard` | Every dock (outfitting station) |
+| `capi_fleetcarrier.json` | `/fleetcarrier` | Every dock |
+| `capi_communitygoals.json` | `/communitygoals` | Every dock, 5-min cooldown |
+
+### Poll frequency
+
+CAPI is polled on every dock event and 10 seconds after startup. Per-endpoint
+cooldowns prevent over-polling: profile/carrier 30s, market/shipyard 60s,
+community goals 300s.
+
+Frontier requests no more than 1 query per minute in normal use. EDMD respects
+this by batching all endpoint polls on dock rather than polling continuously.
+
 ### `[EDDN]`
 
 Contributes exploration, market, outfitting, and shipyard data to the [Elite Dangerous Data Network](https://eddn.edcd.io) — the shared relay used by EDSM, Inara, and most third-party tools.
