@@ -83,6 +83,7 @@ SUBSCRIBED_EVENTS = [
     "USSDrop", "Screenshot",
     "Touchdown", "Liftoff", "EmbarkDismembark",
     "CodexEntry",
+    "ScanOrganic", "SellOrganicData",
     "SRVHandbrake",  # included so discard list can prune it
     "Music",
     "ReceiveText", "SendText",
@@ -106,12 +107,13 @@ class _Sender(threading.Thread):
     Call stop() for clean shutdown.
     """
 
-    def __init__(self, commander_name: str, api_key: str):
+    def __init__(self, commander_name: str, api_key: str, queue_file) -> None:
         super().__init__(daemon=True, name="edsm-sender")
-        self._cmdr     = commander_name
-        self._key      = api_key
-        self._q:       queue.Queue = queue.Queue()
-        self._stop_evt = threading.Event()
+        self._cmdr      = commander_name
+        self._key       = api_key
+        self._queue_file = queue_file
+        self._q:        queue.Queue = queue.Queue()
+        self._stop_evt  = threading.Event()
         self._last_send = 0.0
 
     def push(self, event: dict) -> None:
@@ -209,18 +211,20 @@ class _Sender(threading.Thread):
 
     def _persist(self, events: list[dict]) -> None:
         try:
-            QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(QUEUE_FILE, "a", encoding="utf-8") as f:
+            self._queue_file.parent.mkdir(parents=True, exist_ok=True)
+            import builtins as _bi
+            with _bi.open(self._queue_file, "a", encoding="utf-8") as f:
                 for ev in events:
                     f.write(json.dumps({"queued_at": time.time(), "msg": ev}) + "\n")
         except Exception as e:
             print(f"  [EDSM] Failed to persist events to disk queue: {e}")
 
     def _drain_disk(self) -> None:
-        if not QUEUE_FILE.exists():
+        if not self._queue_file.exists():
             return
         try:
-            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+            import builtins as _bi
+            with _bi.open(self._queue_file, "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except Exception:
             return
@@ -250,7 +254,7 @@ class _Sender(threading.Thread):
                     time.sleep(SEND_INTERVAL_S)
 
         try:
-            QUEUE_FILE.unlink(missing_ok=True)
+            self._queue_file.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -312,7 +316,7 @@ class EDSMPlugin(BasePlugin):
             name="edsm-discard",
         ).start()
 
-        self._sender = _Sender(self._cmdr, self._key)
+        self._sender = _Sender(self._cmdr, self._key, self.storage.path / "queue.jsonl")
         self._sender.start()
 
         print(
