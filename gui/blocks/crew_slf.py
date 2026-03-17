@@ -8,7 +8,7 @@ Hidden when no active crew.
 try:
     import gi
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk
+    from gi.repository import Gtk, Pango
 except ImportError:
     raise ImportError("PyGObject / GTK4 not found.")
 
@@ -36,12 +36,18 @@ class CrewSlfBlock(BlockWidget):
         hdr_line1.append(self._crew_slf_type_hdr)
         hdr_outer.append(hdr_line1)
 
-        # Line 2: combat rank (left-aligned under name; hidden when no rank)
+        # Line 2: rank (left) + SLF variant (right, e.g. "Gelid G")
+        hdr_line2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._hdr_line2 = hdr_line2
         self._crew_rank_hdr = Gtk.Label(label="")
         self._crew_rank_hdr.set_xalign(0.0)
-        self._crew_rank_hdr.add_css_class("data-key")
-        self._crew_rank_hdr.set_visible(False)
-        hdr_outer.append(self._crew_rank_hdr)
+        self._crew_rank_hdr.set_hexpand(True)
+        hdr_line2.append(self._crew_rank_hdr)
+        self._crew_slf_variant_hdr = Gtk.Label(label="")
+        self._crew_slf_variant_hdr.set_xalign(1.0)
+        self._crew_slf_variant_hdr.set_visible(False)
+        hdr_line2.append(self._crew_slf_variant_hdr)
+        hdr_outer.append(hdr_line2)
 
         body = self._build_section(parent, title_widget=hdr_outer)
         scroll_body = self._make_scroll_body(body)
@@ -91,7 +97,17 @@ class CrewSlfBlock(BlockWidget):
             )
         else:
             self._crew_header_lbl.set_label(f"CREW: {s.crew_name or 'NPC'}")
-        self._crew_slf_type_hdr.set_label(s.slf_type or "")
+        # Split "GU-97 (Gelid G)" -> type="GU-97", variant="Gelid G"
+        slf_full = s.slf_type or ""
+        if "(" in slf_full and slf_full.endswith(")"):
+            paren = slf_full.index("(")
+            slf_base    = slf_full[:paren].strip()
+            slf_variant = slf_full[paren + 1:-1].strip()
+        else:
+            slf_base    = slf_full
+            slf_variant = ""
+        self._crew_slf_type_hdr.set_label(slf_base)
+        self._crew_slf_variant_hdr.set_label(slf_variant)
 
         # ── Rank — shown in header line 2 ────────────────────────────────────
         if s.crew_rank is not None and 0 <= s.crew_rank < len(PP_RANK_NAMES):
@@ -100,6 +116,7 @@ class CrewSlfBlock(BlockWidget):
             rank_str = ""
         self._crew_rank_hdr.set_label(rank_str)
         self._crew_rank_hdr.set_visible(bool(rank_str))
+        self._crew_slf_variant_hdr.set_visible(bool(slf_variant))
 
         # ── Hired ─────────────────────────────────────────────────────────────
         self._crew_hired_lbl.set_label(
