@@ -1,23 +1,12 @@
 # EDMD Roadmap
 
-Last updated: 20260310b
+Last updated: 20260316
 
 ---
 
 ## Active / In Progress
 
-### FDev CAPI Integration
-- OAuth2 companion app auth flow
-- Primary benefit: `/profile` endpoint gives full fleet regardless of visited shipyard
-  — eliminates StoredShips / StoredModules staleness in the Assets block
-- Also: live market data, shipyard, outfitting, fleet carrier inventory
-- Deferred pending OAuth implementation — non-trivial auth flow
-
-**Note:** Faction reputation and pilot skill ranks do not require CAPI. Reputation
-is sourced from the journal `Reputation` event (major factions) and `FSDJump`/
-`Location` events (local factions). Ranks are sourced from the journal `Rank`
-event. CAPI `/profile` rank data is also consumed where available but is not the
-primary source.
+*(Nothing currently blocked — see Near-term for next priorities.)*
 
 ---
 
@@ -100,10 +89,6 @@ Planned display:
 - Create-new-profile dialog writing a fully-defaulted `[PROFILENAME]` section to config.toml
 - Restart with `-p PROFILENAME`
 
-### CAPI OAuth Flow
-- Non-trivial auth flow — defer
-- Will inform what additional fields the Assets block can show once available
-
 ### Squadron Carrier Support
 - Fleet carriers belonging to a squadron (not player-owned) are not currently
   tracked in the Assets block — journal coverage is incomplete
@@ -112,8 +97,10 @@ Planned display:
 
 ## Known Limitations / Technical Debt
 
-- `StoredShips` and `StoredModules` data is stale between shipyard / outfitting visits
-  — will be resolved by CAPI `/profile` integration
+- Stored ship loadouts (modules, engineering) are sourced from journal `Loadout`
+  events accumulated across sessions — the most recent fitting for each confirmed
+  owned ship is persisted in `~/.local/share/EDMD/plugins/assets/data.json`.
+  This data is only as current as the last time each ship was boarded.
 - Carrier finance and capacity field paths are hardened with multiple fallbacks but
   the exact `/fleetcarrier` JSON structure has not been confirmed in production —
   run with `--trace` after docking at a carrier if values are missing
@@ -123,3 +110,15 @@ Planned display:
   or `Status.json`
 - Minor faction reputation reflects only the current system and is replaced on each
   jump; it is absent between sessions
+
+**TODO (next release docs):** Document the CAPI tradeoff in the main user
+documentation (not just release notes). Specifically:
+  - When CAPI is enabled: fleet roster is authoritative (Frontier server),
+    sold ships are automatically excluded, hull % and rebuy costs are available.
+  - When CAPI is disabled: roster is sourced from the most recent `StoredShips`
+    journal event (correct at last dock; cannot detect sales between sessions),
+    hull % and rebuy costs are unavailable for stored ships, and phantom ships
+    from recent sales may appear until the next dock. Loadout data is unaffected
+    — it comes from journal `Loadout` events regardless of CAPI status.
+  Suggested location: `docs/CONFIGURATION.md` under a new "CAPI Integration"
+  section, and a brief note in `README.md` features table.
