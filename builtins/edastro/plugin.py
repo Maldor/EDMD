@@ -35,7 +35,7 @@ EDASTRO_UPLOAD_URL    = "https://edastro.com/api/journal"
 EDASTRO_INTEREST_URL  = "https://edastro.com/api/journal/interested"
 SOFTWARE_NAME         = "EDMD"
 SOFTWARE_VERSION      = VERSION
-HTTP_TIMEOUT_S        = 15
+HTTP_TIMEOUT_S        = 30
 SEND_INTERVAL_S       = 10      # ~6/min, leaves comfortable headroom under 100/15 min
 BATCH_MAX             = 30
 STARTUP_DELAY_S       = 12      # stagger slightly behind EDSM startup
@@ -88,8 +88,9 @@ def _is_beta(gameversion: str) -> bool:
 
 class _Sender(threading.Thread):
 
-    def __init__(self) -> None:
+    def __init__(self, queue_file) -> None:
         super().__init__(daemon=True, name="edastro-sender")
+        self._queue_file = queue_file
         self._q         = queue.Queue()
         self._stop_evt  = threading.Event()
         self._last_send = 0.0
@@ -166,6 +167,9 @@ class _Sender(threading.Thread):
         except urllib.error.HTTPError as e:
             print(f"  [EDAstro] HTTP {e.code} — queuing {len(events)} event(s) to disk")
             self._persist(events)
+        except TimeoutError:
+            # Transient network timeout — queue for retry, don't flood the log
+            self._persist(events)
         except Exception as exc:
             print(f"  [EDAstro] Send error ({type(exc).__name__}: {exc}) — queuing to disk")
             self._persist(events)
@@ -174,18 +178,20 @@ class _Sender(threading.Thread):
 
     def _persist(self, events: list[dict]) -> None:
         try:
-            QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(QUEUE_FILE, "a", encoding="utf-8") as f:
+            self._queue_file.parent.mkdir(parents=True, exist_ok=True)
+            import builtins as _bi
+            with _bi.open(self._queue_file, "a", encoding="utf-8") as f:
                 for ev in events:
                     f.write(json.dumps({"queued_at": time.time(), "msg": ev}) + "\n")
         except Exception as e:
             print(f"  [EDAstro] Failed to persist events to disk queue: {e}")
 
     def _drain_disk(self) -> None:
-        if not QUEUE_FILE.exists():
+        if not self._queue_file.exists():
             return
         try:
-            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+            import builtins as _bi
+            with _bi.open(self._queue_file, "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except Exception:
             return
@@ -213,7 +219,7 @@ class _Sender(threading.Thread):
                     time.sleep(SEND_INTERVAL_S)
 
         try:
-            QUEUE_FILE.unlink(missing_ok=True)
+            self._queue_file.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -255,7 +261,7 @@ class EDAstroPlugin(BasePlugin):
             name="edastro-interest",
         ).start()
 
-        self._sender = _Sender()
+        self._sender = _Sender(self.storage.path / "queue.jsonl")
         self._sender.start()
 
         carrier_note = " (carrier events: on)" if self._carrier_opt_in else ""
