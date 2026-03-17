@@ -65,6 +65,9 @@ class PluginStorage:
     _ALLOWED_NAMES = frozenset({
         "data.json", "config.json", "state.json", "tokens.json",
         "config.toml", "state.toml",
+        # CAPI persisted data — raw endpoint responses for cross-plugin use
+        "capi_profile.json", "capi_market.json", "capi_shipyard.json",
+        "capi_fleetcarrier.json", "capi_communitygoals.json", "fleet.json",
     })
 
     def __init__(self, data_dir: Path) -> None:
@@ -115,6 +118,28 @@ class PluginStorage:
         with builtins.open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
         tmp.replace(p)
+
+    def read_sibling_json(self, plugin_name: str, filename: str) -> dict:
+        """Read a JSON file from another plugin's data directory (read-only).
+
+        Allows plugins to consume data written by other plugins — e.g. assets
+        reading CAPI's persisted profile data.  Write operations are still
+        restricted to the plugin's own directory.
+
+        Returns an empty dict if the file does not exist or cannot be parsed.
+        """
+        if "/" in filename or "\\" in filename or ".." in filename:
+            raise ValueError(f"Filename must be bare (got {filename!r})")
+        if filename not in self._ALLOWED_NAMES:
+            raise ValueError(f"Filename {filename!r} not in allowlist")
+        p = self._dir.parent / plugin_name / filename
+        if not p.exists():
+            return {}
+        with builtins.open(p, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except (json.JSONDecodeError, ValueError):
+                return {}
 
     def read_toml(self, filename: str = "config.toml") -> dict:
         """Read a TOML file from the plugin data directory.
