@@ -39,18 +39,16 @@ DEFAULT_LAYOUT = {
     # Strict 3-column layout — each column is 8 grid units (cols 0-8, 8-16, 16-24).
     #
     # Left col:   commander → missions → alerts
-    # Mid col:    session_stats → cargo → engineering
+    # Mid col:    session_stats → mode → cargo → engineering
     # Right col:  crew_slf → assets
-    #
-    # Commander is 13 rows to accommodate the vitals strip + ambient rows.
-    # Ranks and Rep live in separate tabs, so height is unchanged.
-    "commander":    {"col": 0,  "row": 0,  "width": 8, "height": 13},
+    "commander":    {"col": 0,  "row": 0,  "width": 8, "height": 14},
     "session_stats":{"col": 8,  "row": 0,  "width": 8, "height": 10},
     "crew_slf":     {"col": 16, "row": 0,  "width": 8, "height": 10},
-    "missions":     {"col": 0,  "row": 13, "width": 8, "height": 12},
-    "cargo":        {"col": 8,  "row": 10, "width": 8, "height": 8},
-    "engineering":  {"col": 8,  "row": 18, "width": 8, "height": 12},
-    "alerts":       {"col": 0,  "row": 25, "width": 8, "height": 10},
+    "missions":     {"col": 0,  "row": 14, "width": 8, "height": 9},
+    "mode":         {"col": 8,  "row": 10, "width": 8, "height": 5},
+    "cargo":        {"col": 8,  "row": 15, "width": 8, "height": 10},
+    "engineering":  {"col": 8,  "row": 25, "width": 8, "height": 10},
+    "alerts":       {"col": 0,  "row": 23, "width": 8, "height": 10},
     "assets":       {"col": 16, "row": 10, "width": 8, "height": 25},
 }
 
