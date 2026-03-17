@@ -27,6 +27,7 @@ from core.state import (
     RANK_NAMES,
     RECENT_KILL_WINDOW,
     normalise_ship_name,
+    resolve_fighter_name,
     MonitorState,
     SessionData,
     load_session_state,
@@ -157,7 +158,13 @@ def bootstrap_slf(state: MonitorState, journal_dir: Path, trace_mode: bool = Fal
                     if ev == "LaunchFighter" and not je.get("PlayerControlled", True):
                         state.slf_deployed = True
                         state.slf_docked   = False
-                        state.slf_loadout  = je.get("Loadout", state.slf_loadout)
+                        lo = je.get("Loadout", "")
+                        state.slf_loadout  = lo or state.slf_loadout
+                        # Resolve type from LaunchFighter loadout directly
+                        if not slf_type_known and je.get("Type"):
+                            state.slf_type = resolve_fighter_name(je["Type"], lo or "")
+                            slf_type_known = True
+                            trace(f"SLF bootstrap: type={state.slf_type!r} from LaunchFighter", trace_mode)
                         trace(f"SLF bootstrap: deployed from {jpath.name}", trace_mode)
                     elif ev == "DockFighter":
                         state.slf_deployed = False
@@ -170,17 +177,14 @@ def bootstrap_slf(state: MonitorState, journal_dir: Path, trace_mode: bool = Fal
                         trace(f"SLF bootstrap: destroyed from {jpath.name}", trace_mode)
                     slf_state_known = True
 
+                # LaunchFighter (NPC-controlled) is most authoritative for type.
+                # Already handled above when slf_state_known was set.
+                # Fallback: RestockVehicle if no LaunchFighter found yet.
                 if not slf_type_known and ev == "RestockVehicle":
-                    ft   = je.get("Type", "")
-                    lo   = je.get("Loadout", "")
-                    key  = (ft, lo)
-                    if key in FIGHTER_LOADOUT_NAMES:
-                        state.slf_type = FIGHTER_LOADOUT_NAMES[key]
-                    elif ft in FIGHTER_TYPE_NAMES:
-                        state.slf_type = FIGHTER_TYPE_NAMES[ft]
-                    elif ft:
-                        state.slf_type = ft.replace("_", " ").title()
-                    trace(f"SLF bootstrap: type={state.slf_type!r} from {jpath.name}", trace_mode)
+                    ft  = je.get("Type", "")
+                    lo  = je.get("Loadout", "")
+                    state.slf_type = resolve_fighter_name(ft, lo)
+                    trace(f"SLF bootstrap: type={state.slf_type!r} from RestockVehicle in {jpath.name}", trace_mode)
                     slf_type_known = True
 
                 if slf_state_known and slf_type_known:
