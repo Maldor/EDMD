@@ -65,7 +65,9 @@ class CargoPlugin(BasePlugin):
         "Loadout",          # Hold capacity
         "LoadGame",         # Session start
         "Died",             # Ship destroyed
-        "Market",           # Market.json updated
+        "Market",           # Market.json updated (player opened market UI)
+        "Docked",           # Market.json written when player docks
+        "Location",         # Market.json written on session start at station
     ]
 
     def on_load(self, core) -> None:
@@ -97,10 +99,52 @@ class CargoPlugin(BasePlugin):
                     if v.get("mean_price")
                 }
 
+        # Watch Market.json for changes not triggered by a journal event
+        # (e.g. selecting a comparison market from the galaxy/system map).
+        import threading as _thr
+        _thr.Thread(
+            target=self._watch_market_json,
+            daemon=True,
+            name="cargo-market-watch",
+        ).start()
+
         # Bootstrap cargo from Cargo.json
         items = _read_cargo_json(core.journal_dir)
         if items is not None:
             s.cargo_items = items
+
+    def _watch_market_json(self) -> None:
+        """Poll Market.json for mtime changes.
+
+        The game writes Market.json silently (no journal event) when the
+        player selects a comparison market from the galaxy or system map.
+        Poll every 2 seconds; on change, re-read and refresh cargo block.
+        """
+        import time as _time
+        from pathlib import Path as _Path
+        market_path = _Path(self.core.journal_dir) / "Market.json"
+        last_mtime  = 0.0
+        while True:
+            try:
+                if market_path.is_file():
+                    mtime = market_path.stat().st_mtime
+                    if mtime != last_mtime:
+                        last_mtime = mtime
+                        info = _read_market_json(self.core.journal_dir)
+                        if info:
+                            state = self.core.state
+                            state.cargo_market_info = info
+                            state.cargo_mean_prices = {
+                                k: v["mean_price"]
+                                for k, v in info.get("commodities", {}).items()
+                                if v.get("mean_price")
+                            }
+                            gq = self.core.gui_queue
+                            if gq:
+                                gq.put(("plugin_refresh", "cargo"))
+            except Exception:
+                pass
+            _time.sleep(2.0)
 
     def on_event(self, event: dict, state) -> None:
         core = self.core
@@ -181,6 +225,20 @@ class CargoPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "Market":
+                info = _read_market_json(core.journal_dir)
+                if info:
+                    state.cargo_market_info = info
+                    state.cargo_mean_prices = {
+                        k: v["mean_price"]
+                        for k, v in info.get("commodities", {}).items()
+                        if v.get("mean_price")
+                    }
+                if gq: gq.put(("plugin_refresh", "cargo"))
+
+            case "Docked" | "Location":
+                # Market.json is (re)written when the player docks or loads
+                # at a station. Re-read it so prices/station update immediately
+                # even if the player never opens the commodities screen.
                 info = _read_market_json(core.journal_dir)
                 if info:
                     state.cargo_market_info = info
