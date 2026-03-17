@@ -36,9 +36,10 @@ class CrewSlfBlock(BlockWidget):
         hdr_line1.append(self._crew_slf_type_hdr)
         hdr_outer.append(hdr_line1)
 
-        # Line 2: rank text (right-aligned; hidden when no rank)
+        # Line 2: combat rank (left-aligned under name; hidden when no rank)
         self._crew_rank_hdr = Gtk.Label(label="")
-        self._crew_rank_hdr.set_xalign(1.0)
+        self._crew_rank_hdr.set_xalign(0.0)
+        self._crew_rank_hdr.add_css_class("data-key")
         self._crew_rank_hdr.set_visible(False)
         hdr_outer.append(self._crew_rank_hdr)
 
@@ -93,11 +94,10 @@ class CrewSlfBlock(BlockWidget):
         self._crew_slf_type_hdr.set_label(s.slf_type or "")
 
         # ── Rank — shown in header line 2 ────────────────────────────────────
-        rank_str = (
-            PP_RANK_NAMES[s.crew_rank]
-            if s.crew_rank is not None and 0 <= s.crew_rank < len(PP_RANK_NAMES)
-            else ""
-        )
+        if s.crew_rank is not None and 0 <= s.crew_rank < len(PP_RANK_NAMES):
+            rank_str = f"Combat Rank: {PP_RANK_NAMES[s.crew_rank]}"
+        else:
+            rank_str = ""
         self._crew_rank_hdr.set_label(rank_str)
         self._crew_rank_hdr.set_visible(bool(rank_str))
 
