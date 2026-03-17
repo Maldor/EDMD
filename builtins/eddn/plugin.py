@@ -347,7 +347,7 @@ class EDDNPlugin(BasePlugin):
         self._last_market_id:        int | None = None
 
         if self._enabled:
-            self._sender = _Sender(EDDN_ENDPOINT, QUEUE_FILE)
+            self._sender = _Sender(EDDN_ENDPOINT, self.storage.path / "queue.jsonl")
             self._sender.start()
             print(
                 f"  [EDDN] Uploader enabled "
@@ -923,7 +923,7 @@ class EDDNPlugin(BasePlugin):
             return
 
         pricelist = data.get("PriceList") or []
-        ships = sorted(ship["ShipType"] for ship in pricelist)
+        ships = sorted(set(ship["ShipType"] for ship in pricelist if ship.get("ShipType")))
 
         if not ships:
             return  # schema requires minItems=1
