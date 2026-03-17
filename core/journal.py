@@ -160,11 +160,16 @@ def bootstrap_slf(state: MonitorState, journal_dir: Path, trace_mode: bool = Fal
                         state.slf_docked   = False
                         lo = je.get("Loadout", "")
                         state.slf_loadout  = lo or state.slf_loadout
-                        # Resolve type from LaunchFighter loadout directly
-                        if not slf_type_known and je.get("Type"):
-                            state.slf_type = resolve_fighter_name(je["Type"], lo or "")
-                            slf_type_known = True
-                            trace(f"SLF bootstrap: type={state.slf_type!r} from LaunchFighter", trace_mode)
+                        # Resolve type from LaunchFighter - Type field may be absent
+                        # when only one fighter type is stocked (Frontier limitation).
+                        if not slf_type_known:
+                            _ft = je.get("Type", "")
+                            if _ft:
+                                state.slf_type = resolve_fighter_name(_ft, lo or "")
+                                slf_type_known = True
+                                trace(f"SLF bootstrap: type={state.slf_type!r} from LaunchFighter", trace_mode)
+                            # else: Type absent (Frontier omits when one type stocked)
+                            # RestockVehicle scan below will resolve it
                         trace(f"SLF bootstrap: deployed from {jpath.name}", trace_mode)
                     elif ev == "DockFighter":
                         state.slf_deployed = False

@@ -539,6 +539,8 @@ class AssetsPlugin(BasePlugin):
                     state.pilot_squadron_name = ""
                     state.pilot_squadron_tag  = ""
                     state.pilot_squadron_rank = ""
+
+                # NOTE: CAPI launchBays reports wrong fighter type — not used.
         except Exception:
             pass
 

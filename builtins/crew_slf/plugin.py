@@ -93,11 +93,14 @@ class CrewSlfPlugin(BasePlugin):
                 state.slf_hull     = 100
                 state.slf_orders   = "Defend"
                 state.slf_loadout  = event.get("Loadout")
-                # Set type from this event — resolves to "F/A-26 Strike (Rogue F)" etc.
+                # Set type — Frontier omits Type when only one fighter type
+                # is stocked. slf_type retains last known value from
+                # RestockVehicle (set at restock/buy time, always has Type).
                 _ft = event.get("Type", "")
                 _lo = event.get("Loadout", "")
                 if _ft:
                     state.slf_type = resolve_fighter_name(_ft, _lo)
+                # else: keep existing slf_type set by RestockVehicle
                 if gq: gq.put(("slf_update", None))
                 core.emitter.emit(
                     msg_term="Fighter launched",

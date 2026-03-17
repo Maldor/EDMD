@@ -672,6 +672,8 @@ class CAPIPlugin(BasePlugin):
         state.pilot_squadron_tag  = sq.get("tag", "")
         state.pilot_squadron_rank = sq.get("rank", "")
 
+        # NOTE: CAPI launchBays reports wrong fighter type — do not use.
+
         # ── Current ship ──────────────────────────────────────────────────────
         if ship:
             ship_type   = ship.get("name",          "")

@@ -79,6 +79,14 @@ FIGHTER_TYPE_NAMES = {
 }
 
 FIGHTER_LOADOUT_NAMES = {
+    # Base/stock loadout — no engineering variant, Frontier sends "zero"
+    # when only one fighter type is stocked (Type field is also absent).
+    ("independent_fighter", "zero"):  "F63 Condor",
+    ("federation_fighter",  "zero"):  "F/A-26 Strike",
+    ("empire_fighter",      "zero"):  "GU-97",
+    ("gdn_hybrid_fighter_v1", "zero"): "Trident",
+    ("gdn_hybrid_fighter_v2", "zero"): "Javelin",
+    ("gdn_hybrid_fighter_v3", "zero"): "Lancer",
     # Empire
     ("empire_fighter",      "one"):   "GU-97 (Gelid F)",
     ("empire_fighter",      "two"):   "GU-97 (Rogue F)",
@@ -474,6 +482,7 @@ class MonitorState:
         self.in_preload              = True
         self.pilot_name              = None
         self.pilot_squadron_name     = ""
+        self.slf_capi_type           = None  # type from CAPI launchBays
         self.pilot_squadron_tag      = ""
         self.pilot_squadron_rank     = ""
         self.pilot_ship              = None
