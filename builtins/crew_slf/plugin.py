@@ -84,13 +84,12 @@ class CrewSlfPlugin(BasePlugin):
                     if evt == "RestockVehicle":
                         ft = ev.get("Type", "")
                         lo = ev.get("Loadout", "")
-                        ts = ev.get("timestamp", "?")
                         if not ft:
                             continue
                         # Only use if this restock happened on the current ship
                         if current_sid is None or active_sid == current_sid:
-                            result = _rfn(ft, lo)
-                            self.core.state.slf_type = result
+                            self.core.state.slf_known_ft = ft
+                            self.core.state.slf_type = _rfn(ft, lo)
                             gq = self.core.gui_queue
                             if gq:
                                 gq.put(("slf_update", None))
@@ -178,9 +177,9 @@ class CrewSlfPlugin(BasePlugin):
                 state.slf_orders   = "Defend"
                 state.slf_loadout  = event.get("Loadout")
                 # Frontier omits Type when only one type is stocked.
-                # Use Type if present; otherwise keep existing slf_type
-                # (set by RestockVehicle). If still None, schedule recovery.
-                _ft = event.get("Type", "")
+                # Use slf_known_ft (from RestockVehicle) + the loadout key
+                # to resolve the exact variant even without a Type field.
+                _ft = event.get("Type", "") or getattr(state, "slf_known_ft", "") or ""
                 _lo = event.get("Loadout", "")
                 if _ft:
                     state.slf_type = resolve_fighter_name(_ft, _lo)
@@ -200,6 +199,8 @@ class CrewSlfPlugin(BasePlugin):
             case "RestockVehicle":
                 ft   = event.get("Type", "")
                 lo   = event.get("Loadout", "")
+                if ft:
+                    state.slf_known_ft = ft
                 state.slf_type = resolve_fighter_name(ft, lo)
                 state.slf_destroyed_count = 0
                 state.slf_docked          = True

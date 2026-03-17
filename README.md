@@ -48,7 +48,7 @@ When things go wrong — your fighter blown up, hull taking critical damage, fue
 | 📈 **Statistical Reports** | Five journal-wide reports: career overview, bounty breakdown, session history, hunting grounds, and NPC rogues' gallery |
 | 📚 **Native Docs Viewer** | Full documentation browser built into the GUI — no browser needed |
 | 🔌 **Plugin System** | Drop a Python plugin into `plugins/` and it loads automatically with optional dashboard block |
-| 📦 **Cargo Block** | Live ship hold display with tonnage gauge, per-item list, and stolen-goods flagging |
+| 📦 **Cargo Block** | Live ship hold display with tonnage gauge, per-item list, stolen-goods flagging, and target-market price comparison via Spansh |
 | ⚗️ **Engineering Block** | Engineering materials inventory across Raw, Manufactured, and Encoded categories |
 | 🚀 **Assets Block** | Full fleet overview — current ship, stored ships with fitted loadouts, stored modules, fleet carrier status, and CAPI-sourced hull/rebuy data |
 | 🛡️ **CAPI Integration** | Frontier Companion API for authoritative fleet data, live market prices, squadron identity, and community goal tracking. Data persisted locally so it is available immediately on restart |

@@ -43,13 +43,13 @@ DEFAULT_LAYOUT = {
     # Right col:  crew_slf → assets
     "commander":    {"col": 0,  "row": 0,  "width": 8, "height": 14},
     "session_stats":{"col": 8,  "row": 0,  "width": 8, "height": 10},
-    "crew_slf":     {"col": 16, "row": 0,  "width": 8, "height": 10},
+    "crew_slf":     {"col": 16, "row": 0,  "width": 8, "height": 12},
     "missions":     {"col": 0,  "row": 14, "width": 8, "height": 9},
     "mode":         {"col": 8,  "row": 10, "width": 8, "height": 5},
     "cargo":        {"col": 8,  "row": 15, "width": 8, "height": 10},
     "engineering":  {"col": 8,  "row": 25, "width": 8, "height": 10},
     "alerts":       {"col": 0,  "row": 23, "width": 8, "height": 10},
-    "assets":       {"col": 16, "row": 10, "width": 8, "height": 25},
+    "assets":       {"col": 16, "row": 12, "width": 8, "height": 25},
 }
 
 

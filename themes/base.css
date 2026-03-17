@@ -1188,3 +1188,80 @@ link:hover {
     background: var(--accent-hover) none;
     border-color: var(--accent-dim);
 }
+
+/* ── Cargo block ─────────────────────────────────────────────────────────── */
+
+.cargo-full {
+    color: var(--health-crit);
+    font-weight: bold;
+}
+
+.cargo-warn {
+    color: var(--health-warn);
+}
+
+.cargo-ok {
+    color: var(--health-good);
+}
+
+.cargo-stolen {
+    color: var(--health-warn);
+}
+
+/* Target market search entry in cargo footer */
+.data-entry {
+    font-size: 0.82em;
+    min-height: 0;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--bg-deep) none;
+    color: var(--fg);
+    box-shadow: none;
+}
+
+.data-entry:focus {
+    border-color: var(--accent);
+    background: var(--bg) none;
+}
+
+/* Cargo footer accept (green ✓) and clear (red ✕) buttons */
+.cargo-accept-btn {
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: #4caf50;
+    box-shadow: none;
+    min-height: 0;
+}
+
+.cargo-accept-btn:hover {
+    background: rgba(76, 175, 80, 0.15) none;
+    border-color: #4caf50;
+}
+
+.cargo-accept-btn:disabled {
+    opacity: 0.3;
+}
+
+.cargo-clear-btn {
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    color: #e53935;
+    box-shadow: none;
+    min-height: 0;
+}
+
+.cargo-clear-btn:hover {
+    background: rgba(229, 57, 53, 0.15) none;
+    border-color: #e53935;
+}
+
+.cargo-clear-btn:disabled {
+    opacity: 0.3;
+}
