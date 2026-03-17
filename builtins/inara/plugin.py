@@ -87,13 +87,14 @@ class _Sender(threading.Thread):
     Call stop() for clean shutdown.
     """
 
-    def __init__(self, cmdr_name: str, api_key: str):
+    def __init__(self, cmdr_name: str, api_key: str, queue_file) -> None:
         super().__init__(daemon=True, name="inara-sender")
-        self._cmdr      = cmdr_name
-        self._key       = api_key
-        self._q         = queue.Queue()
-        self._stop_evt  = threading.Event()
-        self._last_send = 0.0
+        self._cmdr       = cmdr_name
+        self._key        = api_key
+        self._queue_file = queue_file
+        self._q          = queue.Queue()
+        self._stop_evt   = threading.Event()
+        self._last_send  = 0.0
 
     def push(self, inara_event: dict) -> None:
         self._q.put(inara_event)
@@ -193,18 +194,20 @@ class _Sender(threading.Thread):
 
     def _persist(self, events: list[dict]) -> None:
         try:
-            QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(QUEUE_FILE, "a", encoding="utf-8") as f:
+            self._queue_file.parent.mkdir(parents=True, exist_ok=True)
+            import builtins as _bi
+            with _bi.open(self._queue_file, "a", encoding="utf-8") as f:
                 for ev in events:
                     f.write(json.dumps({"queued_at": time.time(), "msg": ev}) + "\n")
         except Exception as e:
             print(f"  [Inara] Failed to persist events to disk: {e}")
 
     def _drain_disk(self) -> None:
-        if not QUEUE_FILE.exists():
+        if not self._queue_file.exists():
             return
         try:
-            lines = QUEUE_FILE.read_text(encoding="utf-8").splitlines()
+            import builtins as _bi
+            lines = _bi.open(self._queue_file, encoding="utf-8").read().splitlines()
         except Exception:
             return
         if not lines:
@@ -261,10 +264,23 @@ class InaraPlugin(BasePlugin):
         # Missions
         "MissionAccepted", "MissionCompleted",
         "MissionFailed", "MissionAbandoned",
-        # Ship
-        "Loadout", "ShipyardSwap",
+        # Ship — identity, loadout, fleet
+        "Loadout", "ShipyardSwap", "ShipyardBuy", "ShipyardSell",
+        "StoredShips", "SetUserShipName",
         # Materials
         "Materials",
+        # Cargo snapshot
+        "Cargo",
+        # Micro-resources (Odyssey ship locker)
+        "ShipLockerMaterials",
+        # Exobiology
+        "SellOrganicData",
+        # Combat death
+        "Died",
+        # Community goals
+        "CommunityGoalJoin", "CommunityGoalReward",
+        # Multicrew
+        "MulticrewJoin", "MulticrewEnd",
     ]
 
     def on_load(self, core) -> None:
@@ -283,6 +299,8 @@ class InaraPlugin(BasePlugin):
         # so we can send a combined array to Inara on LoadGame
         self._rank_values:    dict[str, int]   = {}   # key → rankValue
         self._rank_progress:  dict[str, float] = {}   # key → fraction 0-1
+        self._micro_items:    list[dict]        = []   # last ShipLockerMaterials snapshot
+        self._last_loadout:   dict | None       = None  # dedup: only send changed loadouts
 
         cfg = core.load_setting("Inara", CFG_DEFAULTS, warn=False)
 
@@ -302,7 +320,7 @@ class InaraPlugin(BasePlugin):
         # Strip "CMDR " prefix if the user included it — a common mistake
         raw_name          = cfg["CommanderName"].strip()
         self._cmdr_name   = raw_name[5:].strip() if raw_name.upper().startswith("CMDR ") else raw_name
-        self._sender      = _Sender(self._cmdr_name, cfg["ApiKey"])
+        self._sender      = _Sender(self._cmdr_name, cfg["ApiKey"], self.storage.path / "queue.jsonl")
         self._sender.start()
 
         print(f"  [Inara] Enabled — uploading as CMDR {self._cmdr_name}")
@@ -512,7 +530,7 @@ class InaraPlugin(BasePlugin):
                     })
 
             case "Loadout":
-                # Current ship identity
+                # Current ship identity + full stats
                 ship_type = event.get("Ship", "")
                 ship_id   = event.get("ShipID")
                 if ship_type:
@@ -526,9 +544,21 @@ class InaraPlugin(BasePlugin):
                     ident = event.get("ShipIdent")
                     if name:  ship_data["shipName"]  = name
                     if ident: ship_data["shipIdent"] = ident
+                    hull_val  = event.get("HullValue")
+                    mods_val  = event.get("ModulesValue")
+                    rebuy     = event.get("Rebuy")
+                    fuel_cap  = (event.get("FuelCapacity") or {}).get("Main")
+                    cargo_cap = event.get("CargoCapacity")
+                    max_jump  = event.get("MaxJumpRange")
+                    if hull_val  is not None: ship_data["shipHullValue"]    = int(hull_val)
+                    if mods_val  is not None: ship_data["shipModulesValue"] = int(mods_val)
+                    if rebuy     is not None: ship_data["shipRebuyCost"]    = int(rebuy)
+                    if fuel_cap  is not None: ship_data["fuelCapacity"]     = round(float(fuel_cap), 2)
+                    if cargo_cap is not None: ship_data["cargoCapacity"]    = int(cargo_cap)
+                    if max_jump  is not None: ship_data["maxJumpRange"]     = round(float(max_jump), 2)
                     self._push(ts, "setCommanderShip", ship_data)
 
-                # Full loadout
+                # Full loadout — use Inara camelCase field names (not journal PascalCase)
                 modules = event.get("Modules", [])
                 if modules and ship_type:
                     loadout_modules = []
@@ -537,17 +567,46 @@ class InaraPlugin(BasePlugin):
                         item = mod.get("Item", "")
                         if not slot or not item:
                             continue
-                        entry: dict = {"Slot": slot, "Item": item}
-                        # Engineering blueprint if present
+                        # Inara API field names (verified against EDMC implementation)
+                        entry: dict = {
+                            "slotName":     slot,
+                            "itemName":     item,
+                            "isOn":         bool(mod.get("On", True)),
+                            "itemPriority": int(mod.get("Priority", 0)),
+                            "itemHealth":   round(float(mod.get("Health", 1.0)), 4),
+                        }
+                        value  = mod.get("Value")
+                        ammo_c = mod.get("AmmoInClip")
+                        ammo_h = mod.get("AmmoInHopper")
+                        hot    = mod.get("Hot")
+                        if value  is not None: entry["itemValue"]     = int(value)
+                        if ammo_c is not None: entry["itemAmmoClip"]  = int(ammo_c)
+                        if ammo_h is not None: entry["itemAmmoHopper"]= int(ammo_h)
+                        if hot    is not None: entry["isHot"]         = bool(hot)
+                        # Engineering — camelCase keys per Inara API spec
                         eng = mod.get("Engineering")
-                        if eng:
-                            bp: dict = {}
-                            if eng.get("BlueprintName"): bp["BlueprintName"]     = eng["BlueprintName"]
-                            if eng.get("Level"):         bp["Level"]             = int(eng["Level"])
-                            if eng.get("Quality"):       bp["Quality"]           = float(eng["Quality"])
-                            if eng.get("ExperimentalEffect"): bp["ExperimentalEffect"] = eng["ExperimentalEffect"]
-                            if bp:
-                                entry["Engineering"] = bp
+                        if eng and eng.get("BlueprintName"):
+                            bp: dict = {
+                                "blueprintName":    eng["BlueprintName"],
+                                "blueprintLevel":   int(eng.get("Level", 0)),
+                                "blueprintQuality": round(float(eng.get("Quality", 0)), 2),
+                            }
+                            if eng.get("ExperimentalEffect"):
+                                bp["experimentalEffect"] = eng["ExperimentalEffect"]
+                            modifiers = eng.get("Modifiers") or []
+                            bp["modifiers"] = []
+                            for mod_entry in modifiers:
+                                m: dict = {"name": mod_entry.get("Label", "")}
+                                if "OriginalValue" in mod_entry:
+                                    m["value"]         = mod_entry["Value"]
+                                    m["originalValue"] = mod_entry["OriginalValue"]
+                                    m["lessIsGood"]    = int(mod_entry.get("LessIsGood", 0))
+                                elif "ValueStr" in mod_entry:
+                                    m["value"] = mod_entry["ValueStr"]
+                                elif "Value" in mod_entry:
+                                    m["value"] = mod_entry["Value"]
+                                bp["modifiers"].append(m)
+                            entry["engineering"] = bp
                         loadout_modules.append(entry)
 
                     loadout_data: dict = {
@@ -556,7 +615,10 @@ class InaraPlugin(BasePlugin):
                     }
                     if ship_id is not None:
                         loadout_data["shipGameID"] = int(ship_id)
-                    self._push(ts, "setCommanderShipLoadout", loadout_data)
+                    # Deduplicate: only send if loadout changed
+                    if loadout_data != self._last_loadout:
+                        self._last_loadout = loadout_data
+                        self._push(ts, "setCommanderShipLoadout", loadout_data)
 
             case "Materials":
                 # Full materials snapshot — post as setCommanderInventoryMaterials
@@ -575,7 +637,174 @@ class InaraPlugin(BasePlugin):
                 if all_materials:
                     self._push(ts, "setCommanderInventoryMaterials", all_materials)
 
+            case "ShipLockerMaterials":
+                items = []
+                for category, key in [("data", "Data"), ("goods", "Goods"), ("assets", "Assets")]:
+                    for item in event.get(key, []):
+                        name = item.get("Name", "")
+                        if name:
+                            items.append({
+                                "itemName":     name,
+                                "itemCount":    int(item.get("Count", 0)),
+                                "itemCategory": category,
+                            })
+                self._micro_items = items
+                if items:
+                    self._push(ts, "setCommanderInventoryMicroResources", items)
+
+            case "Cargo":
+                cargo = self._read_cargo_json()
+                if cargo:
+                    self._push(ts, "setCommanderInventoryCargo", cargo)
+
+            case "ShipyardBuy":
+                # Do NOT send setCommanderShip here — the Loadout event that follows
+                # will send both setCommanderShip and setCommanderShipLoadout together.
+                # Clear dedup cache so the next Loadout is always sent.
+                self._last_loadout = None
+
+            case "ShipyardSell":
+                ship_type = event.get("ShipType", "")
+                ship_id   = event.get("SellShipID")
+                if ship_type:
+                    d = {"shipType": ship_type}
+                    if ship_id is not None:
+                        d["shipGameID"] = int(ship_id)
+                    self._push(ts, "setCommanderShipDestroyed", d)
+
+            case "StoredShips":
+                def _push_stored(ship, in_garage: bool) -> None:
+                    stype = ship.get("ShipType", "")
+                    if not stype:
+                        return
+                    d: dict = {"shipType": stype, "isCurrentShip": False, "shipInGarage": in_garage}
+                    sid = ship.get("ShipID")
+                    if sid is not None: d["shipGameID"] = int(sid)
+                    sname  = ship.get("Name")
+                    sident = ship.get("Ident")
+                    if sname:  d["shipName"]  = sname
+                    if sident: d["shipIdent"] = sident
+                    val = ship.get("Value")
+                    if val is not None: d["shipHullValue"] = int(val)
+                    hot = ship.get("Hot")
+                    if hot is not None: d["shipIsHot"] = bool(hot)
+                    if in_garage:
+                        loc = ship.get("StarSystem")
+                        sta = ship.get("StationName")
+                        if loc: d["shipStarSystem"] = loc
+                        if sta: d["shipStation"]    = sta
+                        in_t = ship.get("InTransit")
+                        if in_t is not None: d["shipInTransit"] = bool(in_t)
+                    self._push(ts, "setCommanderShip", d)
+                for ship in event.get("ShipsHere", []):
+                    _push_stored(ship, False)
+                for ship in event.get("ShipsRemote", []):
+                    _push_stored(ship, True)
+
+            case "ShipyardSwap":
+                # Wait for subsequent Loadout event
+                self._last_loadout = None
+
+            case "SetUserShipName":
+                ship_type = event.get("Ship", "")
+                if ship_type:
+                    d: dict = {"shipType": ship_type, "isCurrentShip": True}
+                    sid = event.get("ShipID")
+                    if sid is not None:
+                        d["shipGameID"] = int(sid)
+                    name  = event.get("UserShipName")
+                    ident = event.get("UserShipId")
+                    if name:  d["shipName"]  = name
+                    if ident: d["shipIdent"] = ident
+                    self._push(ts, "setCommanderShip", d)
+
+            case "Died":
+                killer_ship = event.get("KillerShip", "")
+                d: dict = {}
+                if killer_ship:
+                    d["killerShipType"] = killer_ship
+                    d["isPlayerKill"]   = bool(event.get("KillerRank") is not None)
+                self._push(ts, "addCommanderCombatDeath", d)
+
+            case "SellOrganicData":
+                bio_data = event.get("BioData", [])
+                organisms = []
+                for entry in bio_data:
+                    species = entry.get("Species_Localised") or entry.get("Species", "")
+                    genus   = entry.get("Genus_Localised")   or entry.get("Genus", "")
+                    value   = int(entry.get("Value", 0))
+                    bonus   = int(entry.get("Bonus", 0))
+                    if species:
+                        organisms.append({
+                            "speciesName": species,
+                            "genusName":   genus,
+                            "reward":      value + bonus,
+                        })
+                if organisms:
+                    self._push(ts, "addCommanderExobiology", organisms)
+
+            case "CommunityGoalJoin":
+                cgid = event.get("CGID")
+                if cgid is not None:
+                    self._push(ts, "addCommanderCommunityGoalProgress", {
+                        "communitygoalGameID": int(cgid),
+                        "communitygoalName":   event.get("Name", ""),
+                        "starsystemName":      event.get("SystemName", ""),
+                        "stationName":         event.get("MarketName", ""),
+                        "percentileBand":      0,
+                        "contribution":        0,
+                    })
+
+            case "CommunityGoalReward":
+                cgid   = event.get("CGID")
+                reward = event.get("Reward", 0)
+                if cgid is not None:
+                    self._push(ts, "addCommanderCommunityGoalProgress", {
+                        "communitygoalGameID": int(cgid),
+                        "communitygoalName":   event.get("Name", ""),
+                        "contribution":        int(reward),
+                        "isCompleted":         True,
+                    })
+
+            case "MulticrewJoin":
+                self._push(ts, "addCommanderFleetActivity", {
+                    "activityType":  "multicrew",
+                    "isJoining":     True,
+                    "shipType":      event.get("ShipType", ""),
+                    "commanderName": event.get("CaptainName", ""),
+                })
+
+            case "MulticrewEnd":
+                self._push(ts, "addCommanderFleetActivity", {
+                    "activityType":   "multicrew",
+                    "isJoining":      False,
+                    "timeInSession":  int(event.get("Timespan", 0)),
+                })
+
     # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _read_cargo_json(self) -> list[dict]:
+        """Read Cargo.json and return Inara-formatted cargo list."""
+        from pathlib import Path as _Path
+        import json as _json, builtins as _bi
+        jdir = getattr(self.core, "journal_dir", None)
+        if jdir is None:
+            return []
+        path = _Path(jdir) / "Cargo.json"
+        try:
+            data = _json.load(_bi.open(path, encoding="utf-8"))
+        except Exception:
+            return []
+        result = []
+        for item in data.get("Inventory", []):
+            name = item.get("Name", "")
+            if name:
+                result.append({
+                    "itemName":   name,
+                    "itemCount":  int(item.get("Count", 1)),
+                    "itemStolen": bool(item.get("Stolen", False)),
+                })
+        return result
 
     def _track(self, ev: str, event: dict) -> None:
         """Maintain internal ship/location state from raw journal events."""
@@ -598,9 +827,9 @@ class InaraPlugin(BasePlugin):
             if ship_id is not None:
                 self._ship_id = int(ship_id)
 
-        elif ev == "ShipyardSwap":
+        elif ev in ("ShipyardSwap", "ShipyardBuy"):
             ship_type = event.get("ShipType")
-            ship_id   = event.get("ShipID")
+            ship_id   = event.get("ShipID") or event.get("NewShipID")
             if ship_type:
                 self._ship_type = ship_type
             if ship_id is not None:
