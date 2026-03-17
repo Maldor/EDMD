@@ -35,6 +35,7 @@ from gui.blocks   import (
     CargoBlock,
     EngineeringBlock,
     AssetsBlock,
+    ModeBlock,
 )
 
 GLib.set_prgname("edmd")
@@ -369,6 +370,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
                     self._refresh_block("session_stats")
                 elif msg_type == "alerts_update":
                     self._refresh_block("alerts")
+                elif msg_type == "capi_updated":
+                    # A CAPI endpoint refreshed — refresh all blocks that
+                    # might display CAPI-sourced data
+                    for _n in ("assets", "commander", "cargo", "crew_slf"):
+                        self._refresh_block(_n)
                 elif msg_type == "all_update":
                     self._refresh_all()
                 elif msg_type == "update_notice":
@@ -384,6 +390,13 @@ class EdmdWindow(Gtk.ApplicationWindow):
         return True
 
     def _tick(self) -> bool:
+        # Give mode plugin a chance to check no-kill timeout each second
+        mode_plugin = getattr(self._core, "_plugins", {}).get("mode")
+        if mode_plugin and hasattr(mode_plugin, "tick"):
+            try:
+                mode_plugin.tick(self._core.state)
+            except Exception:
+                pass
         # Refresh all blocks on the tick — builtins and plugin blocks alike.
         # _refresh_block is a no-op for unknown names, so this is always safe.
         for name, _, _ in self._registry:
