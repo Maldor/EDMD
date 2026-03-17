@@ -55,7 +55,8 @@ class EngineeringPlugin(BasePlugin):
         "TechnologyBroker",     # Consumed materials for a tech unlock
         "Synthesis",            # Consumed materials for synthesis
         # Odyssey ShipLocker
-        "ShipLocker",           # Full snapshot of on-foot inventory
+        "ShipLocker",
+        "BackpackChange", "BuyMicroResources", "SellMicroResources",           # Full snapshot of on-foot inventory
     ]
 
     def on_load(self, core) -> None:
@@ -74,6 +75,8 @@ class EngineeringPlugin(BasePlugin):
                 "data":        {},
             }
 
+        # Bootstrap Backpack.json for immediate Odyssey backpack display
+        _bootstrap_backpack(s, core.journal_dir)
         # Read ShipLocker.json for immediate locker display on startup
         self._read_shiplocker_json(core)
 
@@ -227,3 +230,41 @@ def _horizons_bucket(state, category: str):
 
 def _fmt_name(key: str) -> str:
     return key.replace("_", " ").title()
+
+
+# ── Backpack JSON helpers ─────────────────────────────────────────────────────
+
+def _bootstrap_backpack(state, journal_dir) -> None:
+    """Bootstrap Odyssey backpack micro-resources from Backpack.json on startup."""
+    if not hasattr(state, "engineering_backpack"):
+        state.engineering_backpack = {}
+    data = _read_backpack_json(journal_dir)
+    if data:
+        state.engineering_backpack = data
+
+
+def _read_backpack_json(journal_dir) -> dict | None:
+    """Read Backpack.json and return {category: [{name, name_local, count}]} or None."""
+    if journal_dir is None:
+        return None
+    import json as _json
+    from pathlib import Path as _Path
+    import builtins as _bi
+    path = _Path(journal_dir) / "Backpack.json"
+    try:
+        data = _json.load(_bi.open(path, encoding="utf-8"))
+    except Exception:
+        return None
+    result = {}
+    for cat in ("Items", "Components", "Consumables", "Data"):
+        items = data.get(cat, [])
+        if items:
+            result[cat.lower()] = [
+                {
+                    "name":       i.get("Name", ""),
+                    "name_local": i.get("Name_Localised") or i.get("Name", ""),
+                    "count":      int(i.get("Count", 0)),
+                }
+                for i in items
+            ]
+    return result or None
