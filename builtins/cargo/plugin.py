@@ -1,25 +1,31 @@
 """
 builtins/cargo/plugin.py — Ship cargo inventory tracking.
 
-Tracks the current cargo hold: capacity, used slots, and per-item breakdown.
-Only cargo items (those that consume hold space) are tracked here.
-Engineering materials, raw/manufactured/data commodities go in the
-materials builtin.
+Tracks the current cargo hold: capacity, used slots, and per-item breakdown
+enriched with market data (sell price, galactic average, category) from
+Market.json and CAPI /market.
 
 Cargo.json strategy
 -------------------
-The game writes Cargo.json to the journal directory whenever the hold
-changes.  It is always the ship's cargo (never SRV or Fighter), so we
-read it on every "Cargo" journal event rather than parsing the event's
-Inventory array directly — which suffers from multiple per-vessel events
-firing in sequence with the SRV/Fighter snapshots overwriting the ship's.
+The game writes Cargo.json on every hold change. It is always the ship's cargo
+(never SRV or Fighter), so we read it on every "Cargo" journal event rather than
+parsing the event Inventory array directly — which suffers from per-vessel events
+firing in sequence and overwriting the ship's snapshot.
 
-On on_load we also attempt an immediate bootstrap read of Cargo.json so
-the block shows data before a journal Cargo event fires.
-
-State stored on MonitorState:
-    cargo_capacity   int    — maximum hold tonnage (from Loadout)
-    cargo_items      dict   — {name: {"count": int, "stolen": bool, "name_local": str}}
+State written to MonitorState:
+    cargo_capacity      int   — maximum hold tonnage (from Loadout)
+    cargo_items         dict  — {key: {count, stolen, name_local}}
+    cargo_market_info   dict  — full market data from Market.json / CAPI:
+                                {
+                                  "station_name": str,
+                                  "star_system":  str,
+                                  "commodities":  {
+                                    key: {
+                                      name_local, category, category_local,
+                                      sell_price, mean_price
+                                    }
+                                  }
+                                }
 
 GUI block: cargo
 """
@@ -29,35 +35,69 @@ from pathlib import Path
 
 from core.plugin_loader import BasePlugin
 
+_CANON_RE = __import__('re').compile(r'^\$(.+)_name;$')
+
+
+def _canonicalise_key(raw: str) -> str:
+    """Normalise a commodity key to plain lowercase.
+
+    Both Market.json and some journal events use the $commodity_name;
+    localisation wrapper. Strip it so keys always match.
+    """
+    s = (raw or "").strip().lower()
+    m = _CANON_RE.match(s)
+    return m.group(1) if m else s
+
 
 class CargoPlugin(BasePlugin):
     PLUGIN_NAME    = "cargo"
     PLUGIN_DISPLAY = "Cargo"
-    PLUGIN_VERSION = "1.0.0"
+    PLUGIN_VERSION = "2.0.0"
 
     SUBSCRIBED_EVENTS = [
-        "Cargo",            # Trigger to re-read Cargo.json
+        "Cargo",            # Re-read Cargo.json
         "CollectCargo",     # Scooped/picked up
         "EjectCargo",       # Dropped
         "MarketBuy",        # Bought commodity
         "MarketSell",       # Sold commodity
         "MiningRefined",    # Refined ore into hold
-        "CargoDepot",       # Wing mission cargo delivery/collection
-        "Loadout",          # Gives us hold capacity via CargoCapacity field
-        "LoadGame",         # Session start — Cargo.json / journal Cargo event follows
-        "Died",             # Ship destroyed — cargo lost
+        "CargoDepot",       # Wing mission cargo
+        "Loadout",          # Hold capacity
+        "LoadGame",         # Session start
+        "Died",             # Ship destroyed
+        "Market",           # Market.json updated
     ]
 
     def on_load(self, core) -> None:
         super().on_load(core)
         core.register_block(self, priority=45)
         s = core.state
-        if not hasattr(s, "cargo_capacity"):
-            s.cargo_capacity = 0
-        if not hasattr(s, "cargo_items"):
-            s.cargo_items = {}
-        # Bootstrap from Cargo.json immediately so the block isn't blank
-        # before the first journal Cargo event fires.
+        if not hasattr(s, "cargo_capacity"):   s.cargo_capacity   = 0
+        if not hasattr(s, "cargo_items"):      s.cargo_items      = {}
+        # Legacy field kept for compat — block now reads cargo_market_info instead
+        if not hasattr(s, "cargo_mean_prices"):s.cargo_mean_prices = {}
+        if not hasattr(s, "cargo_market_info"):s.cargo_market_info = {}
+
+        # Bootstrap market data — CAPI first, then Market.json
+        capi_mkt = getattr(s, "capi_market", None)
+        if capi_mkt and capi_mkt.get("commodities"):
+            s.cargo_market_info = _build_market_info_from_capi(capi_mkt)
+            s.cargo_mean_prices = {
+                k: v["mean_price"]
+                for k, v in capi_mkt["commodities"].items()
+                if v.get("mean_price")
+            }
+        else:
+            info = _read_market_json(core.journal_dir)
+            if info:
+                s.cargo_market_info = info
+                s.cargo_mean_prices = {
+                    k: v["mean_price"]
+                    for k, v in info.get("commodities", {}).items()
+                    if v.get("mean_price")
+                }
+
+        # Bootstrap cargo from Cargo.json
         items = _read_cargo_json(core.journal_dir)
         if items is not None:
             s.cargo_items = items
@@ -76,26 +116,23 @@ class CargoPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "Cargo":
-                # Journal fires one Cargo event per vessel (Ship, SRV, Fighter).
-                # Cargo.json always contains the ship hold — read that instead.
                 items = _read_cargo_json(core.journal_dir)
                 if items is not None:
                     state.cargo_items = items
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "CollectCargo":
-                key = event.get("Type", "").lower()
+                key = _canonicalise_key(event.get("Type", ""))
                 if key:
                     entry = state.cargo_items.setdefault(key, {
-                        "count":      0,
-                        "stolen":     bool(event.get("Stolen", False)),
+                        "count": 0, "stolen": bool(event.get("Stolen", False)),
                         "name_local": event.get("Type_Localised") or _fmt_name(key),
                     })
                     entry["count"] += 1
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "EjectCargo":
-                key   = event.get("Type", "").lower()
+                key = _canonicalise_key(event.get("Type", ""))
                 count = int(event.get("Count", 1))
                 if key and key in state.cargo_items:
                     state.cargo_items[key]["count"] -= count
@@ -104,19 +141,18 @@ class CargoPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "MarketBuy":
-                key   = event.get("Type", "").lower()
+                key   = _canonicalise_key(event.get("Type", ""))
                 count = int(event.get("Count", 1))
                 if key:
                     entry = state.cargo_items.setdefault(key, {
-                        "count":      0,
-                        "stolen":     False,
+                        "count": 0, "stolen": False,
                         "name_local": event.get("Type_Localised") or _fmt_name(key),
                     })
                     entry["count"] += count
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "MarketSell":
-                key   = event.get("Type", "").lower()
+                key   = _canonicalise_key(event.get("Type", ""))
                 count = int(event.get("Count", 1))
                 if key and key in state.cargo_items:
                     state.cargo_items[key]["count"] -= count
@@ -125,18 +161,16 @@ class CargoPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "MiningRefined":
-                key = event.get("Type", "").lower()
+                key = _canonicalise_key(event.get("Type", ""))
                 if key:
                     entry = state.cargo_items.setdefault(key, {
-                        "count":      0,
-                        "stolen":     False,
+                        "count": 0, "stolen": False,
                         "name_local": event.get("Type_Localised") or _fmt_name(key),
                     })
                     entry["count"] += 1
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
             case "CargoDepot":
-                # Wing mission — re-read Cargo.json for authoritative state
                 items = _read_cargo_json(core.journal_dir)
                 if items is not None:
                     state.cargo_items = items
@@ -146,21 +180,82 @@ class CargoPlugin(BasePlugin):
                 state.cargo_items = {}
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
+            case "Market":
+                info = _read_market_json(core.journal_dir)
+                if info:
+                    state.cargo_market_info = info
+                    state.cargo_mean_prices = {
+                        k: v["mean_price"]
+                        for k, v in info.get("commodities", {}).items()
+                        if v.get("mean_price")
+                    }
+                if gq: gq.put(("plugin_refresh", "cargo"))
+
             case "LoadGame":
-                # Clear on new session; Cargo.json / journal Cargo event follows shortly
                 state.cargo_items = {}
                 if gq: gq.put(("plugin_refresh", "cargo"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _read_cargo_json(journal_dir) -> dict | None:
-    """
-    Read Cargo.json from the journal directory and return a cargo_items dict.
+def _read_market_json(journal_dir) -> dict | None:
+    """Read Market.json and return a cargo_market_info dict or None."""
+    if journal_dir is None:
+        return None
+    path = Path(journal_dir) / "Market.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
 
-    Returns None on any error (file missing, parse failure, etc.).
-    Cargo.json items lack Name_Localised, so _fmt_name() is the display fallback.
-    """
+    commodities = {}
+    for item in data.get("Items", []):
+        key = _canonicalise_key(item.get("Name", ""))
+        if not key:
+            continue
+        cat_raw   = item.get("Category", "")
+        cat_local = item.get("Category_Localised", "")
+        if not cat_local:
+            # Strip $..._name; wrapper from category key
+            m = _CANON_RE.match(cat_raw.lower())
+            cat_local = m.group(1).replace("_", " ").title() if m else cat_raw.title()
+        commodities[key] = {
+            "name_local":   item.get("Name_Localised", "") or _fmt_name(key),
+            "category":     cat_raw,
+            "category_local": cat_local,
+            "sell_price":   int(item.get("SellPrice", 0)),
+            "mean_price":   int(item.get("MeanPrice", 0)),
+        }
+
+    return {
+        "station_name": data.get("StationName", ""),
+        "star_system":  data.get("StarSystem", ""),
+        "commodities":  commodities,
+    }
+
+
+def _build_market_info_from_capi(capi_mkt: dict) -> dict:
+    """Convert state.capi_market into cargo_market_info format."""
+    commodities = {}
+    for key, c in capi_mkt.get("commodities", {}).items():
+        cat = c.get("category", "")
+        commodities[key] = {
+            "name_local":     c.get("name_local", "") or _fmt_name(key),
+            "category":       cat,
+            "category_local": cat.replace("_", " ").title() if cat else "",
+            "sell_price":     int(c.get("sell_price", 0)),
+            "mean_price":     int(c.get("mean_price", 0)),
+        }
+    return {
+        "station_name": capi_mkt.get("station_name", ""),
+        "star_system":  capi_mkt.get("star_system", ""),
+        "commodities":  commodities,
+    }
+
+
+def _read_cargo_json(journal_dir) -> dict | None:
+    """Read Cargo.json and return cargo_items dict or None."""
     if journal_dir is None:
         return None
     path = Path(journal_dir) / "Cargo.json"
@@ -169,10 +264,9 @@ def _read_cargo_json(journal_dir) -> dict | None:
             data = json.load(f)
     except Exception:
         return None
-
     result = {}
     for item in data.get("Inventory", []):
-        key = item.get("Name", "").lower()
+        key = _canonicalise_key(item.get("Name", ""))
         if not key:
             continue
         result[key] = {
@@ -184,5 +278,4 @@ def _read_cargo_json(journal_dir) -> dict | None:
 
 
 def _fmt_name(key: str) -> str:
-    """Fallback localised name from internal key: 'food_cartridges' → 'Food Cartridges'."""
     return key.replace("_", " ").title()
