@@ -54,6 +54,294 @@ def _fmt_credits(val) -> str:
     return f"{v} cr"
 
 
+
+# Slot prefix → hardware category, display order
+_SLOT_CATEGORIES = [
+    # Hardpoints — journal slot names are Size-prefixed (LargeHardpoint1, etc.)
+    ("TinyHardpoint",   "Utility Mounts"),   # must come before the bare Hardpoint match
+    ("HugeHardpoint",   "Hardpoints"),
+    ("LargeHardpoint",  "Hardpoints"),
+    ("MediumHardpoint", "Hardpoints"),
+    ("SmallHardpoint",  "Hardpoints"),
+    ("Hardpoint",       "Hardpoints"),        # catch-all for bare "Hardpoint1" from CAPI
+    # Core internal
+    ("Armour",          "Core Internal"),
+    ("PowerPlant",      "Core Internal"),
+    ("MainEngines",     "Core Internal"),
+    ("FrameShiftDrive", "Core Internal"),
+    ("LifeSupport",     "Core Internal"),
+    ("PowerDistributor","Core Internal"),
+    ("Radar",           "Core Internal"),
+    ("FuelTank",        "Core Internal"),
+    # Optional / Military
+    ("Slot",            "Optional Internal"),
+    ("Military",        "Military"),
+    # Optional internals with non-Slot prefix
+    ("PlanetaryApproachSuite", "Optional Internal"),
+    ("EngineColour",    "Livery"),
+    ("WeaponColour",    "Livery"),
+    ("ShipCockpit",     "Livery"),
+    ("CargoHatch",      "Optional Internal"),
+    # Livery
+    ("PaintJob",        "Livery"),
+    ("Bobble",          "Livery"),
+    ("Decal",           "Livery"),
+    ("ShipName",        "Livery"),
+    ("ShipID",          "Livery"),
+    ("VesselVoice",     "Livery"),
+    ("StringLights",    "Livery"),
+    ("ShipKitSpoiler",  "Livery"),
+    ("ShipKitWings",    "Livery"),
+    ("ShipKitTail",     "Livery"),
+    ("ShipKitBumper",   "Livery"),
+]
+_CATEGORY_ORDER = [
+    "Hardpoints", "Core Internal", "Optional Internal",
+    "Military", "Utility Mounts", "Livery",
+]
+
+def _slot_to_category(slot: str) -> str:
+    for prefix, cat in _SLOT_CATEGORIES:
+        if slot.startswith(prefix):
+            return cat
+    return "Other"
+
+
+
+_BLUEPRINT_NAMES = {
+    # Weapons
+    "weapon_longrange":             "Long Range",
+    "weapon_highcapacity":          "High Capacity Magazine",
+    "weapon_rapidfire":             "Rapid Fire",
+    "weapon_overcharged":           "Overcharged",
+    "weapon_lightweight":           "Lightweight",
+    "weapon_focused":               "Focused",
+    "weapon_efficient":             "Efficient",
+    "weapon_shorterange":           "Short Range Blaster",
+    "weapon_dazzle":                "Dazzle Shell",
+    "weapon_scramblespectrum":      "Scramble Spectrum",
+    "weapon_incendiary":            "Incendiary Rounds",
+    "weapon_screening":             "Screening Shell",
+    # Engines
+    "engine_dirty":                 "Dirty Drive Tuning",
+    "engine_reinforced":            "Drive Strengthening",
+    "engine_clean":                 "Clean Drive Tuning",
+    "engine_tuned":                 "Tuned Drive Tuning",
+    # FSD
+    "fsd_longrange":                "Increased Range",
+    "fsd_fastboot":                 "Faster Boot Sequence",
+    "fsd_shielded":                 "Shielded FSD",
+    # Shields
+    "shieldgenerator_thermic":      "Thermal Resistance",
+    "shieldgenerator_kinetic":      "Kinetic Resistance",
+    "shieldgenerator_reinforced":   "Reinforced",
+    "shieldgenerator_enhanced":     "Enhanced Low Power",
+    # Power plant
+    "powerplant_boosted":           "Overcharged",
+    "powerplant_armoured":          "Armoured",
+    "powerplant_lightweight":       "Low Emissions",
+    # Power distributor
+    "powerdistributor_priorityengines": "Charge Enhanced",
+    "powerdistributor_highfrequency": "High Frequency Distributor",
+    "powerdistributor_shielded":    "Shielded",
+    # Armour
+    "armour_heavyduty":             "Heavy Duty",
+    "armour_kinetic":               "Kinetic Armour",
+    "armour_thermic":               "Thermal Armour",
+    "armour_explosive":             "Explosive Armour",
+    "armour_advanced":              "Advanced",
+    # Hull reinforcement
+    "hullreinforcement_heavyduty":  "Heavy Duty",
+    "hullreinforcement_kinetic":    "Kinetic Armour",
+    "hullreinforcement_thermic":    "Thermal Armour",
+    "hullreinforcement_explosive":  "Explosive Armour",
+    "hullreinforcement_advanced":   "Advanced",
+    # Sensors
+    "sensor_longrange":             "Long Range",
+    "sensor_fastscan":              "Fast Scan",
+    "sensor_wideangle":             "Wide Angle",
+    "sensor_lightweight":           "Lightweight",
+    # Misc
+    "cargoscanner_fastscan":        "Fast Scan",
+    "cargoscanner_longrange":       "Long Range",
+    "cargorack_increasedcapacity":  "Expanded",
+    "misc_highpowerercapacity":     "Stripped Down",
+}
+
+_EXP_EFFECT_NAMES = {
+    "special_weapon_damage":              "Oversized",
+    "special_weapon_multidestabiliser":   "Multi-Servos",
+    "special_weapon_dazzle":              "Dazzle Shell",
+    "special_weapon_scramblespectrum":    "Scramble Spectrum",
+    "special_weapon_incendiary":          "Incendiary Rounds",
+    "special_weapon_autoloader":          "Auto Loader",
+    "special_weapon_empconduit":          "Stripped Down",
+    "special_weapon_thermalshock":        "Thermal Shock",
+    "special_weapon_inertialimpact":      "Inertial Impact",
+    "special_weapon_corrosive":           "Corrosive Shell",
+    "special_weapon_screening":           "Screening Shell",
+    "special_engine_dirty":               "Dirty Drive Tuning",
+    "special_engine_clean":               "Clean Drive Tuning",
+    "special_fsd_toughened":              "Mass Manager",
+    "special_fsd_stripped":               "Deep Charge",
+    "special_shield_regenerative":        "Fast Charge",
+    "special_shield_toughened":           "Hi-Cap",
+    "special_shield_resistive":           "Kinetic Resistance",
+    "special_shield_thermic":             "Thermo Block",
+    "special_powerplant_toughened":       "Double Braced",
+    "special_powerplant_stealth":         "Low Emissions",
+    "special_armour_chunky":              "Deep Plating",
+    "special_armour_thermic":             "Heat Resistant",
+    "special_hullreinforcement_chunky":   "Deep Plating",
+    "special_hullreinforcement_thermic":  "Heat Resistant",
+    "special_misc_chunkybursts":          "Chunky Bursts",
+    "special_misc_shielddampen":          "Dispersal Field",
+    "special_misc_concordant":            "Concordant Sequence",
+    "special_misc_heatdissipation":       "Recycling Cell",
+    "special_misc_coolingblock":          "Cooling Block",
+    "special_misc_expanded":              "Expanded Capture Arc",
+}
+
+def _normalise_eng_name(name: str) -> str:
+    """Convert BlueprintName / ExperimentalEffect to a readable form."""
+    if not name:
+        return ""
+    key = name.lower().strip()
+    # Check experimental effects first (most specific)
+    if key in _EXP_EFFECT_NAMES:
+        return _EXP_EFFECT_NAMES[key]
+    # Check blueprint name map
+    if key in _BLUEPRINT_NAMES:
+        return _BLUEPRINT_NAMES[key]
+    # Fallback: strip category prefix and title-case remainder
+    import re as _re
+    cleaned = _re.sub(r"^[A-Za-z]+_", "", name)
+    return cleaned.replace("_", " ").title().strip()
+
+
+
+# Prefixes/patterns → hardware category for stored modules
+# (stored modules don't have a ship slot — categorise from module type)
+def _module_category_from_name(internal: str) -> str:
+    """Return the hardware category for a module based on its internal name."""
+    raw = (internal or "").lower()
+    # Strip localisation wrapper first
+    import re as _re
+    m = _re.match(r"^\$(.+)_name;$", raw)
+    if m:
+        raw = m.group(1)
+
+    if raw.startswith("hpt_"):
+        # Utility mounts are tiny hardpoints
+        if "chafflauncher" in raw or "electroniccountermeasure" in raw or \
+           "heatsinklauncher" in raw or "plasmapointdefence" in raw or \
+           "shieldbooster" in raw or "antiunknownshutdown" in raw or \
+           "xenoscanner" in raw or "causticchafflauncher" in raw or \
+           "datalinkscanner" in raw or "cargoScanner" in raw.lower() or \
+           "killwarrantscanner" in raw or "subsurfacedisplacement" in raw:
+            return "Utility Mounts"
+        return "Hardpoints"
+    if _re.match(r"^.+_armour_grade\d$", raw):
+        return "Core Internal"
+    if raw.startswith("int_") or raw.startswith("ext_"):
+        raw_inner = raw[4:]
+        _CORE = ("engine", "hyperdrive", "powerplant", "powerdistributor",
+                 "lifesupport", "sensors", "fueltank", "radar",
+                 "shieldgenerator", "armor", "armour")
+        for c in _CORE:
+            if raw_inner.startswith(c):
+                return "Core Internal"
+        return "Optional Internal"
+    return "Other"
+
+def _populate_ship_modules(mod_box: "Gtk.Box", loadout: list,
+                            sep: "Gtk.Widget", hdr: "Gtk.Widget") -> None:
+    """Clear and repopulate the modules sub-box in a ship popover.
+
+    Modules are grouped by hardware category (Hardpoints, Core Internal, etc.)
+    and sorted by slot within each category.  Engineering is shown inline.
+    Module names are normalised from internal slot-key format.
+    """
+    child = mod_box.get_first_child()
+    while child:
+        nxt = child.get_next_sibling()
+        mod_box.remove(child)
+        child = nxt
+
+    # Filter out empty slots and cosmetic-only items
+    _SKIP_SLOTS = frozenset({
+        "PaintJob", "Bobble", "VesselVoice", "EngineColour", "WeaponColour",
+        "ShipCockpit", "CargoHatch",
+    })
+    _SKIP_PREFIXES = ("Decal", "ShipName", "ShipID", "ShipKitSpoiler",
+                      "ShipKitWings", "ShipKitTail", "ShipKitBumper",
+                      "StringLights", "Bobble")
+    def _is_display_module(m):
+        slot = m.get("slot", "")
+        if not m.get("name_internal", ""):
+            return False
+        if slot in _SKIP_SLOTS:
+            return False
+        if any(slot.startswith(p) for p in _SKIP_PREFIXES):
+            return False
+        return True
+    visible = [m for m in loadout if _is_display_module(m)]
+    has = bool(visible)
+    sep.set_visible(has)
+    hdr.set_visible(has)
+    if not has:
+        return
+
+    # Group by category
+    from collections import defaultdict as _dd
+    groups: dict = _dd(list)
+    for mod in visible:
+        slot = mod.get("slot", "")
+        cat  = _slot_to_category(slot)
+        groups[cat].append(mod)
+
+    # Render in defined order, then any unexpected categories
+    all_cats = list(_CATEGORY_ORDER) + [c for c in groups if c not in _CATEGORY_ORDER]
+
+    for cat in all_cats:
+        mods = groups.get(cat)
+        if not mods:
+            continue
+        # Category header
+        cat_lbl = Gtk.Label(label=cat.upper())
+        cat_lbl.set_xalign(0.0)
+        cat_lbl.add_css_class("data-key")
+        cat_lbl.set_margin_top(5)
+        mod_box.append(cat_lbl)
+
+        for mod in sorted(mods, key=lambda m: m.get("slot", "")):
+            # Use name_display (already normalised by normalise_module_name),
+            # falling back to normalising name_internal directly here.
+            name = mod.get("name_display", "") or mod.get("name_internal", "")
+            if not name:
+                continue
+
+            eng  = mod.get("engineering") or {}
+            bp   = eng.get("BlueprintName", "")
+            lvl  = eng.get("Level")
+            exp  = eng.get("ExperimentalEffect", "")
+
+            line = name
+            if bp:
+                eng_s = _normalise_eng_name(bp)
+                if lvl: eng_s += f" G{lvl}"
+                if exp:  eng_s += f" / {_normalise_eng_name(exp)}"
+                line = f"{name}  [{eng_s}]"
+
+            lbl = Gtk.Label(label=line)
+            lbl.set_xalign(0.0)
+            lbl.add_css_class("data-value")
+            lbl.set_margin_start(10)
+            lbl.set_hexpand(True)
+            lbl.set_wrap(True)
+            lbl.set_size_request(280, -1)
+            mod_box.append(lbl)
+
 class AssetsBlock(BlockWidget):
     BLOCK_TITLE = "ASSETS"
     BLOCK_CSS   = "assets-block"
@@ -195,6 +483,24 @@ class AssetsBlock(BlockWidget):
         row.append(v_lbl)
         body.append(row)
         self._carrier_rows[key] = v_lbl
+
+
+    _CARRIER_STATES = {
+        "normaloperation": "Normal Operation",
+        "inmaintenance":   "In Maintenance",
+        "debtstate":       "Debt / Suspended",
+        "lost":            "Decommissioned",
+    }
+    _CARRIER_THEMES = {
+        "default":   "Default",
+        "tactical":  "Tactical",
+        "corsair":   "Corsair",
+        "bling":     "Prestige",
+        "winter":    "Winter",
+        "spring":    "Spring",
+        "summer":    "Summer",
+        "autumn":    "Autumn",
+    }
 
     def _build_carrier_tab(self) -> Gtk.Widget:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -406,10 +712,14 @@ class AssetsBlock(BlockWidget):
         self._carrier_rows["system"].set_label(_s("system"))
         fuel = int(carrier.get("fuel", 0) or 0)
         self._carrier_rows["fuel"].set_label(f"{fuel}/1000  ({fuel // 10}%)")
-        raw_state = (carrier.get("carrier_state") or "\u2014").replace("_", " ")
-        self._carrier_rows["carrier_state"].set_label(raw_state.title())
-        theme = (carrier.get("theme") or "\u2014").replace("_", " ").title()
-        self._carrier_rows["theme"].set_label(theme)
+        raw_state = (carrier.get("carrier_state") or "").lower().replace("_", "")
+        state_nice = self._CARRIER_STATES.get(raw_state,
+                         (carrier.get("carrier_state") or "\u2014").replace("_", " ").title())
+        self._carrier_rows["carrier_state"].set_label(state_nice)
+        raw_theme = (carrier.get("theme") or "").lower().replace("_", "")
+        theme_nice = self._CARRIER_THEMES.get(raw_theme,
+                         (carrier.get("theme") or "\u2014").replace("_", " ").title())
+        self._carrier_rows["theme"].set_label(theme_nice)
 
         # ── Access ────────────────────────────────────────────────────────────
         docking = carrier.get("docking", "\u2014") or "\u2014"
@@ -523,7 +833,12 @@ class AssetsBlock(BlockWidget):
             is_current = ship.get("current", False)
             star       = "  \u2605" if is_current else ""
 
-            line1 = f"{name}  ({type_disp}){star}" if name else f"{type_disp}{star}"
+            ident = ship.get("ident", "") or ""
+            ident_str = f" [{ident}]" if ident else ""
+            if name:
+                line1 = f"{name}{ident_str}  ({type_disp}){star}"
+            else:
+                line1 = f"{type_disp}{ident_str}{star}"
             line2 = ship.get("system", "\u2014")
             if ship.get("hot"):
                 line2 = "\U0001f534 HOT  " + line2
@@ -581,51 +896,107 @@ class AssetsBlock(BlockWidget):
         return container
 
     def _build_ship_popover(self, ship):
+        """Build a scrollable ship detail popover using a Box layout.
+
+        Uses a Box instead of Grid so we can dynamically add/clear the
+        fitted-modules section in _update_ship_popover without rebuilding.
+        """
         popover = Gtk.Popover()
         popover.add_css_class("assets-detail-popover")
         popover.set_autohide(True)
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_row_spacing(3)
-        grid.set_margin_top(8)
-        grid.set_margin_bottom(8)
-        grid.set_margin_start(10)
-        grid.set_margin_end(10)
+        # Outer scroll wrapper so popover stays on-screen for large loadouts
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_max_content_height(520)
+        scroll.set_propagate_natural_height(True)
 
-        rows_data = [
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.set_margin_top(8)
+        outer.set_margin_bottom(8)
+        outer.set_margin_start(10)
+        outer.set_margin_end(12)
+        scroll.set_child(outer)
+
+        def _kv_row(key, val, box):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            kl = Gtk.Label(label=key)
+            kl.set_xalign(0.0)
+            kl.add_css_class("data-key")
+            kl.set_size_request(52, -1)
+            vl = Gtk.Label(label=str(val))
+            vl.set_xalign(0.0)
+            vl.add_css_class("data-value")
+            vl.set_hexpand(True)
+            row.append(kl)
+            row.append(vl)
+            box.append(row)
+            return vl  # return val label for later update
+
+        id_rows = [
             ("Type",   ship.get("type_display", "\u2014")),
-            ("Name",   ship.get("name", "\u2014") or "\u2014"),
-            ("Ident",  ship.get("ident", "\u2014") or "\u2014"),
+            ("Name",   ship.get("name", "") or "\u2014"),
+            ("Ident",  ship.get("ident", "") or "\u2014"),
             ("System", ship.get("system", "\u2014")),
             ("Value",  _fmt_credits(ship.get("value"))),
+            ("Rebuy",  _fmt_credits(ship.get("rebuy"))),
+            ("Hull",   f"{ship.get('hull', 100)}%" if ship.get("hull") is not None else "\u2014"),
             ("Status", "\U0001f534 HOT" if ship.get("hot") else "Clean"),
         ]
-        for i, (k, v) in enumerate(rows_data):
-            key_lbl = Gtk.Label(label=k)
-            key_lbl.set_xalign(0.0)
-            key_lbl.add_css_class("data-key")
-            val_lbl = Gtk.Label(label=str(v))
-            val_lbl.set_xalign(0.0)
-            val_lbl.add_css_class("data-value")
-            grid.attach(key_lbl, 0, i, 1, 1)
-            grid.attach(val_lbl, 1, i, 1, 1)
+        val_labels = {}
+        for k, v in id_rows:
+            val_labels[k] = _kv_row(k, v, outer)
 
-        popover._val_labels = {k: grid.get_child_at(1, i)
-                                for i, (k, _) in enumerate(rows_data)}
-        popover.set_child(grid)
+        # Modules sub-box — cleared and repopulated on each update
+        mod_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        mod_sep.set_margin_top(6)
+        mod_sep.set_margin_bottom(2)
+        outer.append(mod_sep)
+
+        mod_hdr = Gtk.Label(label="FITTED MODULES")
+        mod_hdr.add_css_class("data-key")
+        mod_hdr.set_xalign(0.0)
+        mod_hdr.set_margin_bottom(2)
+        outer.append(mod_hdr)
+
+        mod_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.append(mod_box)
+
+        popover._val_labels = val_labels
+        popover._mod_box    = mod_box
+        popover._mod_sep    = mod_sep
+        popover._mod_hdr    = mod_hdr
+        popover.set_child(scroll)
+
+        # Populate modules section with initial data
+        _populate_ship_modules(mod_box, ship.get("loadout") or [], mod_sep, mod_hdr)
         return popover
 
     def _update_ship_popover(self, container, ship):
         try:
-            vl = container._popover._val_labels
+            pop = container._popover
+            vl  = pop._val_labels
             vl["Type"].set_label(ship.get("type_display", "\u2014"))
-            vl["Name"].set_label(ship.get("name", "\u2014") or "\u2014")
-            vl["Ident"].set_label(ship.get("ident", "\u2014") or "\u2014")
+            vl["Name"].set_label(ship.get("name", "") or "\u2014")
+            vl["Ident"].set_label(ship.get("ident", "") or "\u2014")
             vl["System"].set_label(ship.get("system", "\u2014"))
+            if "Hull" in vl:
+                _h = ship.get("hull")
+                vl["Hull"].set_label(f"{_h}%" if _h is not None else "\u2014")
             vl["Value"].set_label(_fmt_credits(ship.get("value")))
+            if "Rebuy" in vl:
+                vl["Rebuy"].set_label(_fmt_credits(ship.get("rebuy")))
             vl["Status"].set_label("\U0001f534 HOT" if ship.get("hot") else "Clean")
-        except Exception:
+            # Rebuild module list (loadout may have arrived after popover was created)
+            _populate_ship_modules(
+                pop._mod_box,
+                ship.get("loadout") or [],
+                pop._mod_sep,
+                pop._mod_hdr,
+            )
+        except Exception as _ex:
+            import traceback as _tb
+            _tb.print_exc()
             pass
 
     # ── Modules tab ───────────────────────────────────────────────────────────
@@ -636,35 +1007,102 @@ class AssetsBlock(BlockWidget):
             return
         list_box  = sec["list_box"]
         empty_lbl = sec["empty_lbl"]
-        rows      = sec["rows"]
+        rows      = sec["rows"]   # key -> (container, n_lbl, s_lbl)
 
-        seen = set()
+        # Only re-render when module data actually changes.
+        # Full re-render destroys widget rows, closing any open popovers.
+        fp = tuple((m.get("_key",""), m.get("name_display",""),
+                    m.get("system",""), bool(m.get("hot")),
+                    m.get("engineering",{}).get("BlueprintName",""),
+                    m.get("engineering",{}).get("Level"))
+                   for m in (modules or []))
+        if fp == sec.get("_last_fp") and sec.get("cat_headers") is not None:
+            return  # nothing changed — leave widgets intact
+        sec["_last_fp"] = fp
+
+        # Full re-render grouped by category.
+        # Remove all existing item rows and category headers.
+        for key, (container, _n, _s) in list(rows.items()):
+            try:
+                if hasattr(container, "_popover"):
+                    pop = container._popover
+                    try: pop.popdown()
+                    except Exception: pass
+                    try: pop.unparent()
+                    except Exception: pass
+            except Exception:
+                pass
+            try: list_box.remove(container)
+            except Exception: pass
+        rows.clear()
+        # Remove category header widgets (stored in sec dict under "cat_headers")
+        for hdr in sec.get("cat_headers", []):
+            list_box.remove(hdr)
+        sec["cat_headers"] = []
+
+        if not modules:
+            empty_lbl.set_visible(True)
+            return
+        empty_lbl.set_visible(False)
+
+        # Group modules by hardware category derived from internal name
+        from collections import defaultdict as _dd
+        groups: dict = _dd(list)
+        _SKIP_MOD_PREFIXES = ("decal_", "nameplate_", "paintjob_", "bobble_",
+                              "voicepack_", "enginecustomisation_", "weaponcustomisation_")
         for mod in modules:
-            key = mod.get("_key", "")
-            seen.add(key)
+            ni = mod.get("name_internal", "").lower()
+            if any(ni.startswith(p) for p in _SKIP_MOD_PREFIXES):
+                continue  # skip cosmetic-only stored modules
+            # Also skip cargo hatch and cockpit module
+            if ni in ("modularcargobaydoor", ""):
+                continue
+            if "cockpit" in ni:
+                continue
+            cat = _module_category_from_name(mod.get("name_internal", ""))
+            groups[cat].append(mod)
 
-            line1 = mod.get("name_display", "Unknown")
-            line2 = mod.get("system", "\u2014")
-            if mod.get("hot"):
-                line2 = "\U0001f534 HOT  " + line2
+        _CAT_ORDER = [
+            "Hardpoints", "Core Internal", "Optional Internal",
+            "Utility Mounts", "Other",
+        ]
+        all_cats = _CAT_ORDER + [c for c in groups if c not in _CAT_ORDER]
 
-            if key in rows:
-                container, n_lbl, s_lbl = rows[key]
-                n_lbl.set_label(line1)
-                s_lbl.set_label(line2)
-                self._update_mod_popover(container, mod)
-            else:
+        for cat in all_cats:
+            mods_in_cat = groups.get(cat)
+            if not mods_in_cat:
+                continue
+
+            # Category header label
+            cat_lbl = Gtk.Label(label=cat.upper())
+            cat_lbl.set_xalign(0.0)
+            cat_lbl.add_css_class("data-key")
+            cat_lbl.set_margin_top(4)
+            cat_lbl.set_margin_start(4)
+            list_box.append(cat_lbl)
+            sec["cat_headers"].append(cat_lbl)
+
+            # Sort by name within category
+            for mod in sorted(mods_in_cat, key=lambda m: m.get("name_display", "")):
+                key = mod.get("_key", "")
+
+                line1 = mod.get("name_display", "Unknown")
+                _eng  = mod.get("engineering") or {}
+                _bp   = _eng.get("BlueprintName", "")
+                _lvl  = _eng.get("Level")
+                _exp  = _eng.get("ExperimentalEffect", "")
+                if _bp:
+                    _e = _normalise_eng_name(_bp)
+                    if _lvl: _e += f" G{_lvl}"
+                    if _exp: _e += f" / {_normalise_eng_name(_exp)}"
+                    line2 = _e
+                else:
+                    line2 = mod.get("system", "\u2014")
+                if mod.get("hot"):
+                    line2 = "\U0001f534 HOT  " + line2
+
                 container = self._make_mod_row(key, mod, line1, line2, list_box)
                 rows[key] = (container, container._n_lbl, container._s_lbl)
-
-        for key in list(rows.keys()):
-            if key not in seen:
-                container, _, _ = rows.pop(key)
-                if hasattr(container, "_popover"):
-                    container._popover.unparent()
-                list_box.remove(container)
-
-        empty_lbl.set_visible(len(seen) == 0)
 
     def _make_mod_row(self, key, mod, line1, line2, list_box):
         container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -712,13 +1150,23 @@ class AssetsBlock(BlockWidget):
         grid.set_margin_end(10)
 
         mass = mod.get("mass", 0.0)
+        _eng = mod.get("engineering") or {}
+        _bp  = _eng.get("BlueprintName") or _eng.get("blueprint_name", "")
+        _lvl = _eng.get("Level") or _eng.get("level")
+        _exp = _eng.get("ExperimentalEffect") or _eng.get("experimental", "")
+        _eng_str = "\u2014"
+        if _bp:
+            _eng_str = _bp.replace("_", " ").strip()
+            if _lvl is not None: _eng_str += f" G{_lvl}"
+            if _exp: _eng_str += f" / {_exp.replace(chr(95), chr(32)).strip()}"
         rows_data = [
-            ("Module", mod.get("name_display", "\u2014")),
-            ("Slot",   mod.get("slot", "") or "\u2014"),
-            ("System", mod.get("system", "\u2014")),
-            ("Mass",   f"{mass:.1f} t" if mass else "\u2014"),
-            ("Value",  _fmt_credits(mod.get("value"))),
-            ("Status", "\U0001f534 HOT" if mod.get("hot") else "Clean"),
+            ("Module",  mod.get("name_display", "\u2014")),
+            ("Slot",    mod.get("slot", "") or "\u2014"),
+            ("System",  mod.get("system", "\u2014")),
+            ("Mass",    f"{mass:.1f} t" if mass else "\u2014"),
+            ("Value",   _fmt_credits(mod.get("value"))),
+            ("Eng",     _eng_str),
+            ("Status",  "\U0001f534 HOT" if mod.get("hot") else "Clean"),
         ]
         for i, (k, v) in enumerate(rows_data):
             key_lbl = Gtk.Label(label=k)
@@ -739,11 +1187,21 @@ class AssetsBlock(BlockWidget):
         try:
             vl = container._popover._val_labels
             mass = mod.get("mass", 0.0)
+            _eng = mod.get("engineering") or {}
+            _bp  = _eng.get("BlueprintName") or _eng.get("blueprint_name", "")
+            _lvl = _eng.get("Level") or _eng.get("level")
+            _exp = _eng.get("ExperimentalEffect") or _eng.get("experimental", "")
+            _eng_str = "\u2014"
+            if _bp:
+                _eng_str = _bp.replace("_", " ").strip()
+                if _lvl is not None: _eng_str += f" G{_lvl}"
+                if _exp: _eng_str += f" / {_exp.replace(chr(95), chr(32)).strip()}"
             vl["Module"].set_label(mod.get("name_display", "\u2014"))
             vl["Slot"].set_label(mod.get("slot", "") or "\u2014")
             vl["System"].set_label(mod.get("system", "\u2014"))
             vl["Mass"].set_label(f"{mass:.1f} t" if mass else "\u2014")
             vl["Value"].set_label(_fmt_credits(mod.get("value")))
+            if "Eng" in vl: vl["Eng"].set_label(_eng_str)
             vl["Status"].set_label("\U0001f534 HOT" if mod.get("hot") else "Clean")
         except Exception:
             pass
