@@ -94,7 +94,12 @@ def _do_upgrade() -> None:
         print(f"\n{Terminal.WARN}ERROR:{Terminal.END} git pull failed:")
         print(pull.stderr.strip() or pull.stdout.strip()); sys.exit(1)
     if "Already up to date" in pull.stdout:
-        print(f"\n  Already up to date (v{VERSION}). Nothing to do.\n"); sys.exit(0)
+        print(f"\n  Already up to date (v{VERSION}). Nothing to do.\n")
+        # If we were launched from the GUI, relaunch it rather than dying
+        if "--gui" in sys.argv:
+            new_argv = [a for a in sys.argv if a != "--upgrade"]
+            os.execv(sys.executable, [sys.executable] + new_argv)
+        sys.exit(0)
     print(pull.stdout.strip()); print()
 
     install_sh = repo_dir / "install.sh"
