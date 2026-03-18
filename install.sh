@@ -47,6 +47,10 @@ elif command -v apt-get &>/dev/null; then
     DISTRO="debian"
     PKG_MGR="apt"
     ok "Debian / Ubuntu / apt"
+elif command -v rpm-ostree &>/dev/null || [ -f /run/ostree-booted ]; then
+    DISTRO="fedora-ostree"
+    PKG_MGR="rpm-ostree"
+    ok "Fedora Silverblue / Bazzite / rpm-ostree"
 elif command -v dnf &>/dev/null; then
     DISTRO="fedora"
     PKG_MGR="dnf"
@@ -103,6 +107,17 @@ case "$DISTRO" in
         GUI_AVAILABLE=true
         ok "python3-psutil, python3-gi (GTK4 bindings) installed"
         ;;
+    fedora-ostree)
+        info "Installing via rpm-ostree (immutable base layer)..."
+        info "This will stage packages for install — a reboot may be required."
+        # rpm-ostree install exits 0 if all packages are already layered,
+        # so no special already-installed handling is needed.
+        rpm-ostree install --idempotent -y python3-psutil python3-gobject gtk4 ||
+            warn "rpm-ostree install encountered an issue — check the output above"
+        GUI_AVAILABLE=true
+        ok "python3-psutil, python3-gobject, gtk4 staged via rpm-ostree"
+        warn "You may need to reboot for the layered packages to take effect."
+        ;;
     fedora)
         info "Installing via dnf..."
         sudo dnf install -y python3-psutil python3-gobject gtk4
@@ -125,13 +140,23 @@ esac
 # ── Install pip packages ───────────────────────────────────────────────────────
 section "Installing pip packages"
 
-# These packages are not in most distro repos — install via pip
-for PKG in "discord-webhook>=1.3.0" "cryptography>=41.0.0"; do
-    PKG_NAME=$(echo "$PKG" | cut -d'>' -f1)
+# These packages are not in most distro repos — install via pip.
+# We check if they are already importable first so we never error
+# on "already satisfied" — which some pip versions treat as success
+# but external-package guards can still block.
+for PKG in "discord-webhook>=1.3.0:discord_webhook" "cryptography>=41.0.0:cryptography"; do
+    PKG_SPEC="${PKG%%:*}"   # e.g. "discord-webhook>=1.3.0"
+    PKG_IMPORT="${PKG##*:}" # e.g. "discord_webhook"
+    PKG_NAME="${PKG_SPEC%%[>=]*}"
+    # If already importable, skip silently
+    if $PYTHON -c "import ${PKG_IMPORT}" &>/dev/null 2>&1; then
+        ok "${PKG_NAME} already installed"
+        continue
+    fi
     info "Installing ${PKG_NAME}..."
-    if $PYTHON -m pip install "$PKG" --quiet 2>/dev/null; then
+    if $PYTHON -m pip install "$PKG_SPEC" --quiet 2>/dev/null; then
         ok "${PKG_NAME} installed"
-    elif $PYTHON -m pip install "$PKG" --break-system-packages --quiet 2>/dev/null; then
+    elif $PYTHON -m pip install "$PKG_SPEC" --break-system-packages --quiet 2>/dev/null; then
         ok "${PKG_NAME} installed (--break-system-packages)"
     else
         warn "Could not install ${PKG_NAME} automatically."
