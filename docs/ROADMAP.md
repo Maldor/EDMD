@@ -1,12 +1,35 @@
 # EDMD Roadmap
 
-Last updated: 20260316
+Last updated: 20260317
 
 ---
 
 ## Active / In Progress
 
 *(Nothing currently blocked — see Near-term for next priorities.)*
+
+---
+
+## Pending — Include in Next Release (20260318+)
+
+### Hull integrity real-time tracking fix  ✅ coded, not yet released
+`builtins/alerts/plugin.py` — ready to ship.
+
+Frontier's `HullDamage` journal event fires reliably for SLF hits but
+inconsistently for mothership damage. Confirmed across 11 hours of RES
+combat: hull dropped from 98% to 88% with zero `HullDamage(PlayerPilot=True)`
+events fired. Two fixes implemented:
+
+1. **`Loadout` subscription** — The `Loadout` event fires on dock, undock,
+   ship swap, and every SLF dock-back, always carrying accurate `HullHealth`.
+   Alerts plugin now updates `state.ship_hull` on every Loadout.
+
+2. **Shield-triggered CAPI poll** — When `ShieldState: False` fires, a
+   background thread waits 8 seconds then calls `capi.manual_poll()`. CAPI
+   `/profile` returns authoritative hull from Frontier's servers. Rate-limited
+   to once per 5 minutes.
+
+Deliverable: `builtin_alerts_plugin.py` in outputs from 2026-03-17 session.
 
 ---
 

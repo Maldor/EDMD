@@ -57,6 +57,28 @@ class AlertsPlugin(BasePlugin):
         core.register_block(self, priority=90)
         core.register_alert(self)
 
+
+    _last_capi_hull_poll: float = 0.0
+    _CAPI_HULL_COOLDOWN:  float = 300.0   # 5 min between shield-triggered polls
+
+    def _schedule_capi_hull_poll(self) -> None:
+        """Trigger a CAPI /profile poll 8 s after shields drop.
+
+        Delay allows hull damage to register server-side before querying.
+        Rate-limited to once per 5 minutes to avoid hammering CAPI.
+        """
+        import time as _t, threading as _thr
+        if _t.time() - self._last_capi_hull_poll < self._CAPI_HULL_COOLDOWN:
+            return
+        self._last_capi_hull_poll = _t.time()
+        def _poll():
+            _t.sleep(8)
+            try:
+                self.core.plugin_call("capi", "manual_poll")
+            except Exception:
+                pass
+        _thr.Thread(target=_poll, daemon=True, name="hull-poll").start()
+
     def _push(self, emoji: str, text: str) -> None:
         # Never populate the queue during journal replay — those events are
         # historical and the player's current situation is already different.
