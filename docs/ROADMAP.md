@@ -1,6 +1,6 @@
 # EDMD Roadmap
 
-Last updated: 20260317
+Last updated: 20260318
 
 ---
 
@@ -10,9 +10,9 @@ Last updated: 20260317
 
 ---
 
-## Pending — Include in Next Release (20260318+)
+## Released in 20260318
 
-### Hull integrity real-time tracking fix  ✅ coded, not yet released
+### Hull integrity real-time tracking fix  ✅ shipped
 `builtins/alerts/plugin.py` — ready to ship.
 
 Frontier's `HullDamage` journal event fires reliably for SLF hits but
@@ -199,7 +199,7 @@ primary remote use case.
 
 **Phase 2 — Surgical interactivity** (as needed)
 Add specific interactive endpoints only where genuinely needed for remote use:
-trigger end session (KSW), clear alerts, set cargo target market.
+trigger end session, clear alerts, set cargo target market.
 
 **Phase 3 — Full parity** (significant ongoing investment, decide later)
 Full block interaction, theme switching, layout persistence via browser storage.
