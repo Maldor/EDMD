@@ -23,6 +23,7 @@ class AlertsPlugin(BasePlugin):
     SUBSCRIBED_EVENTS = [
         "ShieldState",
         "HullDamage",
+        "Loadout",
         "FighterDestroyed",
         "ReservoirReplenished",
         "EjectCargo",
@@ -91,6 +92,8 @@ class AlertsPlugin(BasePlugin):
                     state.ship_shields            = False
                     state.ship_shields_recharging = True
                     self._push("🛡️", "Ship shields down!")
+                    # Hull damage now possible — schedule a CAPI poll for accurate hull.
+                    self._schedule_capi_hull_poll()
                 gq = core.gui_queue
                 if gq: gq.put(("vessel_update", None))
                 core.emitter.emit(
@@ -122,6 +125,15 @@ class AlertsPlugin(BasePlugin):
                 hullhealth = round(event["Health"] * 100)
                 if state.fighter_integrity != event["Health"]:
                     self._push("🛩️", f"Fighter hull: {hullhealth}%")
+            case "Loadout":
+                # Fires on dock, undock, ship swap, and every SLF dock-back.
+                # HullHealth is always accurate — server-confirmed on each event.
+                hh = event.get("HullHealth")
+                if hh is not None:
+                    state.ship_hull = round(hh * 100)
+                    gq = core.gui_queue
+                    if gq: gq.put(("vessel_update", None))
+
 
             case "FighterDestroyed" if state.prev_event != "StartJump":
                 self._push("💀", "Fighter destroyed!")
