@@ -50,8 +50,6 @@ parser.add_argument("--upgrade", action="store_true", default=False,
 
 args = parser.parse_args()
 
-if args.upgrade and any(f for f in [args.config_profile, args.test, args.trace, args.gui] if f):
-    parser.error("--upgrade cannot be combined with other flags")
 
 
 # ── In-place upgrade (self-contained — runs before full package import) ────────
