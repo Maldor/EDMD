@@ -145,3 +145,75 @@ documentation (not just release notes). Specifically:
     — it comes from journal `Loadout` events regardless of CAPI status.
   Suggested location: `docs/CONFIGURATION.md` under a new "CAPI Integration"
   section, and a brief note in `README.md` features table.
+
+---
+
+## Consideration — Web UI / HTTP Dashboard
+
+*Filed for review. Do not implement without explicit confirmation.*
+
+### Background
+EDMD currently supports a thin-client / remote profile mode (Configuration B):
+the daemon runs on a second machine reading journals over SSHFS, GTK4 GUI is
+forwarded via SSH X-forwarding. This works but has friction — X-forwarding has
+latency and requires a desktop session on the remote end.
+
+The question: would a built-in HTTP server serving a browser-based dashboard be
+a better remote interface?
+
+### What would actually be built
+
+A built-in HTTP server (Flask or stdlib `http.server`) exposing:
+- A single-page HTML/JS/CSS dashboard served on a configurable port
+- Server-Sent Events (SSE) stream pushing state updates to the browser
+  (same events that currently drive `gui_queue` would also push JSON to clients)
+- HTTP POST endpoints for interactions (tab switches, target market search,
+  alerts clear, etc.)
+
+Web blocks would be HTML/CSS/JS equivalents of the GTK blocks — new code,
+not a port of the existing GTK implementation.
+
+### Tradeoffs
+
+**For:**
+- Works from any device with a browser — phone, tablet, another PC, no X-forwarding
+- No GTK dependency on the viewing device
+- Genuinely useful for the "check on your session from another room" use case
+- Read-only view would be ~20% of the effort for ~80% of the value
+- CSS theming is conceptually portable (different renderer, but shared design intent)
+
+**Against:**
+- Maintenance burden: every block needs a GTK version AND a web version, forever
+- New blocks take roughly double the development effort
+- Full interactive parity (drag/resize/collapse blocks, search fields) is substantial work
+- Security surface: HTTP server on the LAN needs at minimum config-driven bind address
+  and optional token auth — not complex but must be done properly
+- SSE is simpler than WebSockets but still needs careful connection lifecycle management
+
+### Recommended approach if pursued
+
+**Phase 1 — Read-only monitoring view** (lower effort, high value)
+A "wall display" layout: Commander status, hull/shields, session stats, cargo,
+mission stack, alerts — all live-updating. No interactive elements. Serves the
+primary remote use case.
+
+**Phase 2 — Surgical interactivity** (as needed)
+Add specific interactive endpoints only where genuinely needed for remote use:
+trigger end session (KSW), clear alerts, set cargo target market.
+
+**Phase 3 — Full parity** (significant ongoing investment, decide later)
+Full block interaction, theme switching, layout persistence via browser storage.
+
+### Config sketch (if implemented)
+```toml
+[WebUI]
+Enabled   = false         # disabled by default
+Port      = 8642
+BindAddr  = "127.0.0.1"  # "0.0.0.0" for LAN access
+Token     = ""            # optional Bearer token for basic auth
+```
+
+### Decision pending
+Deferred. Revisit once the GTK GUI reaches a stable feature set and the
+maintenance cost of dual-frontend development is better understood.
+
