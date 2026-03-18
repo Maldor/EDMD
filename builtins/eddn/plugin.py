@@ -349,16 +349,13 @@ class EDDNPlugin(BasePlugin):
         if self._enabled:
             self._sender = _Sender(EDDN_ENDPOINT, self.storage.path / "queue.jsonl")
             self._sender.start()
-            print(
-                f"  [EDDN] Uploader enabled "
-                f"({'TEST MODE' if self._test_mode else 'LIVE'})"
-            )
+            self._load_note = f"LIVE" if not self._test_mode else "TEST MODE"
         elif not self._primary:
             self._sender = None
-            print("  [EDDN] Uploads suppressed (PrimaryInstance = false)")
+            self._load_note = "suppressed (PrimaryInstance = false)"
         else:
             self._sender = None
-            print("  [EDDN] Uploader disabled (set [EDDN] Enabled = true to enable)")
+            self._load_note = "disabled"
 
     def on_unload(self) -> None:
         if self._sender:

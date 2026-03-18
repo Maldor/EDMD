@@ -433,9 +433,11 @@ class PluginLoader:
             self._plugins.append(instance)
             self._plugin_map[instance.PLUGIN_NAME] = instance
 
+            note = getattr(instance, "_load_note", "")
+            suffix = f"  ({note})" if note else ""
             print(
                 f"  Loaded {label}: {instance.PLUGIN_DISPLAY} "
-                f"v{instance.PLUGIN_VERSION} [{instance.PLUGIN_NAME}]"
+                f"v{instance.PLUGIN_VERSION} [{instance.PLUGIN_NAME}]{suffix}"
             )
 
         except Exception as e:

@@ -323,7 +323,7 @@ class InaraPlugin(BasePlugin):
         self._sender      = _Sender(self._cmdr_name, cfg["ApiKey"], self.storage.path / "queue.jsonl")
         self._sender.start()
 
-        print(f"  [Inara] Enabled — uploading as CMDR {self._cmdr_name}")
+        self._load_note = f"uploading as CMDR {self._cmdr_name}"
 
     def on_unload(self) -> None:
         if self._sender:

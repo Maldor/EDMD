@@ -265,7 +265,7 @@ class EDAstroPlugin(BasePlugin):
         self._sender.start()
 
         carrier_note = " (carrier events: on)" if self._carrier_opt_in else ""
-        print(f"  [EDAstro] Enabled{carrier_note}")
+        self._load_note = f"enabled{carrier_note}"
 
     def on_unload(self) -> None:
         if self._sender:
