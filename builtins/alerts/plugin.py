@@ -147,6 +147,14 @@ class AlertsPlugin(BasePlugin):
                 hullhealth = round(event["Health"] * 100)
                 if state.fighter_integrity != event["Health"]:
                     self._push("🛩️", f"Fighter hull: {hullhealth}%")
+            case "ShipyardSwap":
+                # Switching ships — invalidate burn rate so the old ship's
+                # consumption does not trigger a false QuitOnLowFuelMinutes
+                # on the new ship before a valid rate is established.
+                state.fuel_burn_rate = None
+                core.active_session.fuel_check_time  = 0
+                core.active_session.fuel_check_level = 0
+
             case "Loadout":
                 # Fires on dock, undock, ship swap, and every SLF dock-back.
                 # HullHealth is always accurate — server-confirmed on each event.

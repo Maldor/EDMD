@@ -85,6 +85,7 @@ def _poll_status_json(
     """
     status_path = journal_dir / "Status.json"
     last_flags  = None
+    last_fuel   = None
 
     while True:
         try:
@@ -93,9 +94,11 @@ def _poll_status_json(
                 if raw:
                     data  = json.loads(raw)
                     flags = data.get("Flags", 0)
+                    changed = False
+
+                    # ── Shield and fighter flags ──────────────────────────
                     if flags != last_flags:
                         last_flags = flags
-                        changed    = False
 
                         shields_up = bool(flags & 0x08)
                         if state.ship_shields != shields_up:
@@ -109,9 +112,19 @@ def _poll_status_json(
                             state.cmdr_in_slf = in_fighter
                             changed = True
 
-                        if changed and gui_queue:
-                            gui_queue.put(("vessel_update", None))
-                            gui_queue.put(("slf_update",    None))
+                    # ── Fuel level (500ms live updates for display) ───────
+                    # Status.json Fuel.FuelMain is updated every ~500ms.
+                    # We update state.fuel_current here for the display only.
+                    # KSW fuel checks still use ReservoirReplenished events.
+                    fuel_main = data.get("Fuel", {}).get("FuelMain")
+                    if fuel_main is not None and fuel_main != last_fuel:
+                        last_fuel = fuel_main
+                        state.fuel_current = float(fuel_main)
+                        changed = True
+
+                    if changed and gui_queue:
+                        gui_queue.put(("vessel_update", None))
+                        gui_queue.put(("slf_update",    None))
         except Exception:
             pass
         time.sleep(_STATUS_JSON_POLL_INTERVAL)
