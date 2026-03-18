@@ -264,6 +264,11 @@ class CommanderPlugin(BasePlugin):
             case "FSDJump":
                 state.pilot_system = event.get("StarSystem", state.pilot_system)
                 state.pilot_body   = None
+                # Update fuel display — FuelLevel is accurate post-jump
+                fuel_level = event.get("FuelLevel")
+                if fuel_level is not None:
+                    state.fuel_current = float(fuel_level)
+                if gq: gq.put(("vessel_update", None))
                 # Harvest local faction standings for the Rep tab
                 factions = event.get("Factions", [])
                 if factions:

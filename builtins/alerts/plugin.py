@@ -147,6 +147,31 @@ class AlertsPlugin(BasePlugin):
                 hullhealth = round(event["Health"] * 100)
                 if state.fighter_integrity != event["Health"]:
                     self._push("🛩️", f"Fighter hull: {hullhealth}%")
+            case "RefuelAll" | "RefuelPartial":
+                # Player manually refuelled — update fuel_current immediately.
+                # RefuelAll/Partial do not carry absolute FuelLevel, only Amount
+                # (tons added). Add to current known level and cap at tank size.
+                amount = event.get("Amount", 0.0)
+                if amount and state.fuel_current is not None:
+                    state.fuel_current = min(
+                        state.fuel_current + amount,
+                        state.fuel_tank_size,
+                    )
+                elif state.fuel_current is None:
+                    # No prior reading — cap logic unavailable, set to tank size
+                    # as a safe overestimate (KSW will not false-trigger)
+                    state.fuel_current = float(state.fuel_tank_size)
+                gq = core.gui_queue
+                if gq: gq.put(("vessel_update", None))
+
+            case "FSDJump":
+                # FuelLevel in FSDJump is always the accurate post-jump value.
+                fuel_level = event.get("FuelLevel")
+                if fuel_level is not None:
+                    state.fuel_current = float(fuel_level)
+                    gq = core.gui_queue
+                    if gq: gq.put(("vessel_update", None))
+
             case "ShipyardSwap":
                 # Switching ships — invalidate burn rate so the old ship's
                 # consumption does not trigger a false QuitOnLowFuelMinutes
