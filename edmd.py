@@ -82,20 +82,12 @@ def _do_upgrade() -> None:
             or path.startswith("plugins\\")
         )
     modified = [l for l in dirty.stdout.splitlines() if not _is_user_file(l)]
-    if modified:
-        print(f"{Terminal.YELL}Warning:{Terminal.END} Uncommitted local changes:")
-        for l in modified[:5]: print(f"  {l}")
-        if len(modified) > 5: print(f"  ... and {len(modified) - 5} more")
-        print()
-        try:
-            ans = input("Continue? Local changes may be overwritten. [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            ans = "n"
-        if ans != "y":
-            print("Upgrade cancelled."); sys.exit(0)
-        print()
 
     print(f"  Current version : {VERSION}\n  Pulling from    : origin/main")
+    # Discard any local modifications to tracked files before pulling.
+    # User data lives outside the repo (config.toml in ~/.local/share/EDMD/).
+    _sp.run(["git", "-C", str(repo_dir), "checkout", "."],
+            capture_output=True)
     pull = _sp.run(["git", "-C", str(repo_dir), "pull", "--ff-only"],
                    capture_output=True, text=True)
     if pull.returncode != 0:
@@ -109,6 +101,7 @@ def _do_upgrade() -> None:
             os.execv(sys.executable, [sys.executable] + new_argv)
         sys.exit(0)
     print(pull.stdout.strip()); print()
+
 
     install_sh = repo_dir / "install.sh"
     if install_sh.exists() and _pl.system() != "Windows":
