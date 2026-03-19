@@ -13,6 +13,7 @@ from core.emit import Terminal
 class CommanderPlugin(BasePlugin):
     PLUGIN_NAME    = "commander"
     PLUGIN_DISPLAY = "Commander"
+    PLUGIN_DESCRIPTION = "Commander identity, ship vitals, location, ranks, and PowerPlay status."
     PLUGIN_VERSION = "1.0.0"
 
     SUBSCRIBED_EVENTS = [
@@ -96,6 +97,26 @@ class CommanderPlugin(BasePlugin):
                 state.offline_since_mono = None
                 state.last_offline_alert = None
                 state.pilot_ship = event.get("Ship_Localised") or event.get("Ship")
+                # Session boundary: new session if gap since last Shutdown
+                # exceeds SESSION_GAP_MINUTES (default 15).
+                from core.state import SESSION_GAP_MINUTES
+                from datetime import timedelta
+                shutdown_ts = getattr(state, "last_shutdown_time", None)
+                if shutdown_ts and logtime:
+                    gap = (logtime - shutdown_ts).total_seconds() / 60
+                    if gap >= SESSION_GAP_MINUTES:
+                        # Gap exceeds threshold — notify all session providers
+                        for provider in getattr(core, "session_providers", []):
+                            try:
+                                provider.on_session_reset()
+                            except Exception:
+                                pass
+                        # Emit to session_stats plugin directly if registered
+                        try:
+                            core.plugin_call("session_stats", "on_new_session", gap)
+                        except Exception:
+                            pass
+                state.last_shutdown_time = None
                 if event.get("ShipName"):  state.ship_name  = event["ShipName"]
                 if event.get("ShipIdent"): state.ship_ident = event["ShipIdent"]
                 if "GameMode" in event:
@@ -207,6 +228,7 @@ class CommanderPlugin(BasePlugin):
 
             case "Shutdown":
                 state.in_game = False
+                state.last_shutdown_time = logtime
                 import time
                 if state.offline_since_mono is None:
                     state.offline_since_mono = time.monotonic()

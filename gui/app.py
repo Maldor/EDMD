@@ -35,7 +35,6 @@ from gui.blocks   import (
     CargoBlock,
     EngineeringBlock,
     AssetsBlock,
-    ModeBlock,
 )
 
 GLib.set_prgname("edmd")
@@ -390,11 +389,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
         return True
 
     def _tick(self) -> bool:
-        # Give mode plugin a chance to check no-kill timeout each second
-        mode_plugin = getattr(self._core, "_plugins", {}).get("mode")
-        if mode_plugin and hasattr(mode_plugin, "tick"):
+        # Give activity_combat plugin a chance to check no-kill timeout each second
+        combat = getattr(self._core, "_plugins", {}).get("activity_combat")
+        if combat and hasattr(combat, "tick"):
             try:
-                mode_plugin.tick(self._core.state)
+                combat.tick(self._core.state)
             except Exception:
                 pass
         # Refresh all blocks on the tick — builtins and plugin blocks alike.

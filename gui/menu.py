@@ -90,7 +90,14 @@ class EdmdMenuBar:
         btn = Gtk.Button(label=label)
         btn.add_css_class("menu-item")
         btn.set_has_frame(False)
-        btn.connect("clicked", callback)
+        def _cb(widget, *args):
+            # Dismiss the popover before opening any dialog so it does
+            # not stay open behind the new window.
+            pop = widget.get_ancestor(Gtk.Popover)
+            if pop:
+                pop.popdown()
+            callback(widget, *args)
+        btn.connect("clicked", _cb)
         return btn
 
     def _separator(self) -> Gtk.Separator:
@@ -345,147 +352,162 @@ class EdmdMenuBar:
     # ── Installed Plugins dialog ──────────────────────────────────────────────
 
     def _show_plugins_dialog(self) -> None:
-        """Installed Plugins dialog — lists all plugins (enabled and disabled)
-        with per-plugin enable/disable toggles.  Changes persist to
-        plugin_states.json and take effect after restart."""
+        """Plugins dialog — grouped sections with descriptions and enable/disable toggles."""
 
         core   = self._win._core
         loader = getattr(core, "_loader", None)
 
-        dlg = Gtk.Window(title="Installed Plugins")
+        dlg = Gtk.Window(title="Plugins")
         dlg.set_transient_for(self._win)
         dlg.set_modal(True)
         dlg.set_resizable(True)
-        dlg.set_default_size(460, -1)
+        dlg.set_default_size(520, 600)
         dlg.add_css_class("plugins-dialog")
+
+        # Outer scroll
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        dlg.set_child(scroll)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.set_margin_top(16)
         outer.set_margin_bottom(16)
         outer.set_margin_start(20)
         outer.set_margin_end(20)
-        dlg.set_child(outer)
+        scroll.set_child(outer)
 
-        # ── Header ────────────────────────────────────────────────────────────
-        hdr = Gtk.Label(label="Installed Plugins")
-        hdr.add_css_class("section-header")
-        hdr.set_xalign(0.0)
-        outer.append(hdr)
-
-        outer.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-
-        # ── Restart notice (hidden until a toggle changes) ────────────────────
-        restart_bar = Gtk.Label(
-            label="⟳  Restart EDMD to apply changes"
-        )
+        # Restart notice (hidden until toggle fires)
+        restart_bar = Gtk.Label(label="⟳  Restart EDMD to apply changes")
         restart_bar.add_css_class("plugin-restart-notice")
         restart_bar.set_xalign(0.5)
         restart_bar.set_visible(False)
-        # will be shown when any toggle fires
 
-        # ── Collect all plugins: enabled + disabled ───────────────────────────
+        # Collect all plugins
         active_plugins   = list(getattr(core, "_plugins", {}).values())
-        disabled_plugins = getattr(loader, "disabled_meta", []) if loader else []
+        disabled_plugins = list(getattr(loader, "disabled_meta", [])) if loader else []
 
         all_plugins = (
             [(p, True)  for p in active_plugins]
             + [(p, False) for p in disabled_plugins]
         )
-        # Sort: builtins first (alphabetical), then third-party (alphabetical)
-        all_plugins.sort(key=lambda x: (
-            not getattr(x[0], "_is_builtin", True),
-            getattr(x[0], "PLUGIN_DISPLAY", "").lower(),
-        ))
 
-        if not all_plugins:
-            lbl = Gtk.Label(label="No plugins found.")
-            lbl.add_css_class("about-author")
-            lbl.set_xalign(0.0)
-            lbl.set_margin_top(8)
-            outer.append(lbl)
-        else:
-            # ── Section: Builtins ─────────────────────────────────────────────
-            builtins_list  = [(p, e) for p, e in all_plugins if getattr(p, "_is_builtin", True)]
-            thirdparty_list = [(p, e) for p, e in all_plugins if not getattr(p, "_is_builtin", True)]
+        # Group into sections
+        def _group(plugin):
+            name = getattr(plugin, "PLUGIN_NAME", "")
+            if name.startswith("activity_"):
+                return "Activity Tracking"
+            if name in ("eddn", "edsm", "edastro", "inara"):
+                return "Data Contributions"
+            if getattr(plugin, "_is_builtin", True):
+                return "Core"
+            return "Third-party Plugins"
 
-            for section_items, section_title in [
-                (builtins_list,   "Built-in"),
-                (thirdparty_list, "Third-party"),
-            ]:
-                if not section_items:
-                    continue
+        GROUP_ORDER = ["Core", "Activity Tracking", "Data Contributions", "Third-party Plugins"]
+        groups: dict[str, list] = {g: [] for g in GROUP_ORDER}
+        for p, enabled in all_plugins:
+            groups[_group(p)].append((p, enabled))
 
-                sec_lbl = Gtk.Label(label=section_title)
-                sec_lbl.add_css_class("plugin-section-label")
-                sec_lbl.set_xalign(0.0)
-                sec_lbl.set_margin_top(10)
-                sec_lbl.set_margin_bottom(2)
-                outer.append(sec_lbl)
+        for g in groups.values():
+            g.sort(key=lambda x: getattr(x[0], "PLUGIN_DISPLAY", "").lower())
 
-                for plugin, is_active in section_items:
-                    pname    = getattr(plugin, "PLUGIN_NAME",    "unknown")
-                    pdisplay = getattr(plugin, "PLUGIN_DISPLAY",  pname)
-                    pver     = getattr(plugin, "PLUGIN_VERSION",  "?")
-                    pdesc    = getattr(plugin, "PLUGIN_DESCRIPTION", "")
-                    is_blt   = getattr(plugin, "_is_builtin",    False)
+        for group_title in GROUP_ORDER:
+            items = groups[group_title]
+            if not items:
+                continue
 
-                    # Container row
-                    row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-                    row.set_margin_top(4)
-                    row.set_margin_bottom(4)
-                    outer.append(row)
+            # Section header
+            sec_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            sec_row.set_margin_top(12)
+            sec_row.set_margin_bottom(4)
+            sec_lbl = Gtk.Label(label=group_title.upper())
+            sec_lbl.add_css_class("plugin-section-label")
+            sec_lbl.set_xalign(0.0)
+            sec_lbl.set_hexpand(True)
+            sec_row.append(sec_lbl)
+            count_lbl = Gtk.Label(label=str(len(items)))
+            count_lbl.add_css_class("data-key")
+            sec_row.append(count_lbl)
+            outer.append(sec_row)
+            outer.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-                    # Top line: name + version badge + toggle
-                    top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                    row.append(top)
+            for plugin, is_active in items:
+                pname    = getattr(plugin, "PLUGIN_NAME",    "unknown")
+                pdisplay = getattr(plugin, "PLUGIN_DISPLAY",  pname)
+                pver     = getattr(plugin, "PLUGIN_VERSION",  "?")
+                pdesc    = getattr(plugin, "PLUGIN_DESCRIPTION", "")
 
-                    name_lbl = Gtk.Label(label=pdisplay)
-                    name_lbl.set_xalign(0.0)
-                    name_lbl.set_hexpand(True)
-                    name_lbl.add_css_class("data-value")
-                    top.append(name_lbl)
+                row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+                row.set_margin_top(6)
+                row.set_margin_bottom(2)
+                outer.append(row)
 
-                    ver_lbl = Gtk.Label(label=f"v{pver}")
-                    ver_lbl.add_css_class("data-key")
-                    top.append(ver_lbl)
+                # Top line: name + version + toggle
+                top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                row.append(top)
 
-                    toggle = Gtk.Switch()
-                    toggle.set_active(is_active)
-                    toggle.set_valign(Gtk.Align.CENTER)
-                    # Builtins can be toggled too; user is in charge.
-                    top.append(toggle)
+                name_lbl = Gtk.Label(label=pdisplay)
+                name_lbl.add_css_class("data-key")
+                name_lbl.set_xalign(0.0)
+                name_lbl.set_hexpand(True)
+                top.append(name_lbl)
 
-                    # Description line (if present)
-                    if pdesc:
-                        desc_lbl = Gtk.Label(label=pdesc)
-                        desc_lbl.add_css_class("plugin-desc")
-                        desc_lbl.set_xalign(0.0)
-                        desc_lbl.set_wrap(True)
-                        row.append(desc_lbl)
+                ver_lbl = Gtk.Label(label=f"v{pver}")
+                ver_lbl.add_css_class("data-key")
+                ver_lbl.set_opacity(0.5)
+                top.append(ver_lbl)
 
-                    outer.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+                sw = Gtk.Switch()
+                sw.set_active(is_active)
+                sw.set_valign(Gtk.Align.CENTER)
+                sw.set_sensitive(True)
+                top.append(sw)
 
-                    # Toggle handler — capture pname by value
-                    def _on_toggle(sw, _param, name=pname):
-                        if loader:
-                            loader.set_enabled(name, sw.get_active())
-                        restart_bar.set_visible(True)
+                # Description line
+                if pdesc:
+                    desc_lbl = Gtk.Label(label=pdesc)
+                    desc_lbl.add_css_class("plugin-description")
+                    desc_lbl.set_xalign(0.0)
+                    desc_lbl.set_wrap(True)
+                    desc_lbl.set_margin_end(60)  # don't flow under the toggle
+                    row.append(desc_lbl)
 
-                    toggle.connect("notify::active", _on_toggle)
+                def _on_toggle(widget, state, _pname=pname, _loader=loader):
+                    if _loader:
+                        _loader.set_enabled(_pname, state)
+                    restart_bar.set_visible(True)
+                    return False
 
-        # ── Restart notice + close ────────────────────────────────────────────
+                sw.connect("state-set", _on_toggle)
+
+        outer.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         outer.append(restart_bar)
 
+        # ── Button row ───────────────────────────────────────────────────
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row.set_margin_top(10)
+        btn_row.set_halign(Gtk.Align.END)
+        outer.append(btn_row)
+
         close_btn = Gtk.Button(label="Close")
-        close_btn.add_css_class("about-close")
-        close_btn.set_halign(Gtk.Align.CENTER)
-        close_btn.set_margin_top(10)
+        close_btn.add_css_class("prefs-btn")
         close_btn.connect("clicked", lambda *_: dlg.close())
-        outer.append(close_btn)
+        btn_row.append(close_btn)
+
+        save_btn = Gtk.Button(label="Save & Close")
+        save_btn.add_css_class("prefs-btn-apply")
+        def _save_close(*_):
+            # persist any queued enable/disable changes then close
+            if loader and hasattr(loader, "flush_enabled_states"):
+                try:
+                    loader.flush_enabled_states()
+                except Exception:
+                    pass
+            dlg.close()
+        save_btn.connect("clicked", _save_close)
+        btn_row.append(save_btn)
 
         dlg.present()
-
-    # ── Public update helpers ─────────────────────────────────────────────────
 
     def set_update_available(self, version: str) -> None:
         """Called by EdmdWindow when a new version is detected."""

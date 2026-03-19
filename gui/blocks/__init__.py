@@ -14,7 +14,6 @@ from gui.blocks.alerts        import AlertsBlock
 from gui.blocks.cargo         import CargoBlock
 from gui.blocks.engineering   import EngineeringBlock
 from gui.blocks.assets        import AssetsBlock
-from gui.blocks.mode          import ModeBlock
 
 __all__ = [
     "CommanderBlock",
@@ -25,5 +24,4 @@ __all__ = [
     "CargoBlock",
     "EngineeringBlock",
     "AssetsBlock",
-    "ModeBlock",
 ]

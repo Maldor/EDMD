@@ -233,6 +233,7 @@ class EDAstroPlugin(BasePlugin):
 
     PLUGIN_NAME        = "edastro"
     PLUGIN_DISPLAY     = "EDAstro Uploader"
+    PLUGIN_DESCRIPTION = "Contributes exploration and carrier data to ED Astronomer (EDAstro)."
     PLUGIN_VERSION     = PLUGIN_VERSION
     SUBSCRIBED_EVENTS  = SUBSCRIBED_EVENTS
 

@@ -1,6 +1,6 @@
 # EDMD Roadmap
 
-Last updated: 20260318
+Last updated: 20260319
 
 ---
 
@@ -13,6 +13,11 @@ Last updated: 20260318
 ## Released in 20260318
 
 ### Hull integrity real-time tracking fix  ✅ shipped
+
+## Released in 20260319
+
+### Activity plugin architecture  ✅ shipped
+Session boundary model, eight activity plugins, tabbed Session Stats, mode plugin removed.
 `builtins/alerts/plugin.py` — ready to ship.
 
 Frontier's `HullDamage` journal event fires reliably for SLF hits but

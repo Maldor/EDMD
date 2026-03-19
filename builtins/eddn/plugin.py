@@ -271,6 +271,7 @@ class EDDNPlugin(BasePlugin):
 
     PLUGIN_NAME    = "eddn"
     PLUGIN_DISPLAY = "EDDN Uploader"
+    PLUGIN_DESCRIPTION = "Contributes journal data to the Elite Dangerous Data Network (EDDN)."
     PLUGIN_VERSION = "1.0.0"
 
     SUBSCRIBED_EVENTS = [

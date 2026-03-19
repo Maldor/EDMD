@@ -13,6 +13,7 @@ from core.emit import Terminal, fmt_credits
 class MissionsPlugin(BasePlugin):
     PLUGIN_NAME    = "missions"
     PLUGIN_DISPLAY = "Mission Stack"
+    PLUGIN_DESCRIPTION = "Active massacre mission stack — progress, value, and completion tracking."
     PLUGIN_VERSION = "1.0.0"
 
     SUBSCRIBED_EVENTS = [

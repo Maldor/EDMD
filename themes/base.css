@@ -1265,3 +1265,18 @@ link:hover {
 .cargo-clear-btn:disabled {
     opacity: 0.3;
 }
+
+/* ── Plugins dialog ──────────────────────────────────────────────────────── */
+.plugin-description {
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    margin-left: 2px;
+}
+
+.plugin-section-label {
+    font-size: 0.72em;
+    font-weight: bold;
+    letter-spacing: 0.08em;
+    color: var(--accent-dim);
+    text-transform: uppercase;
+}

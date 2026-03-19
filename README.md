@@ -5,9 +5,9 @@
 # Elite Dangerous Monitor Daemon
 ### EDMD
 
-**Real-time AFK session monitoring for Elite Dangerous**
+**Real-time session monitoring dashboard for Elite Dangerous**
 
-*Kill tracking · Discord alerts · Session awareness · Mission stack · Fleet assets · CAPI integration · Data contributions · GTK4 GUI*
+*Session tracking · Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Fleet assets · CAPI · Discord · GTK4 GUI*
 
 ---
 
@@ -25,9 +25,9 @@ by **CMDR CALURSUS**
 
 ## Overview
 
-EDMD is a Python daemon that tails your Elite Dangerous journal in real time, watching over your AFK combat sessions so you don't have to. It tracks every kill, bounty, merit, and massacre mission — streaming events to your terminal, a GTK4 GUI window, and optionally to a Discord channel via webhook.
+EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails your journal and presents a live GTK4 window alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay — whether you're actively playing or running an AFK grind.
 
-When things go wrong — your fighter blown up, hull taking critical damage, fuel running dry — EDMD will alert you so you can intervene before coming back to a rebuy screen.
+Alerts fire when things go wrong: shields down, hull taking damage, fuel running low, fighter destroyed. Session statistics accumulate across all activity types in a tabbed panel that shows only what's relevant to your current session.
 
 ---
 
@@ -35,9 +35,9 @@ When things go wrong — your fighter blown up, hull taking critical damage, fue
 
 | | |
 |--|--|
-| 💥 **Kill & Reward Tracking** | Logs every bounty and combat bond with ship type, timing, and credit value |
-| 🎯 **Massacre Mission Stack** | Tracks active missions, stack value, and completion status with full bootstrap on start |
-| 📊 **Periodic Summaries** | Session stats every 15 minutes — to terminal, GUI, and Discord |
+| 💥 **Combat Tracking** | Kills, bounties, combat bonds, deaths, and fighter losses with per-kill timing and faction tally |
+| 🎯 **Mission Stack** | Active massacre mission tracking — stack value, completion status, and full bootstrap on start |
+| 📊 **Session Statistics** | Tabbed activity dashboard — Combat, Trade, Mining, Exploration, Missions, Exobiology, PowerPlay — showing totals and /hr rates for each |
 | 🖥️ **GTK4 GUI** | Live graphical interface with commander, crew, SLF, mission, and session panels |
 | 🛡️ **Combat Alerts** | Shield drops, hull damage, fighter loss, ship destruction |
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |

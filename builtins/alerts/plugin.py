@@ -17,6 +17,7 @@ from core.state import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
 
 class AlertsPlugin(BasePlugin):
     PLUGIN_NAME    = "alerts"
+    PLUGIN_DESCRIPTION = "Combat and ship alerts — shields, hull, fuel, fighter, and inactivity warnings."
     PLUGIN_DISPLAY = "Alerts"
     PLUGIN_VERSION = "1.0.0"
 
@@ -164,6 +165,93 @@ class AlertsPlugin(BasePlugin):
                 state.slf_hull = 100
                 gq = core.gui_queue
                 if gq: gq.put(("vessel_update", None))
+
+
+            case "ReceiveText" if event.get("Channel") == "npc":
+                from core.state import PIRATE_NOATTACK_MSGS, LABEL_UNKNOWN
+                msg = event.get("Message", "")
+                if "$Pirate_OnStartScanCargo" in msg:
+                    piratename = event.get("From_Localised", LABEL_UNKNOWN)
+                    ses = core.active_session
+                    if piratename not in ses.recent_inbound_scans:
+                        ses.inbound_scan_count += 1
+                        count_str  = f" (x{ses.inbound_scan_count})" if settings.get("ExtendedStats") else ""
+                        pirate_str = f" [{piratename}]" if settings.get("PirateNames") else ""
+                        if len(ses.recent_inbound_scans) == 5:
+                            ses.recent_inbound_scans.pop(0)
+                        ses.recent_inbound_scans.append(piratename)
+                        core.emitter.emit(
+                            msg_term=f"Cargo scan{count_str}{pirate_str}",
+                            msg_discord=f"**Cargo scan{count_str}**{pirate_str}",
+                            emoji="📦", sigil="-  SCAN",
+                            timestamp=logtime, loglevel=notify["InboundScan"],
+                        )
+                elif any(x in msg for x in PIRATE_NOATTACK_MSGS):
+                    ses = core.active_session
+                    ses.low_cargo_count += 1
+                    count_str = f" (x{ses.low_cargo_count})" if settings.get("ExtendedStats") else ""
+                    core.emitter.emit(
+                        msg_term=(
+                            f"{Terminal.WARN}"
+                            f'Pirate didn"t engage due to insufficient cargo value'
+                            f"{count_str}{Terminal.END}"
+                        ),
+                        msg_discord=(
+                            f'**Pirate didn"t engage due to insufficient cargo value**'
+                            f"{count_str}"
+                        ),
+                        emoji="📦", sigil="-  SCAN",
+                        timestamp=logtime, loglevel=notify["LowCargoValue"],
+                        event="LowCargoValue",
+                    )
+                elif "Police_Attack" in msg:
+                    core.emitter.emit(
+                        msg_term=f"{Terminal.BAD}Under attack by security services!{Terminal.END}",
+                        msg_discord="**Under attack by security services!**",
+                        emoji="🚨", sigil="!! ATCK",
+                        timestamp=logtime, loglevel=notify["PoliceAttack"],
+                    )
+
+            case "ShipTargeted" if "Ship" in event:
+                from core.state import LABEL_UNKNOWN
+                from core.state import normalise_ship_name as _nsn
+                ship = _nsn(event.get("Ship_Localised") or event.get("Ship"))
+                rank = "" if "PilotRank" not in event else f" ({event['PilotRank']})"
+                ses = core.active_session
+                if (
+                    ship != ses.last_security_ship
+                    and "PilotName" in event
+                    and "$ShipName_Police" in event["PilotName"]
+                ):
+                    ses.last_security_ship = ship
+                    core.emitter.emit(
+                        msg_term=f"{Terminal.WARN}Scanned security{Terminal.END} ({ship})",
+                        msg_discord=f"**Scanned security** ({ship})",
+                        emoji="🔍", sigil="-  SCAN",
+                        timestamp=logtime, loglevel=notify["PoliceScan"],
+                    )
+                else:
+                    piratename = event.get("PilotName_Localised", LABEL_UNKNOWN)
+                    check      = piratename if settings.get("MinScanLevel") != 0 else ship
+                    scanstage  = event.get("ScanStage", 0)
+                    if (
+                        scanstage >= settings.get("MinScanLevel", 1)
+                        and check not in ses.recent_outbound_scans
+                    ):
+                        if len(ses.recent_outbound_scans) == 10:
+                            ses.recent_outbound_scans.pop(0)
+                        ses.recent_outbound_scans.append(check)
+                        pirate_str = (
+                            f" [{piratename}]"
+                            if settings.get("PirateNames") and piratename != LABEL_UNKNOWN
+                            else ""
+                        )
+                        core.emitter.emit(
+                            msg_term=f"{Terminal.WHITE}Scan{Terminal.END}: {ship}{rank}{pirate_str}",
+                            msg_discord=f"**{ship}**{rank}{pirate_str}",
+                            emoji="🔍", sigil="-  SCAN",
+                            timestamp=logtime, loglevel=notify["InboundScan"],
+                        )
 
             case "ShipyardSwap":
                 # Switching ships — invalidate burn rate so the old ship's

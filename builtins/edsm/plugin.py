@@ -269,6 +269,7 @@ class EDSMPlugin(BasePlugin):
 
     PLUGIN_NAME      = "edsm"
     PLUGIN_DISPLAY   = "EDSM Uploader"
+    PLUGIN_DESCRIPTION = "Syncs commander travel history to Elite Dangerous Star Map (EDSM)."
     PLUGIN_VERSION   = PLUGIN_VERSION
     SUBSCRIBED_EVENTS = SUBSCRIBED_EVENTS
 

@@ -52,6 +52,7 @@ def _canonicalise_key(raw: str) -> str:
 class CargoPlugin(BasePlugin):
     PLUGIN_NAME    = "cargo"
     PLUGIN_DISPLAY = "Cargo"
+    PLUGIN_DESCRIPTION = "Live ship hold inventory with market price comparison via Spansh."
     PLUGIN_VERSION = "2.0.0"
 
     SUBSCRIBED_EVENTS = [

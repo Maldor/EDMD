@@ -75,6 +75,7 @@ class CoreAPI:
         # Plugin registry — populated by PluginLoader after all plugins load
         self._blocks:  list = []   # plugins with GUI blocks, in priority order
         self._alerts:  list = []   # plugins that feed the Alerts block
+        self._session_providers: list = []   # ActivityProviderMixin instances
         self._plugins: dict = {}   # name -> plugin instance
         self._loader         = None  # PluginLoader — set after load_all()
 
@@ -100,6 +101,22 @@ class CoreAPI:
     def register_alert(self, plugin) -> None:
         """Register plugin as an alert source for the Alerts block."""
         self._alerts.append(plugin)
+
+    def register_session_provider(self, plugin) -> None:
+        """Register plugin as an activity data provider for Session Stats.
+
+        Plugins must implement ActivityProviderMixin.  Tabs appear in the
+        Session Stats block in alphabetical order after the Summary tab.
+        """
+        self._session_providers.append(plugin)
+
+    @property
+    def session_providers(self) -> list:
+        """Return registered activity providers, sorted by tab title."""
+        return sorted(
+            self._session_providers,
+            key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "z"),
+        )
 
     # ── Convenience wrappers ──────────────────────────────────────────────────
 

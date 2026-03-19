@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260318a"
+VERSION = "20260319"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -59,6 +59,7 @@ MAX_DUPLICATES       = 5
 FUEL_WARN_THRESHOLD  = 0.2   # 20 %
 FUEL_CRIT_THRESHOLD  = 0.1   # 10 %
 RECENT_KILL_WINDOW   = 10
+SESSION_GAP_MINUTES  = 15    # gap between Shutdown→LoadGame that starts a new session
 LABEL_UNKNOWN        = "[Unknown]"
 PATTERN_JOURNAL      = r"^Journal\.\d{4}-\d{2}-\d{2}T\d{6}\.\d{2}\.log$"
 PATTERN_WEBHOOK      = r"^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-z0-9_-]+$"
@@ -558,6 +559,7 @@ class MonitorState:
         self.last_offline_alert      = None
         self.offline_since_mono      = None
         self.in_game                 = False
+        self.last_shutdown_time      = None   # datetime of last Shutdown event
         self.mission_value_map       = {}
         self.stack_value             = 0
         self.has_fighter_bay         = False

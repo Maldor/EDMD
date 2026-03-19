@@ -14,6 +14,7 @@ from core.state import FIGHTER_LOADOUT_NAMES, FIGHTER_TYPE_NAMES, resolve_fighte
 class CrewSlfPlugin(BasePlugin):
     PLUGIN_NAME    = "crew_slf"
     PLUGIN_DISPLAY = "NPC Crew & SLF"
+    PLUGIN_DESCRIPTION = "NPC crew details and fighter bay status including hull integrity."
     PLUGIN_VERSION = "1.0.0"
 
     SUBSCRIBED_EVENTS = [
