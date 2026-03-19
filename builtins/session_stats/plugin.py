@@ -74,7 +74,7 @@ class SessionStatsPlugin(BasePlugin):
                     ses.last_kill_mono = time.monotonic()
 
                 if ev == "Bounty":
-                    bountyvalue = event["Rewards"][0]["Reward"]
+                    bountyvalue = event.get("TotalReward") or event["Rewards"][0]["Reward"]
                     ship        = normalise_ship_name(event.get("Target_Localised") or event.get("Target"))
                 else:
                     bountyvalue       = event["Reward"]
