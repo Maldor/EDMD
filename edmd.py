@@ -71,7 +71,17 @@ def _do_upgrade() -> None:
 
     dirty = _sp.run(["git", "-C", str(repo_dir), "status", "--porcelain"],
                     capture_output=True, text=True)
-    modified = [l for l in dirty.stdout.splitlines() if not l.strip().endswith("config.toml")]
+    def _is_user_file(line: str) -> bool:
+        """Return True if this git status line refers to a user-owned path
+        that should not block or warn on upgrade."""
+        path = line.strip().lstrip("?! MADRCU").strip()
+        return (
+            path.endswith("config.toml")
+            or path.endswith("config.toml.bak")
+            or path.startswith("plugins/")
+            or path.startswith("plugins\\")
+        )
+    modified = [l for l in dirty.stdout.splitlines() if not _is_user_file(l)]
     if modified:
         print(f"{Terminal.YELL}Warning:{Terminal.END} Uncommitted local changes:")
         for l in modified[:5]: print(f"  {l}")
