@@ -276,10 +276,17 @@ class AlertsPlugin(BasePlugin):
                 self._push("💀", "Fighter destroyed!")
 
             case "ReservoirReplenished":
-                # Commander plugin owns burn rate calculation.
-                # Alerts only handles threshold warnings.
+                # Commander plugin owns burn rate calculation and fuel_current.
+                # Alerts reads state.fuel_burn_rate for the duration string.
                 fuel_pct = round((event["FuelMain"] / state.fuel_tank_size) * 100)
                 state.fuel_current = event["FuelMain"]
+                burn = getattr(state, "fuel_burn_rate", None)
+                if burn and burn > 0:
+                    secs_r = (event["FuelMain"] / burn) * 3600
+                    h_r = int(secs_r // 3600); m_r = int((secs_r % 3600) // 60)
+                    fuel_time_remain = f"  (~{h_r}h {m_r}m)" if h_r > 0 else f"  (~{m_r}m)"
+                else:
+                    fuel_time_remain = ""
 
                 col = ""; level = ":"; fuel_loglevel = 0
                 if event["FuelMain"] < state.fuel_tank_size * FUEL_CRIT_THRESHOLD:

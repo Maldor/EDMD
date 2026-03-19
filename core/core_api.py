@@ -21,7 +21,8 @@ class CoreAPI:
     """Read-only view of core state and shared services for plugins.
 
     Attributes (read-only by convention — plugins must not mutate these):
-        state          — MonitorState instance
+        state          — MonitorState instance (low-level; prefer core.data)
+        data           — DataProvider — unified source of truth for all state
         active_session — SessionData for the current session
         lifetime       — SessionData accumulating lifetime totals
         cfg            — ConfigManager instance
@@ -52,10 +53,12 @@ class CoreAPI:
         emitter: Emitter,
         gui_queue: queue.Queue | None,
         journal_dir: Path,
+        data_provider=None,
         trace_mode: bool = False,
         launch_argv: list[str] | None = None,
     ):
         self.state          = state
+        self.data           = data_provider   # DataProvider — unified source of truth
         self.active_session = active_session
         self.lifetime       = lifetime
         self.cfg            = cfg_mgr

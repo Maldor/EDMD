@@ -62,9 +62,10 @@ class CommanderPlugin(BasePlugin):
             pass
 
     def on_event(self, event: dict, state) -> None:
-        core = self.core
-        gq   = core.gui_queue
-        ev   = event.get("event")
+        core    = self.core
+        gq      = core.gui_queue
+        ev      = event.get("event")
+        logtime = event.get("_logtime")
 
         match ev:
             case "Commander":
@@ -86,7 +87,7 @@ class CommanderPlugin(BasePlugin):
                     if val is not None:
                         rep[faction] = float(val)
                 if rep:
-                    if not hasattr(state, "pilot_reputation"):
+                    if not state.pilot_reputation:
                         state.pilot_reputation = {}
                     state.pilot_reputation.update(rep)
                     if gq: gq.put(("cmdr_update", None))

@@ -443,12 +443,17 @@ def handle_event(
     journal_dir: Path,
     trace_mode: bool = False,
     plugin_dispatch: dict | None = None,
+    data_provider=None,
 ) -> None:
     try:
         j = json.loads(line)
     except ValueError:
         print(f"{Terminal.WHITE}Warning:{Terminal.END} Journal parsing error, skipping line")
         return
+
+    # ── Event ring buffer — feed DataProvider before plugin dispatch ──────────
+    if data_provider is not None:
+        data_provider.push_event(j)
 
     # ── Plugin dispatch (Phase 2+) ────────────────────────────────────────────
     # When plugin_dispatch is provided, forward the event to all subscribed
@@ -466,6 +471,12 @@ def handle_event(
                     f"{Terminal.WARN}Warning:{Terminal.END} "
                     f"Plugin {plugin.PLUGIN_NAME!r} error on {ev_name!r}: {e}"
                 )
+        # Docked/Undocked: notify DataProvider for CAPI dock-gating
+        if ev_name in ("Docked", "Location") and data_provider is not None:
+            data_provider.notify_docked(True)
+        elif ev_name in ("Undocked", "SupercruiseEntry", "FSDJump") \
+                and data_provider is not None:
+            data_provider.notify_docked(False)
         state.prev_event = ev_name
         return
 
@@ -1056,6 +1067,7 @@ def monitor_journal(
     _edmd_start_mono: float,
     trace_mode: bool = False,
     plugin_dispatch: dict | None = None,
+    data_provider=None,
 ) -> Path | None:
     """Preload a journal then tail it live. Returns path of new journal if one appears."""
 
@@ -1069,6 +1081,7 @@ def monitor_journal(
                 line, state, active_session, lifetime,
                 emitter, cfg_mgr, gui_queue, journal_dir, trace_mode,
                 plugin_dispatch=plugin_dispatch,
+                data_provider=data_provider,
             )
 
         state.in_preload = False
@@ -1304,6 +1317,7 @@ def monitor_journal(
                 line, state, active_session, lifetime,
                 emitter, cfg_mgr, gui_queue, journal_dir, trace_mode,
                 plugin_dispatch=plugin_dispatch,
+                data_provider=data_provider,
             )
 
     return None
@@ -1321,6 +1335,7 @@ def run_monitor(
     _edmd_start_mono: float,
     trace_mode: bool = False,
     plugin_dispatch: dict | None = None,
+    data_provider=None,
 ) -> None:
     """Outer loop: run monitor_journal, switching files when a new one appears."""
     try:
@@ -1332,6 +1347,7 @@ def run_monitor(
                 emitter, cfg_mgr, gui_queue, journal_dir,
                 journal_file_ref, _edmd_start_mono, trace_mode,
                 plugin_dispatch=plugin_dispatch,
+                data_provider=data_provider,
             )
             if next_journal:
                 current = next_journal

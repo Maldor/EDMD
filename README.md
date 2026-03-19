@@ -29,6 +29,8 @@ EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails y
 
 Alerts fire when things go wrong: shields down, hull taking damage, fuel running low, fighter destroyed. Session statistics accumulate across all activity types in a tabbed panel that shows only what's relevant to your current session.
 
+All game state flows through a unified `DataProvider` — CAPI when authenticated, journal events and local JSON files as fallback. Plugin and third-party developers access a single typed API (`core.data`) with no need to scan journals or poll CAPI themselves.
+
 ---
 
 ## Features
@@ -47,11 +49,11 @@ Alerts fire when things go wrong: shields down, hull taking damage, fuel running
 | 📰 **Automatic Journal Switching** | Seamlessly follows new journal files between game sessions |
 | 📈 **Statistical Reports** | Five journal-wide reports: career overview, bounty breakdown, session history, hunting grounds, and NPC rogues' gallery |
 | 📚 **Native Docs Viewer** | Full documentation browser built into the GUI — no browser needed |
-| 🔌 **Plugin System** | Drop a Python plugin into `plugins/` and it loads automatically with optional dashboard block |
+| 🔌 **Plugin System** | Drop a Python plugin into `plugins/` — it loads automatically. Access all game state via `core.data`, the event ring buffer, and typed sub-namespaces |
 | 📦 **Cargo Block** | Live ship hold display with tonnage gauge, per-item list, stolen-goods flagging, and target-market price comparison via Spansh |
 | ⚗️ **Engineering Block** | Engineering materials inventory across Raw, Manufactured, and Encoded categories |
 | 🚀 **Assets Block** | Full fleet overview — current ship, stored ships with fitted loadouts, stored modules, fleet carrier status, and CAPI-sourced hull/rebuy data |
-| 🛡️ **CAPI Integration** | Frontier Companion API for authoritative fleet data, live market prices, squadron identity, and community goal tracking. Data persisted locally so it is available immediately on restart |
+| 🛡️ **Unified Data Provider** | Single source of truth for all game state — CAPI when authenticated, journal and local JSON as fallback. Priority: CAPI › journal › Status.json. All components read from one place |
 | 🎖️ **Squadron Identity** | Squadron name, tag, and rank displayed in the Commander block header when CAPI is enabled |
 | 🌐 **Data Contributions** | Opt-in journal uploading to EDDN, EDSM, EDAstro, and Inara — with batching, retry queues, and beta detection |
 

@@ -69,6 +69,7 @@ class PluginStorage:
         "capi_profile.json", "capi_market.json", "capi_shipyard.json",
         "capi_fleetcarrier.json", "capi_communitygoals.json", "fleet.json",
         "poll_times.json",   # CAPI poll timestamps — survive rapid restarts
+        "capi_tokens.json",  # DataProvider CAPI OAuth tokens
     })
 
     def __init__(self, data_dir: Path) -> None:
@@ -340,25 +341,63 @@ class PluginLoader:
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
-    def load_all(self, core_api) -> None:
-        """Scan builtins/ then plugins/; load enabled plugins; capture
-        metadata for disabled ones so the dialog can show them."""
-        builtins_dir = self._repo_root / "builtins"
-        plugins_dir  = self._repo_root / "plugins"
+    # Integration builtins — shown in plugins menu, user-togglable
+    INTEGRATION_NAMES = frozenset({"eddn", "edsm", "edastro", "inara"})
+    # Activity builtins — always-on, not shown in plugins menu
+    ACTIVITY_PREFIX = "activity_"
 
-        for search_dir, label, is_builtin in [
-            (builtins_dir, "builtin", True),
-            (plugins_dir,  "plugin",  False),
-        ]:
-            if not search_dir.is_dir():
-                continue
-            for plugin_dir in sorted(search_dir.iterdir()):
-                if not plugin_dir.is_dir():
-                    continue
+    def load_all(self, core_api) -> None:
+        """Load plugins in three tiers:
+
+        Tier 1 — core/components/: always-on core components (alerts, commander,
+            cargo, etc.). Not user-disableable. Not shown in plugins menu.
+
+        Tier 2 — builtins/: activity_* plugins (always-on, not shown in menu)
+            and integration plugins (EDDN, EDSM, EDAstro, Inara — user-togglable,
+            shown in plugins menu).
+
+        Tier 3 — plugins/: third-party user plugins (user-togglable, shown in menu).
+        """
+        components_dir = self._repo_root / "core" / "components"
+        builtins_dir   = self._repo_root / "builtins"
+        plugins_dir    = self._repo_root / "plugins"
+
+        # Tier 1: core components — always load, never disable
+        if components_dir.is_dir():
+            for plugin_dir in sorted(components_dir.iterdir()):
+                if not plugin_dir.is_dir(): continue
                 plugin_file = plugin_dir / "plugin.py"
-                if not plugin_file.exists():
-                    continue
-                self._load_one(plugin_file, label, is_builtin, core_api)
+                if not plugin_file.exists(): continue
+                self._load_one(
+                    plugin_file, "component", True, core_api,
+                    always_on=True, show_in_menu=False,
+                )
+
+        # Tier 2: builtins — activity plugins always-on; integrations user-togglable
+        if builtins_dir.is_dir():
+            for plugin_dir in sorted(builtins_dir.iterdir()):
+                if not plugin_dir.is_dir(): continue
+                plugin_file = plugin_dir / "plugin.py"
+                if not plugin_file.exists(): continue
+                dir_name = plugin_dir.name
+                is_activity    = dir_name.startswith(self.ACTIVITY_PREFIX)
+                is_integration = dir_name in self.INTEGRATION_NAMES
+                self._load_one(
+                    plugin_file, "builtin", True, core_api,
+                    always_on=is_activity,
+                    show_in_menu=is_integration,
+                )
+
+        # Tier 3: third-party plugins — user-togglable, shown in menu
+        if plugins_dir.is_dir():
+            for plugin_dir in sorted(plugins_dir.iterdir()):
+                if not plugin_dir.is_dir(): continue
+                plugin_file = plugin_dir / "plugin.py"
+                if not plugin_file.exists(): continue
+                self._load_one(
+                    plugin_file, "plugin", False, core_api,
+                    always_on=False, show_in_menu=True,
+                )
 
         core_api._plugins = self._plugin_map
         core_api._loader  = self
@@ -369,6 +408,8 @@ class PluginLoader:
         label: str,
         is_builtin: bool,
         core_api,
+        always_on: bool = False,
+        show_in_menu: bool = True,
     ) -> None:
         dir_name    = plugin_file.parent.name
         module_name = f"_edmd_plugin_{dir_name}"
@@ -413,21 +454,27 @@ class PluginLoader:
             description = getattr(plugin_cls, "PLUGIN_DESCRIPTION", "")
             cls_default = getattr(plugin_cls, "PLUGIN_DEFAULT_ENABLED", True)
 
-            enabled = self.is_enabled(name, default=cls_default)
-
-            if not enabled:
-                self._disabled.append(
-                    DisabledPluginMeta(name, display, version, description, is_builtin)
-                )
-                print(
-                    f"  Skipped {label}: {display} v{version} [{name}] (disabled)"
-                )
-                return
+            # always_on plugins (core components, activity plugins) bypass
+            # the enable/disable system entirely.
+            if not always_on:
+                enabled = self.is_enabled(name, default=cls_default)
+                if not enabled:
+                    if show_in_menu:
+                        self._disabled.append(
+                            DisabledPluginMeta(name, display, version,
+                                               description, is_builtin)
+                        )
+                    print(
+                        f"  [skipped]  {display} v{version} (disabled)"
+                    )
+                    return
 
             # ── Instantiate and wire up ──────────────────────────────────────
-            instance             = plugin_cls()
-            instance._is_builtin = is_builtin
-            instance.storage     = PluginStorage(storage_dir)
+            instance               = plugin_cls()
+            instance._is_builtin   = is_builtin
+            instance._always_on    = always_on
+            instance._show_in_menu = show_in_menu
+            instance.storage       = PluginStorage(storage_dir)
 
             instance.on_load(core_api)
 
@@ -436,15 +483,37 @@ class PluginLoader:
 
             note = getattr(instance, "_load_note", "")
             suffix = f"  ({note})" if note else ""
-            print(
-                f"  Loaded {label}: {instance.PLUGIN_DISPLAY} "
-                f"v{instance.PLUGIN_VERSION} [{instance.PLUGIN_NAME}]{suffix}"
-            )
+            if always_on and label == "component":
+                # Core components — always-on, silent by default
+                print(
+                    f"  [core]  {instance.PLUGIN_DISPLAY} "
+                    f"v{instance.PLUGIN_VERSION}{suffix}"
+                )
+            elif always_on:
+                # Activity plugins — always-on builtins
+                print(
+                    f"  [activity]  {instance.PLUGIN_DISPLAY} "
+                    f"v{instance.PLUGIN_VERSION}{suffix}"
+                )
+            elif show_in_menu and is_builtin:
+                # Data integrations — user-togglable builtins
+                print(
+                    f"  [integration]  {instance.PLUGIN_DISPLAY} "
+                    f"v{instance.PLUGIN_VERSION}{suffix}"
+                )
+            elif not is_builtin:
+                # Third-party plugins
+                print(
+                    f"  [plugin]  {instance.PLUGIN_DISPLAY} "
+                    f"v{instance.PLUGIN_VERSION} [{instance.PLUGIN_NAME}]{suffix}"
+                )
+            # else: stale builtin not matching any tier — omit silently
 
         except Exception as e:
+            tier = "core component" if label == "component" else label
             print(
                 f"{Terminal.WARN}Warning:{Terminal.END} "
-                f"Failed to load {label} from {plugin_file}: {e}"
+                f"Failed to load {tier} from {plugin_file}: {e}"
             )
             import traceback
             traceback.print_exc()

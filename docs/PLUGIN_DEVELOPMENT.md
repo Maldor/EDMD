@@ -1,346 +1,358 @@
-# EDMD Plugin Development
+# EDMD Plugin Development Guide
 
-EDMD supports user-written plugins. Drop a plugin into `plugins/<n>/plugin.py`
-and it will be loaded automatically on startup alongside the built-in modules.
-
-> **Stability note:** The plugin API and block system interfaces are stable as of v20260310b.
-
-The `plugins/` directory is gitignored — your work survives `--upgrade`.
+EDMD supports user-written plugins. Drop a directory containing a `plugin.py`
+into `plugins/<name>/` and it loads automatically on startup.
 
 ---
 
-## Plugin structure
+## Quick start
 
 ```
 plugins/
-└── myplugin/
-    └── plugin.py
+  myplugin/
+    __init__.py   (empty)
+    plugin.py
 ```
 
----
-
-## Minimal plugin (event handler only)
+`plugin.py` must define exactly one class that subclasses `BasePlugin`:
 
 ```python
 from core.plugin_loader import BasePlugin
 
 class MyPlugin(BasePlugin):
-    PLUGIN_NAME       = "myplugin"
-    PLUGIN_DISPLAY    = "My Plugin"
-    PLUGIN_VERSION    = "1.0.0"
-    SUBSCRIBED_EVENTS = ["Bounty", "FactionKillBond"]
+    PLUGIN_NAME    = "myplugin"
+    PLUGIN_DISPLAY = "My Plugin"
+    PLUGIN_VERSION = "1.0.0"
+    PLUGIN_DESCRIPTION = "Does something useful."
+
+    SUBSCRIBED_EVENTS = ["Bounty", "FSDJump"]
 
     def on_load(self, core) -> None:
-        self.core = core
+        super().on_load(core)
+        # core is a CoreAPI instance — store it for later use
+        # Optionally register a GUI dashboard block:
+        # core.register_block(self, priority=50)
 
     def on_event(self, event: dict, state) -> None:
-        reward = event.get("TotalReward", 0)
-        # event  — the parsed journal line (dict)
-        # state  — live MonitorState
+        ev = event.get("event")
+        logtime = event.get("_logtime")   # datetime | None
+        if ev == "Bounty":
+            value = event.get("TotalReward", 0)
+            # ... do something
 ```
 
 ---
 
-## Plugin class attributes
+## Plugin metadata
 
 | Attribute | Required | Description |
 |-----------|----------|-------------|
-| `PLUGIN_NAME` | Yes | Internal identifier. Must be unique. Lowercase, no spaces. |
-| `PLUGIN_DISPLAY` | Yes | Human-readable name shown in the Installed Plugins dialog. |
-| `PLUGIN_VERSION` | Yes | Freeform version string. |
-| `PLUGIN_DESCRIPTION` | No | One-line description shown in the Installed Plugins dialog. |
-| `PLUGIN_DEFAULT_ENABLED` | No | Set `False` to ship the plugin disabled. Users opt in via the dialog. Default: `True`. |
-| `SUBSCRIBED_EVENTS` | No | List of Elite journal event names to receive. |
-| `BLOCK_WIDGET_CLASS` | No | A `BlockWidget` subclass to register as a dashboard block. |
+| `PLUGIN_NAME` | ✅ | Unique snake_case identifier |
+| `PLUGIN_DISPLAY` | ✅ | Human-readable name shown in the Plugins menu |
+| `PLUGIN_VERSION` | ✅ | Semantic version string |
+| `PLUGIN_DESCRIPTION` | recommended | One-line description shown in Plugins dialog |
+| `SUBSCRIBED_EVENTS` | ✅ | List of journal event names to receive |
+| `PLUGIN_DEFAULT_ENABLED` | optional | `True` (default) — set `False` to ship disabled |
+| `DEFAULT_COL/ROW/WIDTH/HEIGHT` | optional | Default dashboard grid position if registering a block |
 
 ---
 
-## Plugin lifecycle
+## The `core` object (`CoreAPI`)
+
+Every plugin receives a `CoreAPI` instance in `on_load()`. Store it as
+`self.core` (done automatically by `super().on_load(core)`).
+
+### `core.data` — the unified data provider
+
+**This is the primary API for reading game state.** Do not read `core.state`
+fields directly — use `core.data` instead.
+
+```python
+# Ship vitals
+core.data.ship.hull()              # int — hull integrity pct (CAPI > journal)
+core.data.ship.shields()           # bool — shields up
+core.data.ship.shields_recharging()# bool
+core.data.ship.fuel_pct()          # float | None — fuel percentage
+core.data.ship.fuel_tons()         # float | None — FuelMain in tons
+core.data.ship.fuel_rate()         # float | None — burn rate t/hr
+core.data.ship.fuel_remaining_s()  # float | None — seconds of fuel left
+core.data.ship.identity()          # dict — {name, ident, type, type_display, rebuy, value}
+
+# Commander
+core.data.commander.name()         # str | None
+core.data.commander.location()     # dict — {system, body}
+core.data.commander.credits()      # float | None — CAPI > journal
+core.data.commander.ranks()        # dict — all rank types
+core.data.commander.powerplay()    # dict — {power, rank, merits_total}
+core.data.commander.squadron()     # dict — {name, tag, rank}
+core.data.commander.mode()         # str | None — "Solo", "Group", etc.
+
+# Fleet — CAPI primary, journal fallback
+core.data.fleet.current_ship()     # dict | None
+core.data.fleet.stored_ships()     # list[dict]
+core.data.fleet.stored_modules()   # list[dict]
+core.data.fleet.carrier()          # dict | None
+
+# Market — CAPI docked+authed, Market.json otherwise
+core.data.market.commodities()     # dict {name_lower: commodity_dict}
+core.data.market.station_info()    # dict {station_name, market_id, star_system}
+core.data.market.mean_prices()     # dict {name_lower: int}
+
+# Fighter / NPC crew
+core.data.crew.active()            # bool
+core.data.crew.name()              # str | None
+core.data.crew.rank()              # str | None
+core.data.crew.slf_hull()          # int pct
+core.data.crew.slf_deployed()      # bool
+core.data.crew.has_fighter_bay()   # bool
+```
+
+### `core.data.events()` — event ring buffer
+
+Request recent journal events of any type without scanning the journal yourself:
+
+```python
+# Last 5 HullDamage events, newest first
+recent = core.data.events("HullDamage", n=5)
+for ev in recent:
+    print(ev["Health"], ev["_logtime"])
+
+# Most recent FSDJump
+last_jump = core.data.events("FSDJump", n=1)
+if last_jump:
+    system = last_jump[0].get("StarSystem")
+```
+
+The buffer holds the last 200 events per type across the full session.
+
+### `core.data.source()` — transparency
+
+```python
+# Find out which source provided a data value
+src = core.data.source("ship.hull")
+# Returns: "capi" | "journal" | "status_json" | "unknown"
+```
+
+### `core.data.capi` — CAPI auth state
+
+```python
+core.data.capi.is_connected()        # bool
+core.data.capi.commander_name()      # str | None
+core.data.capi.last_poll("profile")  # float (unix timestamp)
+```
+
+### Other `core` APIs
+
+```python
+core.emitter.emit(              # send terminal / Discord message
+    msg_term="Kill: Cobra",
+    msg_discord="**Kill: Cobra**",
+    emoji="💥", sigil="*  KILL",
+    timestamp=logtime,
+    loglevel=core.notify_levels["RewardEvent"],
+)
+
+core.plugin_call("session_stats", "on_new_session", gap)  # call another plugin
+core.active_session   # SessionData — current session counters
+core.app_settings     # dict — user settings from config.toml
+core.notify_levels    # dict — per-event notification levels
+core.gui_queue        # thread-safe queue for GUI messages (None in headless mode)
+core.cfg              # ConfigManager
+```
+
+---
+
+## Receiving events
+
+List journal event names in `SUBSCRIBED_EVENTS`. Your `on_event()` method
+receives the parsed event dict with `_logtime` already set:
+
+```python
+SUBSCRIBED_EVENTS = ["Bounty", "FactionKillBond", "Died"]
+
+def on_event(self, event: dict, state) -> None:
+    ev      = event.get("event")
+    logtime = event.get("_logtime")   # datetime object, or None during preload
+
+    match ev:
+        case "Bounty":
+            value = event.get("TotalReward") or event["Rewards"][0]["Reward"]
+            ship  = event.get("Target_Localised") or event.get("Target")
+            # ...
+        case "Died":
+            rebuy = event.get("Cost", 0)
+            # ...
+```
+
+> **Important:** do not raise exceptions in `on_event()`. Uncaught exceptions
+> are caught and logged as warnings, but they abort processing for that event.
+
+### Preload awareness
+
+`state.in_preload` is `True` while EDMD is replaying historical journal events.
+Avoid emitting alerts or writing to the GUI queue during preload:
+
+```python
+def on_event(self, event: dict, state) -> None:
+    if state.in_preload:
+        return   # skip — historical event
+    # ... live event handling
+```
+
+---
+
+## Registering a GUI block
+
+If your plugin needs a dashboard panel, call `core.register_block(self)` in
+`on_load()` and implement the `BlockWidget` interface in your GUI module.
 
 ```python
 def on_load(self, core) -> None:
-    """Called once when the plugin is loaded at startup."""
+    super().on_load(core)
+    core.register_block(self, priority=50)   # lower priority = displayed first
 
-def on_unload(self) -> None:
-    """Called on clean shutdown. Release any resources."""
-
-def on_event(self, event: dict, state) -> None:
-    """Called for every event in SUBSCRIBED_EVENTS."""
+# Default grid position (can be overridden by user)
+DEFAULT_COL    = 16
+DEFAULT_ROW    = 0
+DEFAULT_WIDTH  = 8
+DEFAULT_HEIGHT = 10
 ```
 
-`on_load` fires after the journal monitor has started but before preload replay.
-Use it to read saved state from `self.storage`, register your block, and grab a
-reference to `core`.
+See `gui/block_base.py` for the `BlockWidget` base class. Your block class
+lives in `gui/blocks/myplugin.py` and is registered in `gui/blocks/__init__.py`.
 
 ---
 
 ## Persistent storage
 
-Every plugin gets a sandboxed storage directory at
-`EDMD_DATA_DIR/plugins/<plugin_name>/`. Access it via `self.storage`:
+Each plugin gets a sandboxed storage directory:
 
 ```python
-def on_load(self, core) -> None:
-    data = self.storage.read_json("data.json")       # returns {} if absent
-    self._count = data.get("count", 0) + 1
-    self.storage.write_json({"count": self._count}, "data.json")
+# In on_load():
+self.storage.write_json({"key": "value"}, "data.json")
+
+# In on_event():
+saved = self.storage.read_json("data.json")
 ```
 
-| Method | Description |
-|--------|-------------|
-| `self.storage.read_json(filename)` | Read a JSON file. Returns `{}` if absent. |
-| `self.storage.write_json(data, filename)` | Write a JSON file. |
-| `self.storage.read_toml(filename)` | Read a TOML file. Returns `{}` if absent. |
-| `self.storage.path` | `Path` to your plugin's data directory. |
-
-Allowed filenames: `data.json`, `config.json`, `state.json`, `config.toml`, `state.toml`.
+Allowed filenames: `data.json`, `config.json`, `state.json`, `tokens.json`.
 
 ---
 
-## Adding a dashboard block
+## Plugin tiers
 
-Plugins can register a native dashboard block. The framework provides all chrome:
-frame, section header, drag-to-move, resize handle, collapse toggle, and footer
-gutter. Your plugin only fills the content area.
+EDMD loads plugins in three tiers. Understanding this helps explain what you
+see in Settings → Plugins:
 
-**Consistency is structurally guaranteed.** A plugin cannot alter the chrome because
-it is owned entirely by `BlockWidget`. The dashboard will always look consistent
-regardless of who wrote the plugin.
+| Tier | Location | Always on | Shown in menu |
+|------|----------|-----------|---------------|
+| Core components | `core/components/` | ✅ | ❌ |
+| Activity plugins | `builtins/activity_*/` | ✅ | ❌ |
+| Data integrations | `builtins/eddn|edsm|edastro|inara/` | ❌ | ✅ |
+| Third-party | `plugins/*/` | ❌ | ✅ |
 
-### Step 1 — Write a BlockWidget subclass
+**Core components** (alerts, commander, cargo, crew, engineering, assets,
+missions, session stats) are always enabled. Users can hide their dashboard
+blocks via View → Blocks but cannot disable the underlying plugin.
 
-```python
-try:
-    import gi
-    gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk
-    _GTK = True
-except Exception:
-    _GTK = False
+**Your plugins** live in `plugins/` — tier 4. They can be enabled and disabled
+by the user via Settings → Plugins.
 
-if _GTK:
-    from gui.block_base import BlockWidget
+---
 
-if _GTK:
-    class MyBlock(BlockWidget):
-        BLOCK_TITLE = "My Plugin"   # section header text
+## Data priority
 
-        # Default grid position — used when the user has no saved layout entry.
-        # Users can drag and resize freely; their layout is saved automatically.
-        DEFAULT_COL    = 0
-        DEFAULT_ROW    = 0
-        DEFAULT_WIDTH  = 8    # grid columns (out of 24)
-        DEFAULT_HEIGHT = 8    # row units
+When `core.data` returns a value, it follows this priority order:
 
-        def build(self, parent: "Gtk.Box") -> None:
-            """Populate the content area. Called once at startup."""
-            body = self._build_section(parent)   # returns the inner content box
+1. **CAPI** — Frontier Companion API (requires user authentication)
+2. **Journal events** — live from the `.log` file tailed by EDMD
+3. **Local JSON** — `Status.json`, `Market.json`, `Shipyard.json`
 
-            self._value_lbl = self.make_label("—", css_class="data-value")
-            body.append(self.make_row("Kills today"))
-            body.append(self._value_lbl)
+If CAPI is not authenticated, journal and JSON data are used throughout.
+If CAPI is authenticated but a poll hasn't completed yet, journal data fills in.
 
-        def refresh(self) -> None:
-            """Called every second and on plugin_refresh queue messages."""
-            count = getattr(self.state, "my_kill_count", 0)
-            self._value_lbl.set_label(str(count))
-```
+You do not need to handle this yourself — `core.data` resolves it transparently.
 
-### Step 2 — Register it on your plugin
+---
+
+## Activity provider plugins
+
+If your plugin tracks session activity and wants a tab in the Session Stats
+block, implement `ActivityProviderMixin`:
 
 ```python
-class MyPlugin(BasePlugin):
-    PLUGIN_NAME        = "myplugin"
-    PLUGIN_DISPLAY     = "My Plugin"
-    PLUGIN_VERSION     = "1.0.0"
-    SUBSCRIBED_EVENTS  = ["Bounty"]
-    BLOCK_WIDGET_CLASS = MyBlock if _GTK else None   # this is all that's needed
+from core.plugin_loader import BasePlugin
+from core.activity import ActivityProviderMixin
+
+class MyActivityPlugin(BasePlugin, ActivityProviderMixin):
+    PLUGIN_NAME        = "my_activity"
+    ACTIVITY_TAB_TITLE = "My Activity"
+    SUBSCRIBED_EVENTS  = ["SomeEvent"]
 
     def on_load(self, core) -> None:
-        self.core = core
+        super().on_load(core)
+        core.register_session_provider(self)
+        self.count = 0
+
+    def on_session_reset(self) -> None:
+        self.count = 0
+
+    def has_activity(self) -> bool:
+        return self.count > 0
+
+    def get_summary_rows(self) -> list[dict]:
+        return [{"label": "Things done", "value": str(self.count), "rate": None}]
+
+    def get_tab_rows(self) -> list[dict]:
+        return self.get_summary_rows()
 
     def on_event(self, event: dict, state) -> None:
-        if event.get("event") == "Bounty":
-            if self.core.gui_queue:
-                self.core.gui_queue.put(("plugin_refresh", self.PLUGIN_NAME))
+        if event.get("event") == "SomeEvent":
+            self.count += 1
 ```
 
-The GUI automatically places your block on the canvas, adds it to the
-View → Blocks show/hide list, and calls `refresh()` every second.
+Tabs appear automatically in Session Stats when `has_activity()` returns `True`,
+sorted alphabetically after the Summary tab.
 
 ---
 
-## Block behaviours reference
-
-Every block built on `BlockWidget` inherits the following behaviours
-automatically — no extra code required in your plugin.
-
-### Drag to move
-
-The section header is a drag handle. Click and drag it to reposition the block
-on the canvas. The block snaps to the nearest grid column and row on release.
-The new position is saved to `layout.json` immediately.
-
-During a drag, a lightweight ghost frame follows the cursor. The real block
-does not move until the gesture ends, eliminating stutter.
-
-### Resize
-
-A resize handle (⤡) lives in the bottom-right corner of every block's footer
-gutter. Drag it to resize. The block snaps to the nearest column and row unit
-on release. The new size is saved automatically.
-
-### Collapse / expand
-
-**Double-click the section header** to collapse a block to just its title bar.
-Double-click again to restore it. The block occupies only the height of its
-header while collapsed, freeing screen space on crowded dashboards.
-
-Collapse state is not persisted — blocks come back expanded on restart.
-
-While collapsed, the block's grid position and size are preserved. On expand,
-it returns to its full allocated size without needing a layout reset.
-
-### Width-responsive layout
-
-If your block needs to respond to its own pixel width (e.g. switching between
-a compact and an expanded layout), override `on_resize`:
+## Example: minimal kill counter plugin
 
 ```python
-WIDE_THRESHOLD = 380   # pixels
+from core.plugin_loader import BasePlugin
 
-def on_resize(self, w: int, h: int) -> None:
-    super().on_resize(w, h)   # REQUIRED — enforces collapsed height
-    if w >= WIDE_THRESHOLD:
-        self._show_wide_layout()
-    else:
-        self._show_narrow_layout()
+class KillCounterPlugin(BasePlugin):
+    PLUGIN_NAME        = "kill_counter"
+    PLUGIN_DISPLAY     = "Kill Counter"
+    PLUGIN_VERSION     = "1.0.0"
+    PLUGIN_DESCRIPTION = "Counts kills and announces milestones."
+    SUBSCRIBED_EVENTS  = ["Bounty", "FactionKillBond"]
+
+    def on_load(self, core) -> None:
+        super().on_load(core)
+        self.kills = 0
+
+    def on_event(self, event: dict, state) -> None:
+        if state.in_preload:
+            return
+        self.kills += 1
+        if self.kills % 100 == 0:
+            core = self.core
+            core.emitter.emit(
+                msg_term=f"Milestone: {self.kills} kills this session!",
+                emoji="🎯", sigil="*  MILE",
+                timestamp=event.get("_logtime"),
+                loglevel=core.notify_levels.get("RewardEvent", 1),
+            )
 ```
 
-`on_resize` is called after every `set_size_request` — on window resize, block
-resize, and reflow. Always call `super().on_resize(w, h)` first so the base
-class can enforce the collapsed height if the block is currently collapsed.
-
 ---
 
-## BlockWidget API reference
+## Further reading
 
-Methods and attributes available inside your `BlockWidget` subclass:
-
-| Method / Attribute | Returns | Description |
-|--------------------|---------|-------------|
-| `self._build_section(parent, title)` | `Gtk.Box` | Sets up section header and separator; returns inner content box. Must be called at the start of `build()`. |
-| `self._make_scroll_body(parent)` | `Gtk.Box` | Creates a standard scrollable content area and appends it to `parent`. Returns the inner `Gtk.Box` to populate. Applies `mat-tab-scroll` CSS class, `NEVER/AUTOMATIC` scroll policy, vexpand, and `margin_end(12)` to keep content clear of the GTK4 overlay scrollbar track. Use this instead of constructing `ScrolledWindow` manually. |
-| `self.make_label(text, css_class, xalign)` | `Gtk.Label` | Create a styled label. |
-| `self.make_row(key_text, value_text)` | `Gtk.Box` | Create a key / value row. |
-| `self.footer()` | `Gtk.Box` | Footer gutter box. Prepend status items here (before the spacer). |
-| `self.state` | `MonitorState` | Live game state. |
-| `self.session` | `SessionData` | Current session data. |
-| `self.core` | `CoreAPI` | Full core API. |
-| `self.fmt_credits(n)` | `str` | Format a credit value — e.g. `1.50M`. |
-| `self.fmt_duration(s)` | `str` | Format seconds — e.g. `1h 30m`. |
-| `self._name` | `str` | Your block's plugin name. Available after `build_widget` is called. |
-
-### BlockWidget class attributes
-
-| Attribute | Default | Description |
-|-----------|---------|-------------|
-| `BLOCK_TITLE` | `"Block"` | Section header text. |
-| `BLOCK_CSS` | `"block"` | CSS class added to the outer section box. |
-| `DEFAULT_COL` | — | Default grid column when no saved layout entry exists. |
-| `DEFAULT_ROW` | — | Default grid row. |
-| `DEFAULT_WIDTH` | — | Default width in grid columns (max 24). |
-| `DEFAULT_HEIGHT` | — | Default height in row units. |
-
-If `DEFAULT_COL` is not declared, the block falls back to `col=0, row=0` with
-minimum size. Always declare all four defaults together.
-
----
-
-## CoreAPI reference
-
-Your plugin receives a `CoreAPI` instance via `on_load`:
-
-| Attribute / Method | Description |
-|--------------------|-------------|
-| `core.state` | Live `MonitorState` |
-| `core.active_session` | `SessionData` for the current session |
-| `core.cfg` | `ConfigManager` — use `.pcfg(key)` for profile-aware lookup |
-| `core.journal_dir` | `Path` to the active journal directory |
-| `core.emit(msg_term, msg_discord, ...)` | Post to terminal, GUI log, and Discord |
-| `core.gui_queue` | Thread-safe queue for GUI update messages |
-| `core.plugin_call(name, method, *args)` | Call a method on another loaded plugin |
-| `core.fmt_credits(n)` | Format a credit value — e.g. `1.50M` |
-| `core.fmt_duration(s)` | Format seconds — e.g. `1h 30m` |
-
-### Notable MonitorState fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `state.pilot_reputation` | `dict[str, float]` | Major faction standings from the journal `Reputation` event: Federation, Empire, Alliance, Independent. Values are 0–100 floats. Populated on first login replay; `None` or empty dict before that. |
-| `state.pilot_minor_reputation` | `dict[str, float]` | Local / minor faction standings from `Factions[].MyReputation` in `FSDJump` and `Location` events. Reflects the current system only; replaced on each jump. |
-
----
-
-## GUI queue message types
-
-| Message type | Payload | Effect |
-|---|---|---|
-| `plugin_refresh` | plugin name `str` | Calls `refresh()` on that plugin's block |
-| `all_update` | `None` | Refreshes all blocks |
-| `cmdr_update` | `None` | Refreshes Commander block |
-| `stats_update` | `None` | Refreshes Session Stats block |
-| `mission_update` | `None` | Refreshes Mission Stack block |
-| `crew_update` / `slf_update` | `None` | Refreshes Crew / SLF block |
-| `alerts_update` | `None` | Refreshes Alerts block |
-| `update_notice` | `tuple[str, str]` — `("release", "20260310b")` or `("commits", "3")` | Shows update badge in the header bar. First element is `"release"` for a new tagged release or `"commits"` for unpulled git commits; second element is the display string. |
-
----
-
-## CSS classes
-
-The following CSS classes are available on all block widgets.
-
-| Class | Applied to | Description |
-|-------|-----------|-------------|
-| `dashboard-block` | frame | Outer block frame |
-| `panel-section` | outer box | Section container |
-| `section-header` | header label | Block title bar |
-| `section-sep` | separator | Line below the title |
-| `section-body` | inner box | Content area returned by `_build_section` |
-| `block-footer` | footer box | Footer gutter row |
-| `data-row` | row box | A key/value pair row |
-| `data-key` | label | Dim key or secondary text |
-| `data-value` | label | Primary value text |
-| `block-dragging` | frame | Applied during a drag gesture |
-| `block-resizing` | frame | Applied during a resize gesture |
-| `block-drag-ghost` | ghost frame | Ghost overlay during drag/resize |
-
----
-
-## The Welcome plugin
-
-`plugins/welcome/plugin.py` is a working example plugin that demonstrates every
-concept in this guide. It ships disabled (`PLUGIN_DEFAULT_ENABLED = False`) and
-can be enabled in **File → Installed Plugins**.
-
-It demonstrates: GTK guard pattern, `_build_section`, `make_label`, `refresh`,
-`SUBSCRIBED_EVENTS`, `self.storage`, `DEFAULT_COL/ROW/WIDTH/HEIGHT`,
-and `PLUGIN_DEFAULT_ENABLED`.
-
-Read it alongside this document.
-
----
-
-## Checklist for a new plugin
-
-- [ ] `PLUGIN_NAME` is lowercase, unique, no spaces
-- [ ] `PLUGIN_VERSION` is set
-- [ ] All GTK imports are guarded with `try/except`
-- [ ] `BLOCK_WIDGET_CLASS = MyBlock if _GTK else None`
-- [ ] `DEFAULT_COL`, `DEFAULT_ROW`, `DEFAULT_WIDTH`, `DEFAULT_HEIGHT` are all declared
-- [ ] `build()` calls `self._build_section(parent)` first
-- [ ] Scrollable content areas use `self._make_scroll_body(parent)` — do not construct `ScrolledWindow` manually
-- [ ] `refresh()` is side-effect safe — it fires every second
-- [ ] `on_resize()` calls `super().on_resize(w, h)` first if overridden
-- [ ] Plugin is tested with GUI disabled (terminal-only mode)
+- `core/data.py` — full `DataProvider` source with inline docs
+- `core/activity.py` — `ActivityProviderMixin` protocol
+- `core/plugin_loader.py` — `BasePlugin`, `PluginStorage`
+- `gui/block_base.py` — `BlockWidget` base class
+- `builtins/activity_combat/plugin.py` — example activity provider
+- `builtins/eddn/plugin.py` — example integration plugin

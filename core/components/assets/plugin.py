@@ -548,7 +548,7 @@ class AssetsPlugin(BasePlugin):
         try:
             fc_data = self.storage.read_sibling_json("capi", "capi_fleetcarrier.json")
             if fc_data:
-                from builtins.assets.plugin import AssetsPlugin as _AP
+                from core.components.assets.plugin import AssetsPlugin as _AP
                 # Reuse the existing carrier parser
                 carrier = self._parse_carrier_stats_from_capi(fc_data)
                 if carrier:

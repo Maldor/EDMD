@@ -160,7 +160,7 @@ fleet data, market prices, carrier state, and squadron information.
 
 Use **File → CAPI Authentication** to complete the OAuth2 flow. You will be
 redirected to Frontier's login page in your browser. On success, tokens are
-stored in `~/.local/share/EDMD/plugins/capi/tokens.json`.
+stored in `~/.local/share/EDMD/plugins/  (third-party only — EDMD builtins are always-on core components)capi/tokens.json`.
 
 ### What CAPI provides (vs journal-only)
 
@@ -179,7 +179,7 @@ stored in `~/.local/share/EDMD/plugins/capi/tokens.json`.
 ### Persisted CAPI data
 
 After each poll, raw endpoint responses are written to
-`~/.local/share/EDMD/plugins/capi/`. These files are read at startup so full
+`~/.local/share/EDMD/plugins/  (third-party only — EDMD builtins are always-on core components)capi/`. These files are read at startup so full
 fleet data is available immediately without waiting for a re-poll:
 
 | File | Source | Updated |

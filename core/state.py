@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260319"
+VERSION = "20260319b"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -601,6 +601,55 @@ class MonitorState:
         self.slf_type            = None
         self.slf_stock_total     = 0
         self.slf_destroyed_count = 0
+
+        # CAPI raw store and poll timestamps (managed by DataProvider)
+        self.capi_raw:        dict = {}
+        self.capi_last_poll:  dict = {}
+
+        # CAPI-derived fields
+        self.capi_ranks:           dict | None = None
+        self.capi_progress:        dict | None = None
+        self.capi_reputation:      dict | None = None
+        self.capi_engineer_ranks:  list | None = None
+        self.capi_statistics:      dict | None = None
+        self.capi_permits:         list | None = None
+        self.capi_ship_health:     dict | None = None
+        self.capi_ship_value:      dict | None = None
+        self.capi_loadout:         dict | None = None
+        self.capi_market:          dict | None = None
+        self.capi_shipyard:        dict | None = None
+        self.capi_community_goals: list | None = None
+        self.capi_debt:            float| None = None
+
+        # Assets (fleet, wallet)
+        self.assets_balance:       float| None = None
+        self.assets_total_wealth:  float| None = None
+        self.assets_current_ship:  dict | None = None
+        self.assets_stored_ships:  list        = []
+        self.assets_stored_modules:list        = []
+        self.assets_carrier:       dict | None = None
+        self.assets_fc_materials:  list        = []
+
+        # Cargo
+        self.cargo_capacity:       int         = 0
+        self.cargo_items:          list        = []
+        self.cargo_market_info:    dict        = {}
+        self.cargo_mean_prices:    dict        = {}
+
+        # Engineering materials
+        self.materials_raw:          dict = {}
+        self.materials_manufactured: dict = {}
+        self.materials_encoded:      dict = {}
+        self.engineering_locker:     dict = {}
+        self.engineering_backpack:   dict = {}
+
+        # Navigation
+        self.nav_route:              list = []
+
+        # Pilot extended
+        self.pilot_minor_reputation: dict | None = None
+        self.pilot_reputation:       dict | None = None
+        self.pilot_engineer_ranks:   list | None = None
 
     def sessionstart(self, active_session: SessionData, reset: bool = False):
         if not self.session_start_time or reset:

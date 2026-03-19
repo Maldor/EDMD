@@ -313,8 +313,19 @@ emitter = Emitter(
 # ── CoreAPI + plugins ─────────────────────────────────────────────────────────
 
 from core.core_api      import CoreAPI
-from core.plugin_loader import PluginLoader
+from core.plugin_loader import PluginLoader, PluginStorage
 from core.journal       import build_dispatch_map
+from core.data          import DataProvider
+from core.state         import EDMD_DATA_DIR
+
+# DataProvider — unified source of truth, instantiated before CoreAPI
+_dp_storage = PluginStorage(EDMD_DATA_DIR / "core")
+data_provider = DataProvider(
+    state=state,
+    storage=_dp_storage,
+    gui_queue_fn=lambda: gui_queue,
+    print_fn=lambda m: print(m) if trace_mode else None,
+)
 
 core = CoreAPI(
     state=state,
@@ -324,12 +335,15 @@ core = CoreAPI(
     emitter=emitter,
     gui_queue=gui_queue,
     journal_dir=journal_dir,
+    data_provider=data_provider,
     launch_argv=sys.argv,
 )
+data_provider._plugin_call = core.plugin_call
 
 loader = PluginLoader(_HERE)
 loader.load_all(core)
 plugin_dispatch = build_dispatch_map(list(core._plugins.values()))
+data_provider.start()   # start CAPI poll thread after plugins loaded
 
 
 # ── Bootstrap from journal history ────────────────────────────────────────────
@@ -393,6 +407,7 @@ def run_monitor() -> None:
         _edmd_start_mono,
         trace_mode=trace_mode,
         plugin_dispatch=plugin_dispatch,
+        data_provider=data_provider,
     )
 
 

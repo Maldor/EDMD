@@ -410,6 +410,10 @@ class PreferencesWindow(Gtk.Window):
         note.add_css_class("prefs-note")
         box.append(note)
 
+        # ── CAPI (top — primary data provider) ───────────────────────────────
+        self._build_capi_section(box)
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
         # ── EDDN ─────────────────────────────────────────────────────────────
         box.append(self._section_label("EDDN  (Elite Dangerous Data Network)"))
 
@@ -525,6 +529,7 @@ class PreferencesWindow(Gtk.Window):
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
         # ── Inara ─────────────────────────────────────────────────────────────
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         box.append(self._section_label("Inara"))
 
         inara_note = Gtk.Label(
@@ -564,9 +569,6 @@ class PreferencesWindow(Gtk.Window):
             "changed", lambda w: self._track_inara("ApiKey", w.get_text().strip())
         )
         box.append(self._row("Inara API Key", inara_key_entry, restart_required=True))
-
-        # ── CAPI ──────────────────────────────────────────────────────────────
-        self._build_capi_section(box)
 
     # ── CAPI section ─────────────────────────────────────────────────────────
 
@@ -614,50 +616,50 @@ class PreferencesWindow(Gtk.Window):
         self._capi_refresh_status()
         GLib.timeout_add(2000, self._capi_poll_status)
 
-    def _capi_refresh_status(self) -> None:
-        """Pull current auth status from the CAPI plugin and update labels."""
-        plugin = None
+    def _capi_provider(self):
+        """Return core.data.capi if available, else None."""
         try:
-            plugin = self._core._plugins.get("capi")
-        except AttributeError:
-            pass
+            dp = getattr(self._core, "data", None)
+            return dp.capi if dp else None
+        except Exception:
+            return None
 
-        if plugin is None:
-            self._capi_status_lbl.set_label("CAPI plugin not loaded")
+    def _capi_refresh_status(self) -> None:
+        """Pull current auth status from DataProvider.capi and update labels."""
+        import time, datetime
+        capi = self._capi_provider()
+
+        if capi is None:
+            self._capi_status_lbl.set_label("Data provider not available")
             self._capi_btn.set_sensitive(False)
             self._capi_disc_btn.set_visible(False)
             return
 
-        status = plugin.auth_status()
-        state  = status.get("state", "none")
-        cmdr   = status.get("cmdr")
-        expiry = status.get("expiry")
-        last   = status.get("last_poll")
+        status    = capi.auth_status()
+        connected = status.get("connected", False)
+        cmdr      = status.get("cmdr")
+        expiry    = status.get("expiry")
+        result    = status.get("auth_result")
 
-        import time
-        if state == "connected":
+        if result == "auth_running":
+            self._capi_status_lbl.set_label("Waiting for browser authentication…")
+            self._capi_btn.set_sensitive(False)
+            self._capi_disc_btn.set_visible(False)
+        elif connected:
             exp_str = ""
             if expiry:
                 mins = max(0, int((expiry - time.time()) / 60))
                 exp_str = f"  (token refreshes in {mins}m)"
-            lbl = f"Connected{(' — CMDR ' + cmdr) if cmdr else ''}{exp_str}"
-            if last:
-                import datetime
-                t = datetime.datetime.fromtimestamp(last).strftime("%H:%M:%S")
-                lbl += f"  ·  last poll {t}"
+            last_ep = capi.last_poll("profile")
+            last_str = ""
+            if last_ep:
+                t = datetime.datetime.fromtimestamp(last_ep).strftime("%H:%M:%S")
+                last_str = f"  ·  last poll {t}"
+            lbl = f"Connected{(' — CMDR ' + cmdr) if cmdr else ''}{exp_str}{last_str}"
             self._capi_status_lbl.set_label(lbl)
             self._capi_btn.set_label("Re-authenticate")
+            self._capi_btn.set_sensitive(True)
             self._capi_disc_btn.set_visible(True)
-        elif state == "expired":
-            self._capi_status_lbl.set_label(
-                "Token expired — click Re-authenticate to reconnect."
-            )
-            self._capi_btn.set_label("Re-authenticate")
-            self._capi_disc_btn.set_visible(True)
-        elif state == "auth_running":
-            self._capi_status_lbl.set_label("Waiting for browser authentication…")
-            self._capi_btn.set_sensitive(False)
-            self._capi_disc_btn.set_visible(False)
         else:
             self._capi_status_lbl.set_label("Not connected")
             self._capi_btn.set_label("Connect")
@@ -675,24 +677,17 @@ class PreferencesWindow(Gtk.Window):
         return False   # window gone, stop timer
 
     def _on_capi_connect(self, *_) -> None:
-        plugin = None
-        try:
-            plugin = self._core._plugins.get("capi")
-        except AttributeError:
-            pass
-        if plugin:
-            plugin.start_auth_flow()
+        capi = self._capi_provider()
+        if capi:
+            capi._auth_result = "auth_running"
+            capi.authenticate()
             self._capi_btn.set_sensitive(False)
             self._capi_status_lbl.set_label("Waiting for browser authentication…")
 
     def _on_capi_disconnect(self, *_) -> None:
-        plugin = None
-        try:
-            plugin = self._core._plugins.get("capi")
-        except AttributeError:
-            pass
-        if plugin:
-            plugin.disconnect()
+        capi = self._capi_provider()
+        if capi:
+            capi.disconnect()
         self._capi_refresh_status()
 
     # ── Apply & Save ──────────────────────────────────────────────────────────

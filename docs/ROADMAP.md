@@ -1,6 +1,6 @@
 # EDMD Roadmap
 
-Last updated: 20260319
+Last updated: 20260319b
 
 ---
 
@@ -17,6 +17,13 @@ Last updated: 20260319
 ## Released in 20260319
 
 ### Activity plugin architecture  ✅ shipped
+Session boundary model, eight activity plugins, tabbed Session Stats, mode plugin removed.
+
+## Released in 20260319b
+
+### Unified DataProvider  ✅ shipped
+`core/data.py` — single source of truth, CAPI absorbed, event ring buffer, typed sub-namespaces.
+Core components moved to `core/components/`. Three-tier plugin loader. Plugin dev guide rewritten.
 Session boundary model, eight activity plugins, tabbed Session Stats, mode plugin removed.
 `builtins/alerts/plugin.py` — ready to ship.
 

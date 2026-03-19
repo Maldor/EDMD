@@ -398,23 +398,24 @@ class EdmdMenuBar:
         active_plugins   = list(getattr(core, "_plugins", {}).values())
         disabled_plugins = list(getattr(loader, "disabled_meta", [])) if loader else []
 
+        # Only show plugins where _show_in_menu is True.
+        # Core components and activity plugins are always-on and not shown here.
         all_plugins = (
-            [(p, True)  for p in active_plugins]
+            [(p, True)  for p in active_plugins
+             if getattr(p, "_show_in_menu", True)]
             + [(p, False) for p in disabled_plugins]
         )
 
         # Group into sections
         def _group(plugin):
             name = getattr(plugin, "PLUGIN_NAME", "")
-            if name.startswith("activity_"):
-                return "Activity Tracking"
             if name in ("eddn", "edsm", "edastro", "inara"):
                 return "Data Contributions"
-            if getattr(plugin, "_is_builtin", True):
-                return "Core"
+            if getattr(plugin, "_is_builtin", False):
+                return "Integrations"
             return "Third-party Plugins"
 
-        GROUP_ORDER = ["Core", "Activity Tracking", "Data Contributions", "Third-party Plugins"]
+        GROUP_ORDER = ["Data Contributions", "Integrations", "Third-party Plugins"]
         groups: dict[str, list] = {g: [] for g in GROUP_ORDER}
         for p, enabled in all_plugins:
             groups[_group(p)].append((p, enabled))
