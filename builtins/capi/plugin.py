@@ -251,7 +251,16 @@ class CAPIPlugin(BasePlugin):
             loaded = {}
         self._tokens = loaded
 
+        # Seed poll timestamps from disk so cooldowns survive restarts.
+        # This prevents hammering Frontier if EDMD is relaunched rapidly.
+        persisted_times = self.storage.read_json("poll_times.json") or {}
+        if isinstance(persisted_times, dict):
+            for ep, ts in persisted_times.items():
+                if isinstance(ts, (int, float)) and ts > 0:
+                    s.capi_last_poll[ep] = float(ts)
+
         threading.Thread(target=self._poll_worker, daemon=True, name="capi-poll").start()
+        self._start_periodic_hull_poll()
         threading.Timer(STARTUP_DELAY_S, self._enqueue, args=(None, False)).start()
 
     def on_unload(self) -> None:
@@ -259,13 +268,17 @@ class CAPIPlugin(BasePlugin):
 
     def on_event(self, event: dict, state) -> None:
         ev = event.get("event")
-        if ev == "Docked":
+        if ev == "ShieldState" and not event.get("ShieldsUp", True):
+            # Shields dropped — hull damage possible.
+            # Schedule a profile poll after a short delay, respecting cooldown.
+            self._request_hull_poll(delay_s=8)
+        elif ev == "Docked":
             self._docked = True
             self._enqueue(None, False)
-        elif ev in ("Undocked",):
+        if ev in ("Undocked",):
             self._docked = False
             self._enqueue(EP_PROFILE, False)
-        elif ev in ("StoredShips", "LoadGame", "CarrierJump"):
+        if ev in ("StoredShips", "LoadGame", "CarrierJump"):
             self._enqueue(None, False)
 
     # ── Public plugin_call API ─────────────────────────────────────────────────
@@ -304,6 +317,45 @@ class CAPIPlugin(BasePlugin):
         s = self.core.state
         s.capi_last_poll = {}    # clear timestamps so cooldowns don't block
         self._enqueue(None, True)
+
+    # ── Hull polling ──────────────────────────────────────────────────────
+
+    _HULL_POLL_INTERVAL:  float = 600.0   # 10 min periodic hull check
+
+    def _start_periodic_hull_poll(self) -> None:
+        """Background thread: poll /profile every 10 minutes during active
+        sessions to keep hull integrity current.  Only runs when an active
+        session is in progress (state.session_start_time is set) and always
+        respects EP_COOLDOWN — never bypasses rate limits.
+        """
+        def _loop():
+            while True:
+                time.sleep(self._HULL_POLL_INTERVAL)
+                try:
+                    if not getattr(self.core.state, "session_start_time", None):
+                        continue
+                    # Use request_refresh — it respects EP_COOLDOWN automatically
+                    self.request_refresh(EP_PROFILE, min_age_s=EP_COOLDOWN[EP_PROFILE])
+                except Exception:
+                    pass
+        threading.Thread(target=_loop, daemon=True, name="capi-hull-periodic").start()
+
+    def _request_hull_poll(self, delay_s: float = 0) -> None:
+        """Request a /profile poll to refresh hull, respecting cooldown.
+
+        delay_s — seconds to wait before queuing (allows hull damage to
+        register server-side before we query).  The cooldown check runs
+        after the delay so rapid shield events do not stack up.
+        """
+        def _do():
+            if delay_s > 0:
+                time.sleep(delay_s)
+            self.request_refresh(EP_PROFILE, min_age_s=EP_COOLDOWN[EP_PROFILE])
+        if delay_s > 0:
+            threading.Thread(target=_do, daemon=True, name="capi-hull-reactive").start()
+        else:
+            self.request_refresh(EP_PROFILE, min_age_s=EP_COOLDOWN[EP_PROFILE])
+
 
     def request_refresh(self, endpoint: str, min_age_s: float = 60) -> bool:
         """
@@ -537,6 +589,14 @@ class CAPIPlugin(BasePlugin):
         # Persist raw response immediately so it survives restarts
         try:
             self.storage.write_json(data, f"capi_{endpoint}.json")
+        except Exception:
+            pass
+        # Persist poll timestamps so cooldowns survive rapid restarts
+        try:
+            self.storage.write_json(
+                {k: v for k, v in s.capi_last_poll.items()},
+                "poll_times.json",
+            )
         except Exception:
             pass
         self._trace(f"{endpoint} stored ({len(str(data))} chars)")

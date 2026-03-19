@@ -68,6 +68,7 @@ class PluginStorage:
         # CAPI persisted data — raw endpoint responses for cross-plugin use
         "capi_profile.json", "capi_market.json", "capi_shipyard.json",
         "capi_fleetcarrier.json", "capi_communitygoals.json", "fleet.json",
+        "poll_times.json",   # CAPI poll timestamps — survive rapid restarts
     })
 
     def __init__(self, data_dir: Path) -> None:

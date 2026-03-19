@@ -26,6 +26,10 @@ class CommanderPlugin(BasePlugin):
         "NavRoute",
         "EngineerProgress",
         "ReservoirReplenished",   # fuel level updates
+        "HullDamage",             # player ship hull integrity updates
+        "RepairAll",              # ship repaired — hull to 100%
+        "RepairPartial",          # station repair — hull to 100%
+        "ShieldState",            # shield up/down for display
     ]
 
     # GUI grid defaults
@@ -127,6 +131,26 @@ class CommanderPlugin(BasePlugin):
                 )
                 state.ship_name  = event.get("ShipName") or None
                 state.ship_ident = event.get("ShipIdent") or None
+                hh = event.get("HullHealth")
+                if hh is not None:
+                    state.ship_hull = round(hh * 100)
+                if gq: gq.put(("vessel_update", None))
+
+            case "ShieldState":
+                if event.get("ShieldsUp"):
+                    state.ship_shields            = True
+                    state.ship_shields_recharging = False
+                else:
+                    state.ship_shields            = False
+                    state.ship_shields_recharging = True
+                if gq: gq.put(("vessel_update", None))
+
+            case "HullDamage" if event.get("PlayerPilot") and not event.get("Fighter"):
+                state.ship_hull = round(event["Health"] * 100)
+                if gq: gq.put(("vessel_update", None))
+
+            case "RepairAll" | "RepairPartial":
+                state.ship_hull = 100
                 if gq: gq.put(("vessel_update", None))
 
             case "VehicleSwitch":
