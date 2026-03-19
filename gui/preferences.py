@@ -529,7 +529,6 @@ class PreferencesWindow(Gtk.Window):
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
         # ── Inara ─────────────────────────────────────────────────────────────
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         box.append(self._section_label("Inara"))
 
         inara_note = Gtk.Label(
