@@ -112,47 +112,72 @@ class SessionStatsBlock(BlockWidget):
             self._set_active_tab(self._TAB_SUMMARY)
 
     def _append_rows(self, box: Gtk.Box, rows: list[dict]) -> None:
-        """Append provider rows to a content box."""
-        # Column widths
-        tw = max((len(r["label"]) for r in rows), default=8)
-        vw = max((len(r["value"]) for r in rows), default=4)
+        """Append provider rows to a content box using a Grid for column alignment.
 
+        Grid columns:
+          0 — label       (hexpand)
+          1 — value       (right-aligned, fixed width from widest value)
+          2 — pipe " | "  (only present when rate exists)
+          3 — rate        (right-aligned, fixed width from widest rate)
+
+        This guarantees all | separators land at the same x position
+        regardless of label or value width variation.
+        """
+        grid = Gtk.Grid()
+        grid.set_column_spacing(4)
+        grid.set_row_spacing(1)
+        grid.add_css_class("stats-grid")
+        box.append(grid)
+
+        row_idx = 0
         for r in rows:
             label = r["label"]
             value = r["value"]
             rate  = r.get("rate")
 
-            # Section dividers
+            # Section dividers — span all 4 columns
             if not value and not rate:
-                sep = Gtk.Label(label=label)
-                sep.add_css_class("data-key")
-                sep.set_xalign(0.0)
-                sep.set_margin_top(4)
-                box.append(sep)
+                sep_lbl = Gtk.Label(label=label)
+                sep_lbl.add_css_class("data-key")
+                sep_lbl.set_xalign(0.0)
+                sep_lbl.set_margin_top(4)
+                grid.attach(sep_lbl, 0, row_idx, 4, 1)
+                row_idx += 1
                 continue
 
-            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            row_box.add_css_class("data-row")
-
+            # Col 0: label
             lbl = Gtk.Label(label=label)
             lbl.add_css_class("data-key")
             lbl.set_xalign(0.0)
             lbl.set_hexpand(True)
-            row_box.append(lbl)
+            grid.attach(lbl, 0, row_idx, 1, 1)
 
             if rate:
-                # value | rate /hr layout
-                line = Gtk.Label(label=f"{value}  |  {rate}")
-                line.add_css_class("stat-line")
-                line.set_xalign(1.0)
-                row_box.append(line)
-            else:
+                # Col 1: value (right-aligned)
                 val_lbl = Gtk.Label(label=value)
                 val_lbl.add_css_class("data-value")
                 val_lbl.set_xalign(1.0)
-                row_box.append(val_lbl)
+                grid.attach(val_lbl, 1, row_idx, 1, 1)
 
-            box.append(row_box)
+                # Col 2: pipe separator
+                pipe_lbl = Gtk.Label(label="|")
+                pipe_lbl.add_css_class("data-key")
+                pipe_lbl.set_xalign(0.5)
+                grid.attach(pipe_lbl, 2, row_idx, 1, 1)
+
+                # Col 3: rate (right-aligned)
+                rate_lbl = Gtk.Label(label=rate)
+                rate_lbl.add_css_class("stat-line")
+                rate_lbl.set_xalign(1.0)
+                grid.attach(rate_lbl, 3, row_idx, 1, 1)
+            else:
+                # No rate — value spans cols 1-3
+                val_lbl = Gtk.Label(label=value)
+                val_lbl.add_css_class("data-value")
+                val_lbl.set_xalign(1.0)
+                grid.attach(val_lbl, 1, row_idx, 3, 1)
+
+            row_idx += 1
 
     def refresh(self) -> None:
         core      = self.core
