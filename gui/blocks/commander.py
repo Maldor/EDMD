@@ -420,7 +420,12 @@ class CommanderBlock(BlockWidget):
             burn = getattr(s, "fuel_burn_rate", None)
             if burn and burn > 0:
                 secs_remain = (fuel_current / burn) * 3600
-                fuel_str += f"  (~{self.fmt_duration(int(secs_remain))})"
+                h_rem = int(secs_remain // 3600)
+                m_rem = int((secs_remain % 3600) // 60)
+                if h_rem > 0:
+                    fuel_str += f"  (~{h_rem}h {m_rem}m)"
+                else:
+                    fuel_str += f"  (~{m_rem}m)"
             self._cmdr_fuel.set_label(fuel_str)
             self._cmdr_fuel.get_parent().set_visible(True)
             from core.state import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD
