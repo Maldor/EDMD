@@ -78,11 +78,12 @@ class AlertsPlugin(BasePlugin):
         if gq: gq.put(("alerts_update", None))
 
     def on_event(self, event: dict, state) -> None:
-        core    = self.core
-        notify  = core.notify_levels
-        cfg     = core.cfg
-        logtime = event.get("_logtime")
-        ev      = event.get("event")
+        core     = self.core
+        notify   = core.notify_levels
+        cfg      = core.cfg
+        settings = core.app_settings
+        logtime  = event.get("_logtime")
+        ev       = event.get("event")
 
         match ev:
 
