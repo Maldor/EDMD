@@ -187,32 +187,21 @@ class SessionStatsBlock(BlockWidget):
         # --- Summary tab ---
         summary_box = self._clear_tab(self._TAB_SUMMARY)
 
-        # Duration row (always first)
+        # Build all summary rows together so Duration shares the same Grid
+        # as provider rows — guaranteeing label and value column alignment.
         dur_s = plugin.session_duration_seconds() if plugin else 0.0
-        dur_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        dur_row.add_css_class("data-row")
-        dur_key = Gtk.Label(label="Duration")
-        dur_key.add_css_class("data-key")
-        dur_key.set_hexpand(True)
-        dur_row.append(dur_key)
-        dur_val = Gtk.Label(label=self.fmt_duration(dur_s) if dur_s > 0 else "—")
-        dur_val.add_css_class("data-value")
-        dur_row.append(dur_val)
-        summary_box.append(dur_row)
-
-        # Collect summary rows from all active providers
-        all_summary: list[dict] = []
+        all_summary: list[dict] = [
+            {"label": "Duration",
+             "value": self.fmt_duration(dur_s) if dur_s > 0 else "—",
+             "rate": None},
+        ]
         for p in providers:
             if p.has_activity():
                 rows = p.get_summary_rows()
                 if rows:
                     all_summary.extend(rows)
 
-        if all_summary:
-            summary_box.append(
-                Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-            )
-            self._append_rows(summary_box, all_summary)
+        self._append_rows(summary_box, all_summary)
 
         # --- Activity tabs ---
         active_tab_titles = {self._TAB_SUMMARY}
