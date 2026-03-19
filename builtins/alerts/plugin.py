@@ -32,7 +32,6 @@ class AlertsPlugin(BasePlugin):
         "RefuelPartial",        # update fuel_current on partial refuel
         "EjectCargo",
         "Died",
-        "ShipyardSwap",         # reset fuel burn rate on ship change
         "RepairAll",            # hull to 100 on station repair
         "RepairPartial",        # hull to 100 on partial repair
         "ReceiveText",          # cargo scans, pirate messages, police attacks
@@ -260,12 +259,8 @@ class AlertsPlugin(BasePlugin):
                         )
 
             case "ShipyardSwap":
-                # Switching ships — invalidate burn rate so the old ship's
-                # consumption does not trigger a false QuitOnLowFuelMinutes
-                # on the new ship before a valid rate is established.
-                state.fuel_burn_rate = None
-                core.active_session.fuel_check_time  = 0
-                core.active_session.fuel_check_level = 0
+                # Commander plugin handles fuel burn rate reset on ship swap.
+                pass
 
             case "Loadout":
                 # Fires on dock, undock, ship swap, and every SLF dock-back.
@@ -281,27 +276,9 @@ class AlertsPlugin(BasePlugin):
                 self._push("💀", "Fighter destroyed!")
 
             case "ReservoirReplenished":
+                # Commander plugin owns burn rate calculation.
+                # Alerts only handles threshold warnings.
                 fuel_pct = round((event["FuelMain"] / state.fuel_tank_size) * 100)
-                fuel_time_remain = ""
-                ses = core.active_session
-                if (
-                    ses.fuel_check_time
-                    and state.session_start_time
-                    and logtime > ses.fuel_check_time
-                ):
-                    fuel_time = (logtime - ses.fuel_check_time).total_seconds()
-                    fuel_hour = (
-                        3600 / fuel_time * (ses.fuel_check_level - event["FuelMain"])
-                        if fuel_time > 0 else 0
-                    )
-                    if fuel_hour > 0:
-                        from core.emit import fmt_duration
-                        fuel_time_remain = f" (~{fmt_duration(event['FuelMain'] / fuel_hour * 3600)})"
-                        state.fuel_burn_rate = fuel_hour
-                ses.fuel_check_time  = logtime
-                ses.fuel_check_level = event["FuelMain"]
-
-                # Persist current fuel level on state so other blocks can read it
                 state.fuel_current = event["FuelMain"]
 
                 col = ""; level = ":"; fuel_loglevel = 0

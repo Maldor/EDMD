@@ -138,11 +138,26 @@ class CommanderPlugin(BasePlugin):
                 )
 
             case "ReservoirReplenished":
-                # Alerts plugin owns the burn-rate calculation and sets
-                # state.fuel_current and state.fuel_burn_rate there too.
-                # We only update here to ensure the commander block stays live
-                # even if the alerts plugin is disabled.
-                state.fuel_current = event.get("FuelMain")
+                # Commander owns fuel state: level, tank size, and burn rate.
+                fuel_main = event.get("FuelMain")
+                state.fuel_current = fuel_main
+                # Burn rate: rolling estimate from consecutive events.
+                # No session_start_time guard — just needs two events.
+                ses = core.active_session
+                if (
+                    fuel_main is not None
+                    and ses.fuel_check_time
+                    and logtime > ses.fuel_check_time
+                ):
+                    fuel_time = (logtime - ses.fuel_check_time).total_seconds()
+                    if fuel_time > 0:
+                        consumed = ses.fuel_check_level - fuel_main
+                        fuel_hour = 3600 / fuel_time * consumed
+                        if fuel_hour > 0:
+                            state.fuel_burn_rate = fuel_hour
+                if fuel_main is not None:
+                    ses.fuel_check_time  = logtime
+                    ses.fuel_check_level = fuel_main
                 if gq: gq.put(("cmdr_update", None))
 
             case "Loadout":
@@ -242,6 +257,10 @@ class CommanderPlugin(BasePlugin):
                 state.pilot_ship = (
                     event.get("ShipType_Localised") or event["ShipType"].title()
                 )
+                # Clear fuel burn rate — old ship's consumption is irrelevant
+                state.fuel_burn_rate = None
+                core.active_session.fuel_check_time  = 0
+                core.active_session.fuel_check_level = 0
                 core.emitter.emit(
                     msg_term=f"Swapped ship to {state.pilot_ship}",
                     emoji="🚢", sigil="-  SHIP",
