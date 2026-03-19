@@ -221,4 +221,18 @@ Token     = ""            # optional Bearer token for basic auth
 ### Decision pending
 Deferred. Revisit once the GTK GUI reaches a stable feature set and the
 maintenance cost of dual-frontend development is better understood.
+---
 
+## TODO / Pending Consideration
+
+### Session Stats — value-only row alignment
+Rows without a rate separator currently right-align their value across
+cols 1–3 of the stats grid (the full value+pipe+rate span). This means
+a value-only row's text sits further right than the value portion of a
+value+rate row, which is mildly inconsistent.
+
+Alternative: value-only rows right-align to col 1 only (the value column),
+leaving cols 2–3 empty. Values would then align with the value portion of
+rate rows rather than the rate portion.
+
+Decision deferred — review visually in practice before changing.
