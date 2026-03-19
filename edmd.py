@@ -45,8 +45,10 @@ parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
 parser.add_argument("-g", "--gui", action="store_true", default=None,
                     help="Launch GTK4 GUI (Linux only; requires PyGObject)")
-parser.add_argument("--upgrade", action="store_true", default=False,
-                    help="Pull latest version from GitHub and restart")
+parser.add_argument("--upgrade",         action="store_true", default=False,
+                    help="Pull latest release and restart")
+parser.add_argument("--upgrade-nightly", action="store_true", default=False,
+                    help="Pull latest commit (nightly/dev) and restart")
 
 args = parser.parse_args()
 
@@ -54,9 +56,10 @@ args = parser.parse_args()
 
 # ── In-place upgrade (self-contained — runs before full package import) ────────
 
-def _do_upgrade() -> None:
+def _do_upgrade(nightly: bool = False) -> None:
     repo_dir = _HERE
-    print(f"{Terminal.CYAN}{'=' * 52}\n  EDMD In-Place Upgrade\n{'=' * 52}{Terminal.END}\n")
+    mode_label = "Nightly (dev)" if nightly else "Release"
+    print(f"{Terminal.CYAN}{'=' * 52}\n  EDMD Upgrade — {mode_label}\n{'=' * 52}{Terminal.END}\n")
 
     import shutil
     if not shutil.which("git"):
@@ -83,13 +86,16 @@ def _do_upgrade() -> None:
         )
     modified = [l for l in dirty.stdout.splitlines() if not _is_user_file(l)]
 
-    print(f"  Current version : {VERSION}\n  Pulling from    : origin/main")
+    label = "latest commit" if nightly else "latest release"
+    print(f"  Current version : {VERSION}\n  Pulling         : {label} from origin/main")
     # Discard any local modifications to tracked files before pulling.
     # User data lives outside the repo (config.toml in ~/.local/share/EDMD/).
     _sp.run(["git", "-C", str(repo_dir), "checkout", "."],
             capture_output=True)
-    pull = _sp.run(["git", "-C", str(repo_dir), "pull", "--ff-only"],
-                   capture_output=True, text=True)
+    pull_cmd = ["git", "-C", str(repo_dir), "pull"]
+    if not nightly:
+        pull_cmd.append("--ff-only")
+    pull = _sp.run(pull_cmd, capture_output=True, text=True)
     if pull.returncode != 0:
         print(f"\n{Terminal.WARN}ERROR:{Terminal.END} git pull failed:")
         print(pull.stderr.strip() or pull.stdout.strip()); sys.exit(1)
@@ -97,7 +103,7 @@ def _do_upgrade() -> None:
         print(f"\n  Already up to date (v{VERSION}). Nothing to do.\n")
         # If we were launched from the GUI, relaunch it rather than dying
         if "--gui" in sys.argv:
-            new_argv = [a for a in sys.argv if a != "--upgrade"]
+            new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")]
             os.execv(sys.executable, [sys.executable] + new_argv)
         sys.exit(0)
     print(pull.stdout.strip()); print()
@@ -115,13 +121,13 @@ def _do_upgrade() -> None:
             print("  Running install.bat...\n")
             _sp.run([str(install_bat)], cwd=str(repo_dir), shell=True)
 
-    new_argv = [a for a in sys.argv if a != "--upgrade"]
+    new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")]
     print(f"\n{Terminal.GOOD}  Upgrade complete. Relaunching EDMD...{Terminal.END}\n")
     os.execv(sys.executable, [sys.executable] + new_argv)
 
 
-if args.upgrade:
-    _do_upgrade()
+if args.upgrade or getattr(args, "upgrade_nightly", False):
+    _do_upgrade(nightly=getattr(args, "upgrade_nightly", False))
     sys.exit(0)  # unreachable — execv replaces process
 
 

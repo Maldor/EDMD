@@ -111,7 +111,8 @@ class EdmdMenuBar:
         pop = self._popover()
         box = self._vbox()
 
-        box.append(self._menu_btn("⬆  Upgrade", self._on_upgrade))
+        box.append(self._menu_btn("⬆  Upgrade  (Release)", self._on_upgrade))
+        box.append(self._menu_btn("⬆  Upgrade  (Nightly)", self._on_upgrade_nightly))
         box.append(self._separator())
         box.append(self._menu_btn("✕  Exit", self._on_exit))
 
@@ -203,7 +204,17 @@ class EdmdMenuBar:
             save_session_state(Path("."), self._win._core.active_session)
         except Exception:
             pass
-        new_argv = [a for a in sys.argv if a != "--upgrade"] + ["--upgrade"]
+        new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")] + ["--upgrade"]
+        os.execv(sys.executable, [sys.executable] + new_argv)
+
+    def _on_upgrade_nightly(self, *_) -> None:
+        try:
+            from core.state import save_session_state
+            from pathlib import Path
+            save_session_state(Path("."), self._win._core.active_session)
+        except Exception:
+            pass
+        new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")] + ["--upgrade-nightly"]
         os.execv(sys.executable, [sys.executable] + new_argv)
 
     def _on_exit(self, *_) -> None:
