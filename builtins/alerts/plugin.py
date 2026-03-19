@@ -26,19 +26,24 @@ class AlertsPlugin(BasePlugin):
         "HullDamage",
         "Loadout",
         "FighterDestroyed",
-        "ReservoirReplenished",
+        "DockFighter",          # reset SLF hull to 100 on bay return
+        "ReservoirReplenished", # fuel burn rate + fuel_current
+        "RefuelAll",            # update fuel_current on manual refuel
+        "RefuelPartial",        # update fuel_current on partial refuel
         "EjectCargo",
         "Died",
+        "ShipyardSwap",         # reset fuel burn rate on ship change
+        "RepairAll",            # hull to 100 on station repair
+        "RepairPartial",        # hull to 100 on partial repair
+        "ReceiveText",          # cargo scans, pirate messages, police attacks
+        "ShipTargeted",         # outbound scans
         # Auto-clear stale alerts whenever context resets
         "LoadGame",
         "Docked",
-        "FSDJump",
+        "FSDJump",              # also reads FuelLevel for fuel_current
         "SupercruiseEntry",
         # Hull/shield reset after rebuy
         "Resurrect",
-        # Hull restored after repair
-        "RepairAll",
-        "Repair",
     ]
 
     DEFAULT_COL    = 0
