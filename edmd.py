@@ -350,11 +350,12 @@ data_provider.start()   # start CAPI poll thread after plugins loaded
 
 print("\nStarting... (Press Ctrl+C to stop)\n")
 
-from core.journal import bootstrap_slf, bootstrap_crew, bootstrap_missions
+from core.journal import bootstrap_slf, bootstrap_crew, bootstrap_missions, bootstrap_burn_rate
 
 bootstrap_slf(state, journal_dir, trace_mode=trace_mode)
 bootstrap_crew(state, journal_dir, trace_mode=trace_mode)
 bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
+bootstrap_burn_rate(state, journal_dir, active_session, trace_mode=trace_mode)
 
 
 # ── Update notice ─────────────────────────────────────────────────────────────

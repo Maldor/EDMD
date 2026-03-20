@@ -351,6 +351,85 @@ def bootstrap_hull(state: MonitorState, journal_dir: Path, trace_mode: bool = Fa
     trace("hull bootstrap: no hull history found, leaving at 100", trace_mode)
 
 
+
+def bootstrap_burn_rate(
+    state: MonitorState,
+    journal_dir: Path,
+    active_session,
+    trace_mode: bool = False,
+) -> None:
+    """Seed fuel burn rate from recent journal history.
+
+    Called after current-journal preload when state.fuel_burn_rate is still None
+    (e.g. short session with fewer than 2 ReservoirReplenished events, or first
+    launch after a crash with no Shutdown).  Scans the two most recent journals
+    for consecutive ReservoirReplenished events on the same ship and derives an
+    initial burn rate.  The rate will be refined once two live events fire.
+    """
+    if state.fuel_burn_rate is not None:
+        trace("burn rate bootstrap: already set, skipping", trace_mode)
+        return
+
+    journals = sorted(journal_dir.glob("Journal*.log"), reverse=True)
+    # Collect up to 10 reservoir events from recent journals
+    reservoir_events: list[tuple] = []  # (datetime, fuel_main, ship_type)
+    current_ship = getattr(state, "pilot_ship", None)
+
+    for jpath in journals[:3]:   # look back no further than 3 journals
+        try:
+            lines = jpath.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        ship_in_file = None
+        for line in lines:
+            try:
+                je = json.loads(line)
+            except ValueError:
+                continue
+            ev = je.get("event")
+            if ev == "Loadout":
+                ship_in_file = je.get("Ship_Localised") or je.get("Ship")
+            elif ev == "ShipyardSwap":
+                ship_in_file = je.get("ShipType_Localised") or je.get("ShipType")
+            elif ev == "ReservoirReplenished" and je.get("FuelMain") is not None:
+                ts = je.get("timestamp", "")
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    reservoir_events.append((dt, float(je["FuelMain"]), ship_in_file))
+                except Exception:
+                    pass
+
+    # Find two consecutive events for the current ship within a reasonable window
+    current_ship_lower = (current_ship or "").lower()
+    candidates = [
+        (dt, fuel) for dt, fuel, ship in reservoir_events
+        if ship is None or current_ship is None
+        or (ship or "").lower() == current_ship_lower
+    ]
+    candidates.sort(key=lambda x: x[0])  # oldest first
+
+    for i in range(len(candidates) - 1):
+        dt1, f1 = candidates[i]
+        dt2, f2 = candidates[i + 1]
+        gap = (dt2 - dt1).total_seconds()
+        consumed = f1 - f2
+        # Sanity check: gap 10–30 min (reservoir fires every ~17 min), consumed > 0
+        if 600 <= gap <= 2400 and consumed > 0:
+            rate = 3600 / gap * consumed
+            state.fuel_burn_rate = rate
+            # Seed anchors with the most recent event so next live event refines rate
+            active_session.fuel_check_time  = dt2
+            active_session.fuel_check_level = f2
+            trace(
+                f"burn rate bootstrap: {rate:.3f} t/hr from "
+                f"{dt1.strftime('%H:%M')}–{dt2.strftime('%H:%M')} "
+                f"({consumed:.3f}t in {gap/60:.0f}m)",
+                trace_mode,
+            )
+            return
+
+    trace("burn rate bootstrap: no usable reservoir pair found", trace_mode)
+
 def bootstrap_missions(
     state: MonitorState,
     journal_dir: Path,
