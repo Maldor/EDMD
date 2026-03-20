@@ -11,6 +11,7 @@ config.toml
 *.pub
 allowlist.ksw
 ksw_client.py
+plugins/ksw/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
