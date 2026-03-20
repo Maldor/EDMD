@@ -14,6 +14,8 @@ from core.activity import ActivityProviderMixin
 from core.emit import Terminal, fmt_credits, fmt_duration, rate_per_hour, clip_name
 from core.state import normalise_ship_name, RECENT_KILL_WINDOW
 
+SUMMARY_INTERVAL_S  = 15 * 60   # emit session summary every 15 minutes
+
 
 class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
     PLUGIN_NAME         = "activity_combat"
@@ -43,8 +45,11 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
         core.register_block(self, priority=20)
         core.register_session_provider(self)
         self._reset_counters()
-        self._last_kill_mono:  float = 0.0
-        self._inactivity_alerted: bool = False
+        self._last_kill_mono:         float = 0.0
+        self._inactivity_alerted:     bool  = False
+        self._last_summary_mono:        float | None = None
+        self._last_inactive_alert_mono: float | None = None
+        self._last_rate_alert_mono:     float | None = None
 
     def _reset_counters(self) -> None:
         self.kills:            int   = 0
@@ -60,6 +65,9 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
         self.last_kill_time         = None
         self.last_kill_mono: float  = 0.0
         self.session_start_time     = None
+        self._last_summary_mono        = time.monotonic()  # reset clock on new session
+        self._last_inactive_alert_mono = None
+        self._last_rate_alert_mono     = None
 
     def on_session_reset(self) -> None:
         self._reset_counters()
@@ -170,21 +178,118 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
             case "Shutdown" | "Music" if ev == "Music" and event.get("MusicTrack") == "MainMenu":
                 pass  # no-kill timer pauses naturally — monotonic won't advance
 
+    def _emit_summary(self, state) -> None:
+        """Emit a 15-minute session summary to terminal and Discord."""
+        from core.emit import emit_summary as _legacy_emit
+        # Build a temporary SessionData-like object so legacy emit_summary works
+        class _S:
+            pass
+        s = _S()
+        s.kills              = self.kills
+        s.credit_total       = self.bounty_total + self.bond_total
+        s.merits             = 0   # merits owned by activity_powerplay
+        s.kill_interval_total = self.kill_interval_total
+        s.last_kill_mono     = self._last_kill_mono
+        try:
+            pp = self.core._plugins.get("activity_powerplay")
+            if pp: s.merits = pp.merits_earned
+        except Exception:
+            pass
+        _legacy_emit(self.core.emitter, state, s)
+
     def tick(self, state) -> None:
-        """Called every second. Check no-kill inactivity timeout."""
-        if not state.in_game or self._inactivity_alerted:
+        """Called every second. Handles:
+        - periodic session summary (every 15 min)
+        - inactivity alerts (WarnNoKills config)
+        - no-kill timeout flush (QuitOnNoKillsMinutes config)
+        """
+        if not state.in_game:
+            return
+
+        now = time.monotonic()
+        core = self.core
+        cfg  = core.cfg
+        settings = core.app_settings
+
+        # ── Periodic summary ──────────────────────────────────────────────
+        if (
+            self.kills > 0
+            and self.session_start_time is not None
+            and self._last_summary_mono is not None
+            and now - self._last_summary_mono >= SUMMARY_INTERVAL_S
+        ):
+            self._last_summary_mono = now
+            self._emit_summary(state)
+
+        # ── Inactivity alert (WarnNoKills) ────────────────────────────────
+        notify = core.notify_levels
+        warn_no_kills  = settings.get("WarnNoKills",        20)
+        warn_initial   = settings.get("WarnNoKillsInitial",  5)
+        warn_cooldown  = settings.get("WarnCooldown",        15)
+        if (
+            notify.get("InactiveAlert", 3) > 0
+            and self.session_start_time is not None
+            and warn_no_kills > 0
+            and not state.in_preload
+        ):
+            threshold_mins = warn_initial if self.kills == 0 else warn_no_kills
+            last_kill_ref  = self._last_kill_mono if self._last_kill_mono > 0.0 \
+                             else (self._last_summary_mono or now)
+            cooldown_ok = (
+                self._last_inactive_alert_mono is None
+                or now - self._last_inactive_alert_mono >= warn_cooldown * 60
+            )
+            if cooldown_ok and now - last_kill_ref >= threshold_mins * 60:
+                idle_dur = fmt_duration(int(now - last_kill_ref))
+                core.emitter.emit(
+                    msg_term=f"No kills in {idle_dur} — session may be inactive",
+                    msg_discord=f"⚠️ **No kills in {idle_dur}** — session may be inactive",
+                    emoji="⚠️", sigil="!  WARN",
+                    timestamp=state.event_time,
+                    loglevel=notify.get("InactiveAlert", 3),
+                )
+                self._last_inactive_alert_mono = now
+
+        # ── Kill rate alert (WarnKillRate) ───────────────────────────────
+        warn_rate = settings.get("WarnKillRate", 20)
+        if (
+            notify.get("RateAlert", 3) > 0
+            and warn_rate > 0
+            and self.kills >= 3
+            and len(self.recent_kill_times) >= 3
+        ):
+            recent_avg_secs = (
+                sum(self.recent_kill_times) / len(self.recent_kill_times)
+            )
+            recent_rate = 3600 / recent_avg_secs if recent_avg_secs > 0 else 0
+            rate_cooldown_ok = (
+                self._last_rate_alert_mono is None
+                or now - self._last_rate_alert_mono >= warn_cooldown * 60
+            )
+            if rate_cooldown_ok and recent_rate < warn_rate:
+                rate_fmt = f"{recent_rate:.1f}"
+                core.emitter.emit(
+                    msg_term=f"Kill rate low: {rate_fmt}/hr (threshold: {warn_rate}/hr)",
+                    msg_discord=f"📉 **Kill rate low: {rate_fmt}/hr** (threshold: {warn_rate}/hr)",
+                    emoji="📉", sigil="!  WARN",
+                    timestamp=state.event_time,
+                    loglevel=notify.get("RateAlert", 3),
+                )
+                self._last_rate_alert_mono = now
+
+        # ── No-kill timeout (KSW/session flush) ───────────────────────────
+        if self._inactivity_alerted:
             return
         if self._last_kill_mono == 0.0:
             return
-        cfg           = self.core.cfg
         limit_minutes = cfg.pcfg("QuitOnNoKillsMinutes", 0)
         if not limit_minutes:
             return
-        elapsed = (time.monotonic() - self._last_kill_mono) / 60
+        elapsed = (now - self._last_kill_mono) / 60
         if elapsed >= limit_minutes:
             self._inactivity_alerted = True
             try:
-                self.core.plugin_call(
+                core.plugin_call(
                     "session_manager", "flush_session",
                     f"No kills for {elapsed:.0f} min (threshold {limit_minutes} min)"
                 )
