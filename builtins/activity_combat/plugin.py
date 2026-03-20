@@ -44,12 +44,9 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
         super().on_load(core)
         core.register_block(self, priority=20)
         core.register_session_provider(self)
-        self._reset_counters()
+        self._reset_counters()          # also seeds _last_summary_mono etc.
         self._last_kill_mono:         float = 0.0
         self._inactivity_alerted:     bool  = False
-        self._last_summary_mono:        float | None = None
-        self._last_inactive_alert_mono: float | None = None
-        self._last_rate_alert_mono:     float | None = None
 
     def _reset_counters(self) -> None:
         self.kills:            int   = 0

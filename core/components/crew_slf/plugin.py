@@ -209,10 +209,11 @@ class CrewSlfPlugin(BasePlugin):
                 if gq: gq.put(("slf_update", None))
 
             case "DockFighter":
-                state.slf_deployed = False
-                state.slf_docked   = True
-                state.slf_hull     = 100
-                state.slf_orders   = None
+                state.slf_deployed      = False
+                state.slf_docked        = True
+                state.slf_hull          = 100
+                state.fighter_integrity = 1.0   # reset so next launch reads fresh
+                state.slf_orders        = None
                 if gq: gq.put(("slf_update", None))
 
             case "FighterRebuilt":
