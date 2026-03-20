@@ -98,6 +98,12 @@ class CommanderPlugin(BasePlugin):
                 state.offline_since_mono = None
                 state.last_offline_alert = None
                 state.pilot_ship = event.get("Ship_Localised") or event.get("Ship")
+                # Reset fuel burn rate on every game launch — prevents stale
+                # timing anchors from a previous session (e.g. crash/kill)
+                # producing wildly wrong estimates in the new session.
+                state.fuel_burn_rate = None
+                core.active_session.fuel_check_time  = 0
+                core.active_session.fuel_check_level = 0
                 # Session boundary: new session if gap since last Shutdown
                 # exceeds SESSION_GAP_MINUTES (default 15).
                 from core.state import SESSION_GAP_MINUTES
