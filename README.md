@@ -89,10 +89,8 @@ pip install discord-webhook cryptography --break-system-packages
 bash install.sh
 ```
 
-### Windows
-```bat
-install.bat
-```
+### Windows ⚠️ Experimental
+Download `EDMD-Setup-{version}.exe` from [Releases](https://github.com/drworman/EDMD/releases/latest). The installer handles MSYS2, GTK4, Python, and all dependencies automatically. Requires [Git for Windows](https://git-scm.com/download/win) on your PATH. See [WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md).
 
 > `psutil` and `PyGObject` have C extensions that require system libraries — install them via your distro's package manager, not pip. See [INSTALL.md](INSTALL.md) for details.
 

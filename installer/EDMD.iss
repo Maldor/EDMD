@@ -19,7 +19,7 @@
 ;   Users can also run "EDMD.exe --upgrade" at any time.
 
 #define AppName      "EDMD"
-#define AppVersion   "20260319b"
+#define AppVersion   "20260323"
 #define AppPublisher "CMDR CALURSUS"
 #define AppURL       "https://github.com/drworman/EDMD"
 #define AppExeName   "EDMD.exe"
