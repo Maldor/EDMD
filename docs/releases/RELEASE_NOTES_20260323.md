@@ -20,15 +20,6 @@
 
 **Engineering row hover highlight.** Mousing over a row in the Engineering materials tab now highlights it, improving readability when scanning long lists.
 
-**Fuel kill criteria refinement.** The automatic session-end trigger for low fuel has been reworked into two independent conditions:
-
-- **Fuel % alone** — fires if fuel falls at or below the configured percentage threshold.
-- **Duration + fuel % combined** — fires only when *both* estimated time remaining is below the minutes threshold *and* fuel % is below the percentage threshold simultaneously. This prevents false triggers when only one condition is momentarily true.
-
-Both conditions are suppressed entirely while the player is in supercruise, and for a configurable grace period (default 60 seconds, `FuelKillSCGrace`) after exiting supercruise. The state is tracked via `state.in_supercruise` and `state.last_sc_exit_mono` set by the commander component on `SupercruiseEntry` and `SupercruiseExit` events.
-
-**Session-end notifications.** When an automatic session-end trigger fires for any reason, the reason is now emitted to the terminal and Discord at loglevel 3 before the game process is terminated.
-
 ## Windows installer (Experimental)
 
 v20260323 introduces a Windows installer: `EDMD-Setup-{version}.exe`, built automatically by GitHub Actions on every release tag.
