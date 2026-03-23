@@ -155,10 +155,40 @@ class SpanshPlugin(BasePlugin):
 
     def _refresh_loop(self) -> None:
         while not self._stop.wait(_REFRESH_INTERVAL):
-            saved = self.storage.read_json()
-            last  = saved.get("target_station", "")
-            if last:
+            saved     = self.storage.read_json()
+            last      = saved.get("target_station", "")
+            market_id = saved.get("target_market_id", 0)
+            if market_id:
+                self._fetch_by_id(int(market_id))
+            elif last:
                 self._fetch_and_store(last)
+
+    def _fetch_by_id(self, market_id: int) -> None:
+        """Fetch market data for a specific station by market_id.
+
+        Uses the Spansh station endpoint which returns a single unambiguous
+        result regardless of how many stations share the same name.
+        """
+        try:
+            url = f"https://spansh.co.uk/api/stations/{market_id}"
+            with urllib.request.urlopen(url, timeout=8) as resp:
+                data = json.load(resp)
+            rec = data.get("station") or data.get("record") or data
+            if rec and rec.get("name"):
+                # Normalise: station endpoint uses "system" not "system_name"
+                if "system" in rec and "system_name" not in rec:
+                    rec["system_name"] = (
+                        rec["system"].get("name", "") if isinstance(rec["system"], dict)
+                        else rec["system"]
+                    )
+                # market field may be nested under "market" key
+                if "market" not in rec and "commodities" in rec:
+                    rec["market"] = rec["commodities"]
+                self._store_record(rec)
+        except urllib.error.URLError:
+            pass
+        except Exception:
+            pass
 
     def _fetch_and_store(self, query: str) -> None:
         """Search Spansh, take the first station result, store its market data."""
@@ -205,8 +235,12 @@ class SpanshPlugin(BasePlugin):
             }
 
 
-        # Persist station name only — including system name breaks Spansh fuzzy search
-        self.storage.write_json({"target_station": stn_name})
+        # Persist station name + market_id so refreshes fetch the exact station.
+        market_id = rec.get("market_id") or rec.get("id") or 0
+        self.storage.write_json({
+            "target_station":    stn_name,
+            "target_market_id":  market_id,
+        })
 
         s = self.core.state
         s.cargo_target_market = {

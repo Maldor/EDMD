@@ -10,6 +10,26 @@ from core.state import RANK_NAMES
 from core.emit import Terminal
 
 
+
+def _read_nav_route_json(journal_dir) -> list | None:
+    """Read NavRoute.json from the journal directory.
+
+    Returns the Route list on success, or None if the file is absent,
+    unreadable, or contains an empty/cleared route.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    try:
+        p = _Path(journal_dir) / "NavRoute.json"
+        if not p.exists():
+            return None
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        route = data.get("Route") or []
+        return route if route else None
+    except Exception:
+        return None
+
+
 class CommanderPlugin(BasePlugin):
     PLUGIN_NAME    = "commander"
     PLUGIN_DISPLAY = "Commander"
@@ -19,7 +39,7 @@ class CommanderPlugin(BasePlugin):
     SUBSCRIBED_EVENTS = [
         "Commander", "LoadGame", "Rank", "Progress", "Reputation",
         "Location", "Docked", "Undocked",
-        "FSDJump", "SupercruiseEntry",
+        "FSDJump", "SupercruiseEntry", "SupercruiseExit",
         "ShipyardSwap", "Loadout",
         "Powerplay", "PowerplayJoin", "PowerplayLeave",
         "PowerplayDefect", "PowerplayRank", "PowerplayMerits",
@@ -93,8 +113,9 @@ class CommanderPlugin(BasePlugin):
                     if gq: gq.put(("cmdr_update", None))
 
             case "LoadGame":
-                state.crew_active = False
-                state.in_game     = True
+                state.crew_active    = False
+                state.in_game        = True
+                state.in_supercruise = False
                 state.offline_since_mono = None
                 state.last_offline_alert = None
                 state.pilot_ship = event.get("Ship_Localised") or event.get("Ship")
@@ -362,8 +383,9 @@ class CommanderPlugin(BasePlugin):
                 state.sessionend()
 
             case "SupercruiseEntry":
-                state.pilot_system = event.get("StarSystem", state.pilot_system)
-                state.pilot_body   = None
+                state.pilot_system   = event.get("StarSystem", state.pilot_system)
+                state.pilot_body     = None
+                state.in_supercruise = True
                 if gq: gq.put(("cmdr_update", None))
                 core.emitter.emit(
                     msg_term=f"Supercruise entry in {event['StarSystem']}",
@@ -371,3 +393,10 @@ class CommanderPlugin(BasePlugin):
                     timestamp=event.get("_logtime"), loglevel=2,
                 )
                 state.sessionend()
+
+            case "SupercruiseExit":
+                import time as _time
+                state.in_supercruise    = False
+                state.last_sc_exit_mono = _time.monotonic()
+                state.pilot_body        = event.get("Body")
+                if gq: gq.put(("cmdr_update", None))

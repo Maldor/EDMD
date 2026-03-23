@@ -874,7 +874,17 @@ class CAPISource:
                 "capi":         True,
             })
         if stored:
-            state.assets_stored_ships = stored
+            # Merge: CAPI data updates ships it knows about, but preserves
+            # journal-derived ships that CAPI may not have seen yet
+            # (e.g. after a swap since the last CAPI poll).
+            existing = {
+                s["ship_id"]: s
+                for s in (getattr(state, "assets_stored_ships", None) or [])
+                if s.get("ship_id") is not None
+            }
+            for s in stored:
+                existing[s["ship_id"]] = s   # CAPI wins for known ships
+            state.assets_stored_ships = list(existing.values())
 
         try:
             self._storage.write_json({

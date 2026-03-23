@@ -27,10 +27,18 @@ class SessionStatsBlock(BlockWidget):
     def build(self, parent: Gtk.Box) -> None:
         body = self._build_section(parent)
 
-        # Tab bar
+        # Tab bar + clear button on same row
+        tab_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self._tab_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self._tab_bar.add_css_class("mat-tab-bar")
-        body.append(self._tab_bar)
+        self._tab_bar.set_hexpand(True)
+        tab_row.append(self._tab_bar)
+        clear_btn = Gtk.Button(label="↺")
+        clear_btn.add_css_class("mat-tab-btn")
+        clear_btn.set_tooltip_text("Reset session counters")
+        clear_btn.connect("clicked", self._on_clear_session)
+        tab_row.append(clear_btn)
+        body.append(tab_row)
 
         # Content stack — one page per tab
         self._stack = Gtk.Stack()
@@ -178,6 +186,15 @@ class SessionStatsBlock(BlockWidget):
                 grid.attach(val_lbl, 1, row_idx, 3, 1)
 
             row_idx += 1
+
+    def _on_clear_session(self, *_) -> None:
+        """Reset all session counters via session_stats.on_new_session()."""
+        try:
+            self.core.plugin_call("session_stats", "on_new_session", 0)
+        except Exception:
+            pass
+        gq = self.core.gui_queue
+        if gq: gq.put(("stats_update", None))
 
     def refresh(self) -> None:
         core      = self.core

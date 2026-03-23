@@ -559,6 +559,8 @@ class MonitorState:
         self.last_offline_alert      = None
         self.offline_since_mono      = None
         self.in_game                 = False
+        self.in_supercruise          = False  # True while in supercruise
+        self.last_sc_exit_mono       = None   # monotonic time of last SC exit
         self.last_shutdown_time      = None   # datetime of last Shutdown event
         self.mission_value_map       = {}
         self.stack_value             = 0

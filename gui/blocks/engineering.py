@@ -221,6 +221,10 @@ class EngineeringBlock(BlockWidget):
             else:
                 row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
                 row_box.add_css_class("data-row")
+                _mc = Gtk.EventControllerMotion()
+                _mc.connect("enter",  lambda c, x, y, w=row_box: w.add_css_class("mat-row-hover"))
+                _mc.connect("leave",  lambda c,       w=row_box: w.remove_css_class("mat-row-hover"))
+                row_box.add_controller(_mc)
 
                 name_lbl_w = Gtk.Label(label=name_str)
                 name_lbl_w.set_xalign(0.0)

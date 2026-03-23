@@ -176,23 +176,75 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
                 pass  # no-kill timer pauses naturally — monotonic won't advance
 
     def _emit_summary(self, state) -> None:
-        """Emit a 15-minute session summary to terminal and Discord."""
-        from core.emit import emit_summary as _legacy_emit
-        # Build a temporary SessionData-like object so legacy emit_summary works
-        class _S:
-            pass
-        s = _S()
-        s.kills              = self.kills
-        s.credit_total       = self.bounty_total + self.bond_total
-        s.merits             = 0   # merits owned by activity_powerplay
-        s.kill_interval_total = self.kill_interval_total
-        s.last_kill_mono     = self._last_kill_mono
+        """Emit a 15-minute session summary to terminal and Discord.
+
+        Uses the same data sources as the GUI so output is consistent.
+        Duration comes from session_stats._session_start_time (the GUI
+        clock). Rates are derived from that duration. Merits come from
+        activity_powerplay. No legacy emit_summary() call.
+        """
+        if self.kills == 0:
+            return
+
+        core = self.core
+
+        # Duration — from session_stats plugin (same source as GUI block)
+        ss = core._plugins.get("session_stats")
+        duration = ss.session_duration_seconds() if ss else 0.0
+
+        # Rates
+        credit_total = self.bounty_total + self.bond_total
+        merits       = 0
         try:
-            pp = self.core._plugins.get("activity_powerplay")
-            if pp: s.merits = pp.merits_earned
+            pp = core._plugins.get("activity_powerplay")
+            if pp: merits = pp.merits_earned
         except Exception:
             pass
-        _legacy_emit(self.core.emitter, state, s)
+
+        kph = rate_per_hour(duration / self.kills        if self.kills        else 0, 1)
+        bph = rate_per_hour(duration / credit_total      if credit_total      else 0, 2)
+        mph = rate_per_hour(duration / merits            if merits            else 0, 1)
+
+        dur_str = fmt_duration(int(duration))
+
+        avg_interval = ""
+        if self.kills > 1 and self.kill_interval_total > 0:
+            avg_secs     = self.kill_interval_total / (self.kills - 1)
+            avg_interval = f" | avg {fmt_duration(int(avg_secs))}/kill"
+
+        sep = " | "
+        summary_text = (
+            f"Session Summary:\n"
+            f"- Duration: {dur_str}\n"
+            f"- Kills:    {self.kills:,}{sep}{kph:,} /hr{avg_interval}\n"
+            f"- Bounties: {fmt_credits(credit_total)}{sep}{fmt_credits(bph)} /hr\n"
+        )
+
+        # Mission stack from state (unchanged — still authoritative there)
+        if state.stack_value > 0:
+            done      = state.missions_complete
+            total     = len(state.active_missions)
+            remaining = total - done
+            complete_str = (
+                "all complete — turn in!"
+                if remaining == 0
+                else f"{done}/{total} complete, {remaining} remaining"
+            )
+            summary_text += f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
+
+        if merits > 0:
+            summary_text += f"- Merits:   {merits:,}{sep}{int(mph):,} /hr"
+        else:
+            summary_text = summary_text.rstrip("\n")
+
+        core.emitter.emit(
+            msg_term=summary_text,
+            msg_discord=f"```{summary_text}```",
+            emoji="📊",
+            sigil="~  SUMM",
+            timestamp=state.event_time,
+            loglevel=2,
+        )
 
     def tick(self, state) -> None:
         """Called every second. Handles:
