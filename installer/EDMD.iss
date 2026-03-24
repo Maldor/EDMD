@@ -45,7 +45,8 @@ WizardStyle         = modern
 PrivilegesRequired  = lowest
 PrivilegesRequiredOverridesAllowed = dialog
 ArchitecturesInstallIn64BitMode    = x64compatible
-UninstallDisplayIcon= {app}\{#AppExeName}
+SetupIconFile       = installer\edmd.ico
+UninstallDisplayIcon= {app}\edmd.ico
 ChangesEnvironment  = yes
 SetupLogging        = yes
 InfoAfterFile       = post_install_notes.txt
@@ -63,16 +64,19 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; EDMD.exe launcher (built by PyInstaller — no EDMD source inside)
 Source: "..\dist\EDMD\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Application icon (converted from PNG by the build workflow)
+Source: "edmd.ico"; DestDir: "{app}"; Flags: ignoreversion
+
 ; Documentation (optional convenience copies)
 Source: "..\README.md";             DestDir: "{app}";      Flags: ignoreversion
 Source: "..\INSTALL.md";            DestDir: "{app}";      Flags: ignoreversion
 Source: "..\docs\*";                DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName} (GUI)";       Filename: "{app}\{#AppExeName}"; Parameters: "-g"; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
-Name: "{group}\{#AppName} (terminal)";  Filename: "{app}\{#AppExeName}"; Comment: "Elite Dangerous Monitor Daemon — terminal mode"
+Name: "{group}\{#AppName} (GUI)";       Filename: "{app}\{#AppExeName}"; Parameters: "-g";        IconFilename: "{app}\edmd.ico"; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
+Name: "{group}\{#AppName} (terminal)";  Filename: "{app}\{#AppExeName}"; Parameters: "--no-gui"; IconFilename: "{app}\edmd.ico"; Comment: "Elite Dangerous Monitor Daemon — terminal mode"
 Name: "{group}\Uninstall {#AppName}";   Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName} (GUI)"; Filename: "{app}\{#AppExeName}"; Parameters: "-g"; Tasks: desktopicon; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
+Name: "{autodesktop}\{#AppName} (GUI)"; Filename: "{app}\{#AppExeName}"; Parameters: "-g";        IconFilename: "{app}\edmd.ico"; Tasks: desktopicon; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
 
 [Run]
 ; Step 1: Clone or update EDMD source using Windows-native git.
@@ -90,18 +94,12 @@ Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
   StatusMsg: "Installing GTK4 and Python packages..."; \
   Flags: waituntilterminated runhidden
 
-; Step 3: Copy example config if none exists, then open in Notepad for the user.
-Filename: "{cmd}"; \
-  Parameters: "/c if not exist \"{userappdata}\EDMD\config.toml\" (copy /Y \"{app}\src\example.config.toml\" \"{userappdata}\EDMD\config.toml\")"; \
-  WorkingDir: "{app}"; \
-  StatusMsg: "Setting up configuration file..."; \
-  Flags: runhidden waituntilterminated
-
+; Step 3: Notepad launch offered as a post-install checkbox.
+; Config copy is handled by CurStepChanged(ssPostInstall) in [Code].
 Filename: "notepad.exe"; \
   Parameters: "{userappdata}\EDMD\config.toml"; \
   WorkingDir: "{userappdata}\EDMD"; \
-  StatusMsg: "Opening config.toml..."; \
-  Description: "Open config.toml to set your journal folder"; \
+  Description: "Open config.toml to set your journal folder (recommended)"; \
   Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
@@ -387,6 +385,17 @@ var
   Ms2Root:    String;
 begin
   if CurStep <> ssPostInstall then Exit;
+
+  // Copy example config if none exists yet
+  begin
+    var CfgFile := ExpandConstant('{userappdata}') + '\EDMD\config.toml';
+    var ExampleFile := ExpandConstant('{app}') + '\src\example.config.toml';
+    if not FileExists(CfgFile) and FileExists(ExampleFile) then
+    begin
+      ForceDirectories(ExpandConstant('{userappdata}') + '\EDMD');
+      FileCopy(ExampleFile, CfgFile, False);
+    end;
+  end;
 
   AppDir  := ExpandConstant('{app}');
   SrcDir  := AppDir + '\src';
