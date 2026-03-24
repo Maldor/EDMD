@@ -152,7 +152,7 @@ jobs:
 
       # ── 11. Upload artifacts ──────────────────────────────────────────────
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: EDMD-Windows-Installer-${{ steps.version.outputs.version }}
           path: |
