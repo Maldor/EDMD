@@ -208,68 +208,11 @@ end;
 // ── InitializeSetup ────────────────────────────────────────────────────────
 
 function InitializeSetup(): Boolean;
-var
-  Answer:       Integer;
-  GitInstaller: String;
-  GitDL:        TDownloadWizardPage;
-  GitRC:        Integer;
 begin
   Result := True;
-
-  // Check git
+  // Git availability check — download offer is in NextButtonClick (wpReady)
+  // where WizardForm is available. We just record state here.
   GitAvailable := GitFound();
-  if not GitAvailable then
-  begin
-    Answer := MsgBox(
-      'Git was not found on your PATH.' + #13#10 + #13#10 +
-      'EDMD uses git to download its source files and to apply updates.' + #13#10 + #13#10 +
-      'Install Git for Windows now? (~60 MB, required for EDMD to work.)',
-      mbConfirmation, MB_YESNO
-    );
-    if Answer = IDYES then
-    begin
-      // Download and silently install Git for Windows
-      GitInstaller := ExpandConstant('{tmp}') + '\git-installer.exe';
-      GitDL := CreateDownloadPage('Downloading Git for Windows',
-                                   'Please wait...', nil);
-      GitDL.Clear;
-      GitDL.Add('{#GITURL}', 'git-installer.exe', '');
-      GitDL.Show;
-      try
-        try
-          GitDL.Download;
-        except
-          MsgBox('Git download failed. Please install manually from https://git-scm.com',
-                 mbError, MB_OK);
-          Result := False;
-          Exit;
-        end;
-      finally
-        GitDL.Hide;
-      end;
-      Exec(GitInstaller,
-           '/VERYSILENT /NORESTART /NOCANCEL /SP- '
-           + '/COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"',
-           '', SW_HIDE, ewWaitUntilTerminated, GitRC);
-      GitAvailable := GitFound();
-      if not GitAvailable then
-        MsgBox('Git installation may not have completed. '
-               + 'Please reboot and re-run this installer if problems occur.',
-               mbInformation, MB_OK);
-    end else begin
-      Answer := MsgBox(
-        'Without Git, EDMD cannot download its source files and will not run.' + #13#10 +
-        'Continue anyway?',
-        mbConfirmation, MB_YESNO or MB_DEFBUTTON2
-      );
-      if Answer = IDNO then
-      begin
-        Result := False;
-        Exit;
-      end;
-    end;
-  end;
-
   // Check / locate MSYS2
   Msys2Root := FindMsys2();
 end;
@@ -283,6 +226,51 @@ var
   DownloadPage: TDownloadWizardPage;
 begin
   Result := True;
+
+  // On the "Ready to install" page: handle Git then MSYS2
+  if CurPageID = wpReady then
+  begin
+    if not GitAvailable then
+    begin
+      if MsgBox(
+        'Git was not found. Install Git for Windows now?' + #13#10 +
+        '(~60 MB, required for EDMD to work)',
+        mbConfirmation, MB_YESNO
+      ) = IDYES then
+      begin
+        var GitInstaller: String := ExpandConstant('{tmp}') + '\git-installer.exe';
+        var GitDL: TDownloadWizardPage := CreateDownloadPage(
+          'Downloading Git for Windows', 'Please wait...', nil);
+        GitDL.Clear;
+        GitDL.Add('{#GITURL}', 'git-installer.exe', '');
+        GitDL.Show;
+        try
+          try
+            GitDL.Download;
+          except
+            MsgBox('Git download failed. Install from https://git-scm.com', mbError, MB_OK);
+            Result := False;
+            Exit;
+          end;
+        finally
+          GitDL.Hide;
+        end;
+        var GitRC: Integer;
+        Exec(GitInstaller,
+             '/VERYSILENT /NORESTART /NOCANCEL /SP- '
+             + '/COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"',
+             '', SW_HIDE, ewWaitUntilTerminated, GitRC);
+        GitAvailable := GitFound();
+        if not GitAvailable then
+          MsgBox('Git may not have installed correctly. '
+                 + 'Reboot and re-run if problems occur.', mbInformation, MB_OK);
+      end else begin
+        if MsgBox('Without Git, EDMD will not run. Continue anyway?',
+                  mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDNO then
+        begin Result := False; Exit; end;
+      end;
+    end;
+  end;
 
   // On the "Ready to install" page, install MSYS2 if not found
   if (CurPageID = wpReady) and (Msys2Root = '') then
