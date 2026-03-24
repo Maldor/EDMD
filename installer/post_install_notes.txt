@@ -1,0 +1,30 @@
+EDMD — Installation Complete
+=============================
+
+IMPORTANT: Before launching EDMD you must set your Elite Dangerous
+journal folder in the config file.
+
+Your config file is located at:
+  %APPDATA%\EDMD\config.toml
+
+Open it in any text editor (Notepad works fine) and find the line:
+
+  # JournalFolder = ...
+
+Replace it with your actual journal path. Use forward slashes OR
+double backslashes — single backslashes will cause an error.
+
+Forward slashes (recommended):
+  JournalFolder = "C:/Users/YourName/Saved Games/Frontier Developments/Elite Dangerous"
+
+Double backslashes:
+  JournalFolder = "C:\\Users\\YourName\\Saved Games\\Frontier Developments\\Elite Dangerous"
+
+The default Elite Dangerous journal path is:
+  C:\Users\<YourName>\Saved Games\Frontier Developments\Elite Dangerous
+
+After saving config.toml, launch EDMD from the Start Menu or Desktop shortcut.
+
+For full documentation see:
+  %LOCALAPPDATA%\EDMD\docs\
+  https://github.com/drworman/EDMD

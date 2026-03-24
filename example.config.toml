@@ -138,13 +138,15 @@ Theme   = "default"         # palette filename in themes/ without .css extension
 # Individual settings within a profile follow the same HOT/RESTART rules above.
 # ==============================================================================
 
+# Windows example:
 [EDP1]
-Settings.JournalFolder = "/home/username/games/ED-Logs/EDP1"
+Settings.JournalFolder = "C:/Users/YourName/Saved Games/Frontier Developments/Elite Dangerous"
 Discord.UserID         = 123456789098765432
 Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webhook-token-here'
 
+# Linux example:
 [EDP2]
-Settings.JournalFolder = "/home/username/games/ED-Logs/EDP2"
+Settings.JournalFolder = "/home/username/games/ED-Logs/EDP1"
 Discord.UserID         = 123456789098765432
 Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webhook-token-here'
 

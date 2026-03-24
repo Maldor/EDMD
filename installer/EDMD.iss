@@ -48,6 +48,7 @@ ArchitecturesInstallIn64BitMode    = x64compatible
 UninstallDisplayIcon= {app}\{#AppExeName}
 ChangesEnvironment  = yes
 SetupLogging        = yes
+InfoAfterFile       = installer\post_install_notes.txt
 
 ; Minimum Windows 10
 MinVersion = 10.0.17763
@@ -88,6 +89,13 @@ Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
   WorkingDir: "{app}"; \
   StatusMsg: "Installing GTK4 and Python packages..."; \
   Flags: waituntilterminated runhidden
+
+; Step 3: Show post-install guidance
+Filename: "{cmd}"; \
+  Parameters: "/c echo."; \
+  WorkingDir: "{app}"; \
+  StatusMsg: "Installation complete."; \
+  Flags: runhidden waituntilterminated
 
 [UninstallDelete]
 ; Remove the source clone and any generated files on uninstall
@@ -344,7 +352,7 @@ var
 begin
   AppDir := ExpandConstant('{app}');
   SrcDir := AppDir + '\src';
-  CfgDir := ExpandConstant('{localappdata}') + '\EDMD';
+  CfgDir := ExpandConstant('{userappdata}') + '\EDMD';
 
   // Escape backslashes for bash; wrap the whole thing in quotes for Inno
   // We write a temp script file instead to avoid quoting nightmares
@@ -375,7 +383,7 @@ begin
 
   AppDir  := ExpandConstant('{app}');
   SrcDir  := AppDir + '\src';
-  CfgDir  := ExpandConstant('{localappdata}') + '\EDMD';
+  CfgDir  := ExpandConstant('{userappdata}') + '\EDMD';
   Ms2Root := GetMsys2Root('');
 
   // Convert Windows paths to MSYS2 paths (C:\foo → /c/foo)
@@ -420,10 +428,15 @@ begin
     Script.Add('');
     Script.Add('# ── 4. pip packages ─────────────────────────────────────────────');
     Script.Add('log "Installing pip packages..."');
-    Script.Add('PYTHON="${MSYS2_ROOT}/ucrt64/bin/python.exe"');
-    Script.Add('"${PYTHON}" -m pip install --quiet --upgrade pip 2>/dev/null || true');
-    Script.Add('"${PYTHON}" -m pip install --quiet "discord-webhook>=1.3.0" "cryptography>=41.0.0"');
-    Script.Add('log "pip packages installed."');
+    Script.Add('export PATH="${MSYS2_ROOT}/ucrt64/bin:${PATH}"');
+    Script.Add('python -m pip install --upgrade pip 2>/dev/null || true');
+    Script.Add('python -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0"');
+    Script.Add('if python -c "import discord_webhook" 2>/dev/null; then');
+    Script.Add('    log "pip packages installed."');
+    Script.Add('else');
+    Script.Add('    log "WARNING: pip packages may not have installed correctly."');
+    Script.Add('    log "Run manually: python -m pip install discord-webhook cryptography"');
+    Script.Add('fi');
     Script.Add('');
     Script.Add('# ── 5. Config file ───────────────────────────────────────────────');
     Script.Add('# Note: git clone/pull is handled by the Windows-native git step.');
