@@ -412,16 +412,20 @@ var
   CfgFile:    String;
   ExampleFile: String;
 begin
-  if CurStep <> ssPostInstall then Exit;
-
-  // Copy example config if none exists yet
-  CfgFile     := ExpandConstant('{userappdata}') + '\EDMD\config.toml';
-  ExampleFile := ExpandConstant('{app}') + '\src\example.config.toml';
-  if not FileExists(CfgFile) and FileExists(ExampleFile) then
+  // Write setup scripts at ssInstall so they exist when [Run] entries fire.
+  // Copy config at ssPostInstall when {app}\src is already in place.
+  if CurStep = ssPostInstall then
   begin
-    ForceDirectories(ExpandConstant('{userappdata}') + '\EDMD');
-    FileCopy(ExampleFile, CfgFile, False);
+    CfgFile     := ExpandConstant('{userappdata}') + '\EDMD\config.toml';
+    ExampleFile := ExpandConstant('{app}') + '\src\example.config.toml';
+    if not FileExists(CfgFile) and FileExists(ExampleFile) then
+    begin
+      ForceDirectories(ExpandConstant('{userappdata}') + '\EDMD');
+      FileCopy(ExampleFile, CfgFile, False);
+    end;
   end;
+
+  if CurStep <> ssInstall then Exit;
 
   AppDir  := ExpandConstant('{app}');
   SrcDir  := AppDir + '\src';
