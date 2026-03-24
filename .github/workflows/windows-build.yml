@@ -31,6 +31,16 @@ jobs:
           fetch-depth: 1
 
       # ── 2. Determine version string ───────────────────────────────────────
+      - name: Write version helper script
+        shell: bash
+        run: |
+          cat > get_version.py << 'PYEOF'
+          import re
+          t = open('core/state.py').read()
+          m = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', t)
+          print(m.group(1) if m else 'dev')
+          PYEOF
+
       - name: Set version
         id: version
         shell: bash
@@ -40,13 +50,7 @@ jobs:
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${{ github.ref_name }}"
           else
-            # Extract from core/state.py
-            VERSION=$(python -c "
-import re
-t = open('core/state.py').read()
-m = re.search(r'VERSION\s*=\s*[\"\'](.*?)[\"\']', t)
-print(m.group(1) if m else 'dev')
-")
+            VERSION=$(python get_version.py)
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building version: ${VERSION}"
