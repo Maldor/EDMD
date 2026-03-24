@@ -18,6 +18,10 @@
 # Required - no default. Change requires restart as the file handle must reopen.
 # JournalFolder = '\\SOMENETWORKSHARE\Users\me\Saved Games\Frontier Developments\Elite Dangerous'
 # JournalFolder = "/home/username/games/ED-Logs/EDP1"
+#
+# Windows users: backslashes must be doubled, or use forward slashes instead.
+# JournalFolder = "C:\\Users\\YourName\\Saved Games\\Frontier Developments\\Elite Dangerous"
+# JournalFolder = "C:/Users/YourName/Saved Games/Frontier Developments/Elite Dangerous"
 
 # [HOT] Use UTC timestamps instead of local time (Default: false)
 UseUTC = false

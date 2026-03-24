@@ -335,8 +335,12 @@ def load_config_file(config_path: Path) -> dict:
             return tomllib.load(f)
         except tomllib.TOMLDecodeError as e:
             print(f"Config decode error: {e}")
-            if sys.argv[0].count("\\") > 1:
-                input("Press ENTER to exit")
+            print()
+            print("  Windows paths require double backslashes or forward slashes.")
+            print(r'  JournalFolder = "C:\\Users\\Name\\Saved Games\\Elite Dangerous"')
+            print(r'  JournalFolder = "C:/Users/Name/Saved Games/Elite Dangerous"')
+            if sys.platform == "win32" or sys.argv[0].count("\\") > 1:
+                input("\nPress ENTER to exit")
             sys.exit(1)
 
 
