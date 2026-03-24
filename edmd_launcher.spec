@@ -10,14 +10,13 @@
 #
 # This design preserves the git-based upgrade path (edmd.py --upgrade).
 
-import sys
-from pathlib import Path
+import os
 
 block_cipher = None
 
 a = Analysis(
-    ['edmd_launcher.py'],
-    pathex=[str(Path(__file__).parent)],
+    [os.path.join(SPECPATH, 'edmd_launcher.py')],
+    pathex=[SPECPATH],
     binaries=[],
     datas=[],
     hiddenimports=[
