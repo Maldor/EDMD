@@ -115,9 +115,27 @@ def main() -> None:
     python_exe = msys2_root / PYTHON_REL
     dll_dir    = msys2_root / DLL_REL
 
-    # ── 3. Prepend MSYS2 UCRT64/bin to PATH (loads GTK4 DLLs) ───────────────
+    # ── 3. Set up environment for MSYS2 python ───────────────────────────────
     env = os.environ.copy()
+
+    # Prepend UCRT64/bin so GTK4 DLLs are found before anything else
     env["PATH"] = str(dll_dir) + os.pathsep + env.get("PATH", "")
+
+    # Explicitly set PYTHONPATH to MSYS2's site-packages so pip-installed
+    # packages (discord_webhook, cryptography) are found even if the MSYS2
+    # shell environment hasn't been fully initialised by a login shell.
+    site_pkgs = msys2_root / UCRT_SUBDIR / "lib" / "python3.12" / "site-packages"
+    if not site_pkgs.exists():
+        # Try any python3.x directory present
+        lib_dir = msys2_root / UCRT_SUBDIR / "lib"
+        for d in sorted(lib_dir.glob("python3.*"), reverse=True):
+            candidate = d / "site-packages"
+            if candidate.exists():
+                site_pkgs = candidate
+                break
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(site_pkgs) + (os.pathsep + existing_pp if existing_pp else "")
+
     env["EDMD_MSYS2_ROOT"] = str(msys2_root)
     env["EDMD_SRC_DIR"]    = str(src_dir)
 
