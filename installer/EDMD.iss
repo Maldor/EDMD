@@ -25,6 +25,7 @@
 #define AppExeName   "EDMD.exe"
 #define AppSrcRepo   "https://github.com/drworman/EDMD.git"
 #define MSYS2URL     "https://github.com/msys2/msys2-installer/releases/download/nightly-x86_64/msys2-x86_64-latest.exe"
+#define GITURL       "https://github.com/git-for-windows/git/releases/download/v2.49.0.windows.1/Git-2.49.0-64-bit.exe"
 #define MSYS2SHA256  ""   ; set if you pin a specific release for security
 
 [Setup]
@@ -87,11 +88,18 @@ Filename: "{code:GetGitExe}"; \
   StatusMsg: "Downloading EDMD source..."; \
   Flags: waituntilterminated runhidden
 
-; Step 2: Install GTK4, Python, and pip packages via MSYS2 bash.
+; Step 2a: Initialise MSYS2 environment (required on fresh install before pacman works).
+Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
+  Parameters: "--login -c ""exit"""; \
+  WorkingDir: "{app}"; \
+  StatusMsg: "Initialising MSYS2..."; \
+  Flags: waituntilterminated runhidden
+
+; Step 2b: Install GTK4, Python, and pip packages via MSYS2 bash.
 Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
   Parameters: "--login -c ""{code:GetEdmdSetupScript}"""; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Installing GTK4 and Python packages..."; \
+  StatusMsg: "Installing GTK4 and Python packages (this may take several minutes)..."; \
   Flags: waituntilterminated runhidden
 
 ; Step 3: Notepad launch offered as a post-install checkbox.
@@ -211,19 +219,55 @@ begin
   begin
     Answer := MsgBox(
       'Git was not found on your PATH.' + #13#10 + #13#10 +
-      'EDMD uses git to download its source files and to apply updates ' +
-      '("EDMD.exe --upgrade").' + #13#10 + #13#10 +
-      'You can install Git for Windows from:' + #13#10 +
-      '  https://git-scm.com/download/win' + #13#10 + #13#10 +
-      'Install git now, then re-run this installer.' + #13#10 + #13#10 +
-      'Continue anyway without git? (EDMD will not be able to download ' +
-      'its source files and will not run.)',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2
+      'EDMD uses git to download its source files and to apply updates.' + #13#10 + #13#10 +
+      'Install Git for Windows now? (~60 MB, required for EDMD to work.)',
+      mbConfirmation, MB_YESNO
     );
-    if Answer = IDNO then
+    if Answer = IDYES then
     begin
-      Result := False;
-      Exit;
+      // Download and silently install Git for Windows
+      var GitInstaller: String;
+      GitInstaller := ExpandConstant('{tmp}') + '\git-installer.exe';
+      var GitDL: TDownloadWizardPage;
+      GitDL := CreateDownloadPage('Downloading Git for Windows',
+                                   'Please wait...', nil);
+      GitDL.Clear;
+      GitDL.Add('{#GITURL}', 'git-installer.exe', '');
+      GitDL.Show;
+      try
+        try
+          GitDL.Download;
+        except
+          MsgBox('Git download failed. Please install manually from https://git-scm.com',
+                 mbError, MB_OK);
+          Result := False;
+          Exit;
+        end;
+      finally
+        GitDL.Hide;
+      end;
+      WizardForm.StatusLabel.Caption := 'Installing Git for Windows...';
+      var GitRC: Integer;
+      Exec(GitInstaller,
+           '/VERYSILENT /NORESTART /NOCANCEL /SP- '
+           + '/COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"',
+           '', SW_HIDE, ewWaitUntilTerminated, GitRC);
+      GitAvailable := GitFound();
+      if not GitAvailable then
+        MsgBox('Git installation may not have completed. '
+               + 'Please reboot and re-run this installer if problems occur.',
+               mbInformation, MB_OK);
+    end else begin
+      Answer := MsgBox(
+        'Without Git, EDMD cannot download its source files and will not run.' + #13#10 +
+        'Continue anyway?',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2
+      );
+      if Answer = IDNO then
+      begin
+        Result := False;
+        Exit;
+      end;
     end;
   end;
 
