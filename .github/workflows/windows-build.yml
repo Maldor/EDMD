@@ -110,21 +110,20 @@ jobs:
 
       # ── 8. Compile Inno Setup installer ──────────────────────────────────
       - name: Build Inno Setup installer
-        shell: cmd
+        shell: pwsh
         run: |
-          :: Assign ProgramFiles(x86) to plain variable first to avoid
-          :: CMD misparse of parentheses inside if-blocks
-          set PF86=%ProgramFiles(x86)%
-          set PF64=%ProgramFiles%
-          set ISS_PATH=%PF86%\Inno Setup 6\ISCC.exe
-          if not exist "%ISS_PATH%" set ISS_PATH=%PF64%\Inno Setup 6\ISCC.exe
-          if not exist "%ISS_PATH%" (
-            echo Inno Setup not found. Installing via choco...
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup not found. Installing via choco..."
             choco install innosetup --no-progress -y
-            set ISS_PATH=%PF86%\Inno Setup 6\ISCC.exe
-          )
-          echo Using Inno Setup at %ISS_PATH%
-          "%ISS_PATH%" installer\EDMD.iss
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          Write-Host "Using Inno Setup at $iscc"
+          & $iscc installer\EDMD.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dir dist\installer\
 
       # ── 9. Verify installer was produced ──────────────────────────────────
