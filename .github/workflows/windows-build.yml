@@ -69,6 +69,7 @@ jobs:
         run: pip install pyinstaller
 
       # ── 4. Build EDMD.exe launcher with PyInstaller ───────────────────────
+      # ── 4. Build EDMD.exe launcher with PyInstaller ───────────────────────
       - name: Build launcher exe
         shell: cmd
         run: |

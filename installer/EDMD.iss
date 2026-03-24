@@ -69,10 +69,10 @@ Source: "..\INSTALL.md";            DestDir: "{app}";      Flags: ignoreversion
 Source: "..\docs\*";                DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName}";                     Filename: "{app}\{#AppExeName}"; Comment: "Elite Dangerous Monitor Daemon"
-Name: "{group}\{#AppName} (terminal mode)";     Filename: "{app}\{#AppExeName}"; Parameters: "--no-gui"; Comment: "EDMD without the GTK4 GUI"
-Name: "{group}\Uninstall {#AppName}";           Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}";               Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{group}\{#AppName} (GUI)";       Filename: "{app}\{#AppExeName}"; Parameters: "-g"; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
+Name: "{group}\{#AppName} (terminal)";  Filename: "{app}\{#AppExeName}"; Comment: "Elite Dangerous Monitor Daemon — terminal mode"
+Name: "{group}\Uninstall {#AppName}";   Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#AppName} (GUI)"; Filename: "{app}\{#AppExeName}"; Parameters: "-g"; Tasks: desktopicon; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
 
 [Run]
 ; Step 1: Clone or update EDMD source using Windows-native git.
@@ -90,12 +90,19 @@ Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
   StatusMsg: "Installing GTK4 and Python packages..."; \
   Flags: waituntilterminated runhidden
 
-; Step 3: Show post-install guidance
+; Step 3: Copy example config if none exists, then open in Notepad for the user.
 Filename: "{cmd}"; \
-  Parameters: "/c echo."; \
+  Parameters: "/c if not exist \"{userappdata}\EDMD\config.toml\" (copy /Y \"{app}\src\example.config.toml\" \"{userappdata}\EDMD\config.toml\")"; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Installation complete."; \
+  StatusMsg: "Setting up configuration file..."; \
   Flags: runhidden waituntilterminated
+
+Filename: "notepad.exe"; \
+  Parameters: "{userappdata}\EDMD\config.toml"; \
+  WorkingDir: "{userappdata}\EDMD"; \
+  StatusMsg: "Opening config.toml..."; \
+  Description: "Open config.toml to set your journal folder"; \
+  Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; Remove the source clone and any generated files on uninstall
