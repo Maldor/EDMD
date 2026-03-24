@@ -84,7 +84,7 @@ Filename: "{code:GetGitExe}"; \
 
 ; Step 2: Install GTK4, Python, and pip packages via MSYS2 bash.
 Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
-  Parameters: "--login -c \"{code:GetEdmdSetupScript}\""; \
+  Parameters: "--login -c ""{code:GetEdmdSetupScript}"""; \
   WorkingDir: "{app}"; \
   StatusMsg: "Installing GTK4 and Python packages..."; \
   Flags: waituntilterminated runhidden
