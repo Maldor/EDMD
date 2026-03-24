@@ -24,7 +24,7 @@
 #define AppURL       "https://github.com/drworman/EDMD"
 #define AppExeName   "EDMD.exe"
 #define AppSrcRepo   "https://github.com/drworman/EDMD.git"
-#define MSYS2URL     "https://github.com/msys2/msys2-installer/releases/download/2024-12-12/msys2-x86_64-20241212.exe"
+#define MSYS2URL     "https://github.com/msys2/msys2-installer/releases/download/nightly-x86_64/msys2-x86_64-latest.exe"
 #define MSYS2SHA256  ""   ; set if you pin a specific release for security
 
 [Setup]
@@ -121,7 +121,10 @@ begin
 
   for I := 0 to GetArrayLength(Candidates) - 1 do
   begin
-    if FileExists(Candidates[I] + '\ucrt64\bin\python.exe') then
+    // Check for usr\bin\bash.exe which exists after base MSYS2 install.
+    // ucrt64\bin\python.exe only exists after pacman installs it, so
+    // it cannot be used as the detection marker.
+    if FileExists(Candidates[I] + '\usr\bin\bash.exe') then
     begin
       Result := Candidates[I];
       Exit;
@@ -131,10 +134,46 @@ end;
 
 function GitFound(): Boolean;
 var
-  ResultCode: Integer;
+  ResultCode:  Integer;
+  InstallPath: String;
 begin
-  Result := Exec('cmd.exe', '/c where git >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-            and (ResultCode = 0);
+  // 1. Check PATH (works if git was already installed before this process started)
+  if Exec('cmd.exe', '/c where git >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+     and (ResultCode = 0) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  // 2. Check registry — Git for Windows writes InstallPath here even
+  //    when the PATH update hasn't been picked up by the current process
+  if RegQueryStringValue(HKLM, 'SOFTWARE\GitForWindows', 'InstallPath', InstallPath) then
+  begin
+    if FileExists(InstallPath + '\cmd\git.exe') then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+  if RegQueryStringValue(HKCU, 'SOFTWARE\GitForWindows', 'InstallPath', InstallPath) then
+  begin
+    if FileExists(InstallPath + '\cmd\git.exe') then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+  // 3. Check the two default install paths Git for Windows uses
+  if FileExists(ExpandConstant('{pf64}') + '\Git\cmd\git.exe') then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{localappdata}') + '\Programs\Git\cmd\git.exe') then
+  begin
+    Result := True;
+    Exit;
+  end;
+  Result := False;
 end;
 
 // ── InitializeSetup ────────────────────────────────────────────────────────
@@ -229,7 +268,7 @@ begin
       // Run MSYS2 installer silently — installs to C:\msys64 by default
       WizardForm.StatusLabel.Caption := 'Installing MSYS2...';
       Exec(MSYS2Installer,
-           'install --confirm-command --accept-messages --root C:\msys64',
+           'in --confirm-command --accept-messages --root C:\msys64',
            '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
 
       Msys2Root := FindMsys2();
