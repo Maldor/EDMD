@@ -330,7 +330,6 @@ begin
       end;
 
       // Run MSYS2 installer silently — installs to C:\msys64 by default
-      WizardForm.StatusLabel.Caption := 'Installing MSYS2...';
       Exec(MSYS2Installer,
            'in --confirm-command --accept-messages --root C:\msys64',
            '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
