@@ -221,9 +221,12 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  ResultCode: Integer;
+  ResultCode:     Integer;
   MSYS2Installer: String;
-  DownloadPage: TDownloadWizardPage;
+  DownloadPage:   TDownloadWizardPage;
+  GitInstaller:   String;
+  GitDL:          TDownloadWizardPage;
+  GitRC:          Integer;
 begin
   Result := True;
 
@@ -238,9 +241,8 @@ begin
         mbConfirmation, MB_YESNO
       ) = IDYES then
       begin
-        var GitInstaller: String := ExpandConstant('{tmp}') + '\git-installer.exe';
-        var GitDL: TDownloadWizardPage := CreateDownloadPage(
-          'Downloading Git for Windows', 'Please wait...', nil);
+        GitInstaller := ExpandConstant('{tmp}') + '\git-installer.exe';
+        GitDL := CreateDownloadPage('Downloading Git for Windows', 'Please wait...', nil);
         GitDL.Clear;
         GitDL.Add('{#GITURL}', 'git-installer.exe', '');
         GitDL.Show;
@@ -255,7 +257,6 @@ begin
         finally
           GitDL.Hide;
         end;
-        var GitRC: Integer;
         Exec(GitInstaller,
              '/VERYSILENT /NORESTART /NOCANCEL /SP- '
              + '/COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"',
