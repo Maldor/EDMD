@@ -112,15 +112,16 @@ jobs:
       - name: Build Inno Setup installer
         shell: cmd
         run: |
-          :: Inno Setup is pre-installed on GitHub Windows runners
-          set ISS_PATH=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe
+          :: Assign ProgramFiles(x86) to plain variable first to avoid
+          :: CMD misparse of parentheses inside if-blocks
+          set PF86=%ProgramFiles(x86)%
+          set PF64=%ProgramFiles%
+          set ISS_PATH=%PF86%\Inno Setup 6\ISCC.exe
+          if not exist "%ISS_PATH%" set ISS_PATH=%PF64%\Inno Setup 6\ISCC.exe
           if not exist "%ISS_PATH%" (
-            set ISS_PATH=%ProgramFiles%\Inno Setup 6\ISCC.exe
-          )
-          if not exist "%ISS_PATH%" (
-            echo Inno Setup not found at expected path. Installing...
+            echo Inno Setup not found. Installing via choco...
             choco install innosetup --no-progress -y
-            set ISS_PATH=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe
+            set ISS_PATH=%PF86%\Inno Setup 6\ISCC.exe
           )
           echo Using Inno Setup at %ISS_PATH%
           "%ISS_PATH%" installer\EDMD.iss
