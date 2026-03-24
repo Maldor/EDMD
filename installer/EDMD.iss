@@ -247,7 +247,6 @@ begin
       finally
         GitDL.Hide;
       end;
-      WizardForm.StatusLabel.Caption := 'Installing Git for Windows...';
       Exec(GitInstaller,
            '/VERYSILENT /NORESTART /NOCANCEL /SP- '
            + '/COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"',
