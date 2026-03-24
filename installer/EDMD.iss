@@ -209,7 +209,10 @@ end;
 
 function InitializeSetup(): Boolean;
 var
-  Answer: Integer;
+  Answer:       Integer;
+  GitInstaller: String;
+  GitDL:        TDownloadWizardPage;
+  GitRC:        Integer;
 begin
   Result := True;
 
@@ -226,9 +229,7 @@ begin
     if Answer = IDYES then
     begin
       // Download and silently install Git for Windows
-      var GitInstaller: String;
       GitInstaller := ExpandConstant('{tmp}') + '\git-installer.exe';
-      var GitDL: TDownloadWizardPage;
       GitDL := CreateDownloadPage('Downloading Git for Windows',
                                    'Please wait...', nil);
       GitDL.Clear;
@@ -247,7 +248,6 @@ begin
         GitDL.Hide;
       end;
       WizardForm.StatusLabel.Caption := 'Installing Git for Windows...';
-      var GitRC: Integer;
       Exec(GitInstaller,
            '/VERYSILENT /NORESTART /NOCANCEL /SP- '
            + '/COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"',
