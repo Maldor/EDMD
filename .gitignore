@@ -32,8 +32,9 @@ dist/
 *.egg
 
 # ── PyInstaller (if ever bundled) ─────────────────────────────────────────────
-#*.spec
-#*.exe
+*.spec
+!edmd_launcher.spec
+*.exe
 
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store
