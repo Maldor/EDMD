@@ -18,6 +18,9 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: write
+
 jobs:
   build-windows-installer:
     name: Build Windows installer
@@ -163,7 +166,7 @@ jobs:
       # ── 12. Attach to GitHub Release if triggered by a tag ────────────────
       - name: Upload to GitHub Release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/installer/EDMD-Setup-*.exe
