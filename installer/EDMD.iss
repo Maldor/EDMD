@@ -88,16 +88,16 @@ Filename: "{code:GetGitExe}"; \
   StatusMsg: "Downloading EDMD source..."; \
   Flags: waituntilterminated runhidden
 
-; Step 2a: Initialise MSYS2 environment (required on fresh install before pacman works).
-Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
-  Parameters: "--login -c ""exit"""; \
+; Step 2a: Initialise MSYS2 UCRT64 environment (required on fresh install before pacman works).
+Filename: "{code:GetMsys2Root}\msys2_shell.cmd"; \
+  Parameters: "-ucrt64 -defterm -no-start -c ""exit"""; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Initialising MSYS2..."; \
+  StatusMsg: "Initialising MSYS2 UCRT64 environment..."; \
   Flags: waituntilterminated runhidden
 
-; Step 2b: Install GTK4, Python, and pip packages via MSYS2 bash.
-Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
-  Parameters: "--login -c ""{code:GetEdmdSetupScript}"""; \
+; Step 2b: Install GTK4, Python, and pip packages via MSYS2 UCRT64.
+Filename: "{code:GetMsys2Root}\msys2_shell.cmd"; \
+  Parameters: "-ucrt64 -defterm -no-start -c ""{code:GetEdmdSetupScript}"""; \
   WorkingDir: "{app}"; \
   StatusMsg: "Installing GTK4 and Python packages (this may take several minutes)..."; \
   Flags: waituntilterminated runhidden
