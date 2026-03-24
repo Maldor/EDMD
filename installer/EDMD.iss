@@ -383,18 +383,18 @@ var
   SrcDir:     String;
   CfgDir:     String;
   Ms2Root:    String;
+  CfgFile:    String;
+  ExampleFile: String;
 begin
   if CurStep <> ssPostInstall then Exit;
 
   // Copy example config if none exists yet
+  CfgFile     := ExpandConstant('{userappdata}') + '\EDMD\config.toml';
+  ExampleFile := ExpandConstant('{app}') + '\src\example.config.toml';
+  if not FileExists(CfgFile) and FileExists(ExampleFile) then
   begin
-    var CfgFile := ExpandConstant('{userappdata}') + '\EDMD\config.toml';
-    var ExampleFile := ExpandConstant('{app}') + '\src\example.config.toml';
-    if not FileExists(CfgFile) and FileExists(ExampleFile) then
-    begin
-      ForceDirectories(ExpandConstant('{userappdata}') + '\EDMD');
-      FileCopy(ExampleFile, CfgFile, False);
-    end;
+    ForceDirectories(ExpandConstant('{userappdata}') + '\EDMD');
+    FileCopy(ExampleFile, CfgFile, False);
   end;
 
   AppDir  := ExpandConstant('{app}');
