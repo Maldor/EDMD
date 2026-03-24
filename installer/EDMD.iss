@@ -74,11 +74,19 @@ Name: "{group}\Uninstall {#AppName}";           Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}";               Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-; Clone or update EDMD source after all files are installed
-Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
-  Parameters: "--login -c ""{code:GetEdmdSetupScript}"""; \
+; Step 1: Clone or update EDMD source using Windows-native git.
+; Runs independently of MSYS2 so it cannot be blocked by GTK4 setup.
+Filename: "{code:GetGitExe}"; \
+  Parameters: "{code:GetGitParams}"; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Setting up GTK4 and EDMD source..."; \
+  StatusMsg: "Downloading EDMD source..."; \
+  Flags: waituntilterminated runhidden
+
+; Step 2: Install GTK4, Python, and pip packages via MSYS2 bash.
+Filename: "{code:GetMsys2Root}\usr\bin\bash.exe"; \
+  Parameters: "--login -c \"{code:GetEdmdSetupScript}\""; \
+  WorkingDir: "{app}"; \
+  StatusMsg: "Installing GTK4 and Python packages..."; \
   Flags: waituntilterminated runhidden
 
 [UninstallDelete]
@@ -286,6 +294,34 @@ end;
 
 // ── Code functions used in [Run] section ──────────────────────────────────
 
+function GetGitExe(Param: String): String;
+var
+  InstallPath: String;
+begin
+  if RegQueryStringValue(HKLM, 'SOFTWARE\GitForWindows', 'InstallPath', InstallPath) then
+    if FileExists(InstallPath + '\cmd\git.exe') then
+    begin Result := InstallPath + '\cmd\git.exe'; Exit; end;
+  if RegQueryStringValue(HKCU, 'SOFTWARE\GitForWindows', 'InstallPath', InstallPath) then
+    if FileExists(InstallPath + '\cmd\git.exe') then
+    begin Result := InstallPath + '\cmd\git.exe'; Exit; end;
+  if FileExists(ExpandConstant('{pf64}') + '\Git\cmd\git.exe') then
+  begin Result := ExpandConstant('{pf64}') + '\Git\cmd\git.exe'; Exit; end;
+  if FileExists(ExpandConstant('{localappdata}') + '\Programs\Git\cmd\git.exe') then
+  begin Result := ExpandConstant('{localappdata}') + '\Programs\Git\cmd\git.exe'; Exit; end;
+  Result := 'git.exe';
+end;
+
+function GetGitParams(Param: String): String;
+var
+  SrcDir: String;
+begin
+  SrcDir := ExpandConstant('{app}') + '\src';
+  if DirExists(SrcDir + '\.git') then
+    Result := '-C "' + SrcDir + '" pull --ff-only'
+  else
+    Result := 'clone --depth=1 https://github.com/drworman/EDMD.git "' + SrcDir + '"';
+end;
+
 function GetMsys2Root(Param: String): String;
 begin
   if Msys2Root = '' then
@@ -389,20 +425,8 @@ begin
     Script.Add('"${PYTHON}" -m pip install --quiet "discord-webhook>=1.3.0" "cryptography>=41.0.0"');
     Script.Add('log "pip packages installed."');
     Script.Add('');
-    Script.Add('# ── 5. Clone or update EDMD source ──────────────────────────────');
-    Script.Add('if [ -d "${EDMD_SRC}/.git" ]; then');
-    Script.Add('    log "Updating EDMD source (git pull)..."');
-    Script.Add('    git -C "${EDMD_SRC}" checkout . 2>/dev/null || true');
-    Script.Add('    git -C "${EDMD_SRC}" pull --ff-only');
-    Script.Add('    log "EDMD source updated."');
-    Script.Add('else');
-    Script.Add('    log "Cloning EDMD source..."');
-    Script.Add('    mkdir -p "${EDMD_APP}"');
-    Script.Add('    git clone --depth=1 https://github.com/drworman/EDMD.git "${EDMD_SRC}"');
-    Script.Add('    log "EDMD source cloned."');
-    Script.Add('fi');
-    Script.Add('');
-    Script.Add('# ── 6. Config file ───────────────────────────────────────────────');
+    Script.Add('# ── 5. Config file ───────────────────────────────────────────────');
+    Script.Add('# Note: git clone/pull is handled by the Windows-native git step.');
     Script.Add('mkdir -p "${EDMD_CFG}"');
     Script.Add('if [ ! -f "${EDMD_CFG}/config.toml" ]; then');
     Script.Add('    if [ -f "${EDMD_SRC}/example.config.toml" ]; then');
