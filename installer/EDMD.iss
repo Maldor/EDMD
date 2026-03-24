@@ -48,7 +48,7 @@ ArchitecturesInstallIn64BitMode    = x64compatible
 UninstallDisplayIcon= {app}\{#AppExeName}
 ChangesEnvironment  = yes
 SetupLogging        = yes
-InfoAfterFile       = installer\post_install_notes.txt
+InfoAfterFile       = post_install_notes.txt
 
 ; Minimum Windows 10
 MinVersion = 10.0.17763
