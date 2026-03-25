@@ -297,6 +297,7 @@ class EDDNPlugin(BasePlugin):
         "Shipyard",
         # FC materials
         "FCMaterials",
+        "CarrierTradeOrder",    # buy/sell order change — re-send Market.json
         # Docking events (own schema)
         "DockingGranted",
         "DockingDenied",
@@ -306,6 +307,12 @@ class EDDNPlugin(BasePlugin):
         "CodexEntry",
         # Nav beacon (own schema)
         "NavBeaconScan",
+        # Nav route (own schema — reads NavRoute.json)
+        "NavRoute",
+        # Docking state tracking
+        "Undocked",
+        # Carrier identity
+        "CarrierStats",
     ]
 
     # ── on_load ───────────────────────────────────────────────────────────────
@@ -339,6 +346,10 @@ class EDDNPlugin(BasePlugin):
 
         # FSSSignalDiscovered batching
         self._fss_signals: list[dict] = []
+
+        # Docking state — used to validate CarrierTradeOrder sends
+        self._carrier_market_id: int | None = None   # MarketID of our own FC
+        self._docked_station_id: int | None = None   # current docked MarketID
 
         # Dedup hashes
         self._last_commodity_hash:   str | None = None
@@ -405,6 +416,17 @@ class EDDNPlugin(BasePlugin):
             self._flush_fss_signals(flush_event=event)
 
         # ── Location tracking ─────────────────────────────────────────────────
+        # Track docked status and carrier identity
+        if ev == "Docked":
+            self._docked_station_id = event.get("MarketID")
+        elif ev == "Undocked":
+            self._docked_station_id = None
+        elif ev == "CarrierStats":
+            # CarrierID == MarketID for fleet carriers
+            self._carrier_market_id = event.get("CarrierID")
+        elif ev in ("Location",) and event.get("Docked"):
+            self._docked_station_id = event.get("MarketID")
+
         if ev in ("FSDJump", "Location", "CarrierJump"):
             self._update_location(event)
 
@@ -454,17 +476,37 @@ class EDDNPlugin(BasePlugin):
             case "DockingDenied":
                 self._send_dockingdenied(event, is_test)
 
-            # ── Market / Outfitting / Shipyard (read companion .json files) ───
-            case "Market":
-                self._send_market_json(event, is_test)
-            case "Outfitting":
-                self._send_outfitting_json(event, is_test)
-            case "Shipyard":
-                self._send_shipyard_json(event, is_test)
+            # ── Market / Outfitting / Shipyard / FCMaterials / NavRoute ────────
+            # These read from .json files that only reflect the current session.
+            # Skip them during preload — the on-disk files are stale.
+            case "Market" | "Outfitting" | "Shipyard" | "FCMaterials" | "NavRoute" if not state.in_preload:
+                match ev:
+                    case "Market":
+                        self._send_market_json(event, is_test)
+                    case "Outfitting":
+                        self._send_outfitting_json(event, is_test)
+                    case "Shipyard":
+                        self._send_shipyard_json(event, is_test)
+                    case "NavRoute":
+                        self._send_navroute_json(event, is_test)
+                    case "FCMaterials":
+                        self._send_fcmaterials(event, is_test)
 
-            # ── FCMaterials ───────────────────────────────────────────────────
-            case "FCMaterials":
-                self._send_fcmaterials(event, is_test)
+            # ── Fleet Carrier trade order ─────────────────────────────────────
+            case "CarrierTradeOrder":
+                # Trade order changed on our FC — re-send Market.json if we
+                # are currently docked at our own carrier. If not docked,
+                # Market.json still reflects the last station we visited and
+                # would produce a MarketID mismatch.
+                carrier_id = event.get("CarrierID")
+                if (carrier_id and
+                        self._carrier_market_id == carrier_id and
+                        self._docked_station_id == carrier_id):
+                    self._last_commodity_hash = None
+                    self._send_market_json(
+                        {"MarketID": carrier_id, "timestamp": event.get("timestamp", "")},
+                        is_test,
+                    )
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -764,12 +806,10 @@ class EDDNPlugin(BasePlugin):
                 return
             msg["StarPos"] = list(self._star_pos)
 
-        # Validate required non-empty strings
-        for k in ("System", "Name", "Region", "Category", "SubCategory"):
-            v = msg.get(k)
-            if not v or not isinstance(v, str):
-                print(f"  [EDDN] CodexEntry: required field {k!r} missing or empty — dropping")
-                return
+        # Validate only the truly required fields (schema: timestamp/event/System/StarPos/SystemAddress/EntryID)
+        if not msg.get("System") or not msg.get("EntryID"):
+            print("  [EDDN] CodexEntry: missing required System or EntryID — dropping")
+            return
 
         self._add_horizons_odyssey(msg)
         self._post(_schema("codexentry", 1, is_test), msg)
@@ -836,8 +876,9 @@ class EDDNPlugin(BasePlugin):
                     "demandBracket": c["DemandBracket"],
                 }
                 for c in items
-                # Omit Producer/Rare/id (disallowed by schema)
-                # Keep all commodities (including zero-stock FC entries per EDMC logic)
+                # Skip NonMarketable (e.g. limpets) and items with a legality restriction
+                if "nonmarketable" not in c.get("Category", "").lower()
+                and not c.get("legality", "")
             ],
             key=lambda x: x["name"],
         )
@@ -881,13 +922,16 @@ class EDDNPlugin(BasePlugin):
             return
 
         items = data.get("Items", [])
-        # Filter: only Hpt_/Int_/Armour_ modules; skip int_planetapproachsuite
+        # Filter: only Hpt_/Int_/Armour_ modules; skip int_planetapproachsuite;
+        # skip items with a non-null sku unless it is the Horizons planetary sku
+        HORIZONS_SKU = "ELITE_HORIZONS_V_PLANETARY_LANDINGS"
         modules = sorted(
             MODULE_RE.sub(lambda m: m.group(0).capitalize(), item["Name"])
             for item in items
             if (
                 MODULE_RE.search(item["Name"])
                 and item["Name"].lower() != "int_planetapproachsuite"
+                and (not item.get("sku") or item.get("sku") == HORIZONS_SKU)
             )
         )
 
@@ -944,17 +988,104 @@ class EDDNPlugin(BasePlugin):
     # ── FCMaterials ───────────────────────────────────────────────────────────
 
     def _send_fcmaterials(self, event: dict, is_test: bool) -> None:
-        if "Items" not in event:
+        """Read FCMaterials.json and send fcmaterials_journal/1 schema message.
+        The journal FCMaterials event is a trigger; authoritative data is in the file.
+        Schema requires: timestamp, event, MarketID, CarrierName, CarrierID, Items.
+        """
+        data = self._read_json_file("FCMaterials")
+        if data is None:
             return
 
-        h = _dict_hash({"items": event["Items"], "mid": event.get("MarketID")})
+        # Validate required fields are present
+        for field in ("MarketID", "CarrierName", "CarrierID", "Items"):
+            if not data.get(field) and data.get(field) != 0:
+                print(f"  [EDDN] FCMaterials.json missing {field!r} — skipping")
+                return
+
+        h = _dict_hash({"items": data["Items"], "mid": data.get("MarketID")})
         if h == self._last_fcmaterials_hash:
             return
         self._last_fcmaterials_hash = h
 
-        msg = deepcopy(event)
-        msg = _filter_localised(msg)
+        msg = _filter_localised(deepcopy(data))
         msg.pop("_logtime", None)
 
         self._add_horizons_odyssey(msg)
         self._post(_schema("fcmaterials_journal", 1, is_test), msg)
+
+    # ── NavRoute.json ─────────────────────────────────────────────────────────
+
+    def _send_navroute_json(self, trigger: dict, is_test: bool) -> None:
+        """Read NavRoute.json and send navroute/1 schema message."""
+        data = self._read_json_file("NavRoute")
+        if not data:
+            return
+        route = data.get("Route", [])
+        if not route:
+            return   # empty route / NavRouteClear — nothing useful to send
+        # Build EDDN-format route entries
+        eddn_route = []
+        for hop in route:
+            entry: dict = {
+                "StarSystem":    hop.get("StarSystem", ""),
+                "SystemAddress": hop.get("SystemAddress", 0),
+                "StarPos":       hop.get("StarPos", [0, 0, 0]),
+                "StarClass":     hop.get("StarClass", ""),
+            }
+            eddn_route.append(entry)
+        msg: dict = {
+            "timestamp": data.get("timestamp", trigger.get("timestamp", "")),
+            "event":     "NavRoute",
+            "Route":     eddn_route,
+        }
+        self._add_horizons_odyssey(msg)
+        self._post(_schema("navroute", 1, is_test), msg)
+
+    # ── fcmaterials_capi (called by CAPI data layer) ──────────────────────────
+
+    def push_fcmaterials_capi(
+        self,
+        market_id:  int,
+        carrier_id: str,
+        items:      dict,
+        timestamp:  str,
+    ) -> None:
+        """
+        Called by the CAPI data layer after a /market poll on a fleet carrier.
+        Sends the bartender micro-resource orders via fcmaterials_capi/1 schema.
+
+        items  — raw orders.onfootmicroresources dict from CAPI /market response.
+        carrier_id — CAPI "name" field (the callsign, used as CarrierID).
+        """
+        if not self._enabled or self._sender is None:
+            return
+        if not items:
+            return
+
+        # Strip locName from purchases and sales per schema requirement
+        def _strip_loc(obj):
+            if isinstance(obj, list):
+                return [{k: v for k, v in i.items() if k != "locName"}
+                        for i in obj if isinstance(i, dict)]
+            if isinstance(obj, dict):
+                return {key: {k: v for k, v in val.items() if k != "locName"}
+                        if isinstance(val, dict) else val
+                        for key, val in obj.items()}
+            return obj
+
+        clean_items = {
+            "purchases": _strip_loc(items.get("purchases", [])),
+            "sales":     _strip_loc(items.get("sales",     [])),
+        }
+
+        is_test = self._is_test()
+        msg: dict = {
+            "timestamp": timestamp,
+            "event":     "FCMaterials",
+            "MarketID":  int(market_id),
+            "CarrierID": str(carrier_id),
+            "Items":     clean_items,
+        }
+        self._add_horizons_odyssey(msg)
+        self._post(_schema("fcmaterials_capi", 1, is_test), msg)
+

@@ -588,6 +588,15 @@ class MonitorState:
         self.ship_shields           = True
         self.ship_shields_recharging = False
 
+        # ── Vehicle / on-foot state ────────────────────────────────────────
+        # vessel_mode: "ship" | "srv" | "on_foot"
+        self.vessel_mode:     str  = "ship"
+        self.srv_type:        str  = ""     # e.g. "SRV Scarab"
+        self.srv_hull:        int  = 100
+        self.suit_name:       str  = ""     # e.g. "Artemis Suit"
+        self.suit_loadout:    str  = ""     # e.g. "XBIO"
+        self.suit_shields:    bool = True   # from ShieldState when on foot
+
         # Commander in SLF
         self.cmdr_in_slf = False
 
@@ -631,6 +640,13 @@ class MonitorState:
         self.assets_stored_modules:list        = []
         self.assets_carrier:       dict | None = None
         self.assets_fc_materials:  list        = []
+
+        # ── At-risk holdings (lost on ship destruction) ────────────────────
+        self.holdings_bounties:    int         = 0   # unredeemed bounty vouchers
+        self.holdings_bonds:       int         = 0   # unredeemed combat bonds
+        self.holdings_trade:       int         = 0   # unredeemed trade vouchers
+        self.holdings_cartography: int         = 0   # unsold exploration data (est.)
+        self.holdings_exobiology:  int         = 0   # unsold exobio samples (est.)
 
         # Cargo
         self.cargo_capacity:       int         = 0

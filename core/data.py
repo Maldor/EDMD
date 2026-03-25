@@ -976,6 +976,24 @@ class CAPISource:
         if mean_prices:
             state.cargo_mean_prices = mean_prices
 
+        # ── Fleet Carrier bartender (fcmaterials_capi/1) ─────────────────────
+        # CAPI /market for a fleet carrier includes orders.onfootmicroresources
+        # for the bartender service. Push to EDDN if present.
+        orders = data.get("orders") or {}
+        micro  = orders.get("onfootmicroresources")
+        if micro is not None:
+            import time as _time
+            market_id  = data.get("id", 0)
+            carrier_id = data.get("name", "")   # callsign is CAPI "name" field
+            ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            try:
+                self._dp._plugin_call(
+                    "eddn", "push_fcmaterials_capi",
+                    int(market_id), str(carrier_id), micro, ts,
+                )
+            except Exception:
+                pass
+
     def _extract_shipyard(self, data: dict, state) -> None:
         ships_raw  = data.get("ships") or {}
         ships_list = []

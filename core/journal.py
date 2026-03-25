@@ -147,6 +147,44 @@ def trace(message: str, trace_mode: bool = False) -> None:
 
 # ── Bootstrap functions ───────────────────────────────────────────────────────
 
+def bootstrap_fighter_bay(state: MonitorState, journal_dir: Path) -> None:
+    """Scan the most recent Loadout event to set has_fighter_bay and slf_stock_total.
+
+    Must run before bootstrap_slf and bootstrap_crew, which both guard on
+    state.has_fighter_bay being True.
+    """
+    import re as _re
+    _FIGHTERBAY_CAPACITY = {"3": 1, "5": 4, "6": 6, "7": 9, "8": 12}
+    journals = sorted(journal_dir.glob("Journal*.log"), reverse=True)
+    for jpath in journals:
+        try:
+            lines = jpath.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            try:
+                je = json.loads(line)
+            except ValueError:
+                continue
+            ev = je.get("event")
+            if ev == "Loadout":
+                slf_found = False
+                slf_cap   = 0
+                for mod in je.get("Modules", []):
+                    item = mod.get("Item", "").lower()
+                    if "fighterbay" in item:
+                        slf_found = True
+                        m = _re.search(r"fighterbay_size(\d+)", item)
+                        if m:
+                            slf_cap = max(slf_cap, _FIGHTERBAY_CAPACITY.get(m.group(1), 1))
+                state.has_fighter_bay = slf_found
+                if slf_found:
+                    state.slf_stock_total = slf_cap or 1
+                return   # found the most recent Loadout — done
+            elif ev == "LoadGame":
+                return   # don't go further back than the current session start
+
+
 def bootstrap_slf(state: MonitorState, journal_dir: Path, trace_mode: bool = False) -> None:
     """Recover SLF type and deployed/docked state from journal history."""
     if not state.has_fighter_bay:
@@ -1147,6 +1185,7 @@ def monitor_journal(
     trace_mode: bool = False,
     plugin_dispatch: dict | None = None,
     data_provider=None,
+    core=None,
 ) -> Path | None:
     """Preload a journal then tail it live. Returns path of new journal if one appears."""
 
@@ -1324,14 +1363,18 @@ def monitor_journal(
 
                 # ── Periodic summary ──────────────────────────────────────
                 SUMMARY_INTERVAL = 15 * 60
+                _providers    = getattr(core, "session_providers", [])
+                _sess_plugin  = (core._plugins.get("session_stats")
+                                 if core and hasattr(core, "_plugins") else None)
+                _has_activity = any(p.has_activity() for p in _providers)
                 if (
                     state.session_start_time
-                    and active_session.kills > 0
+                    and _has_activity
                     and state.last_periodic_summary is not None
                     and now_mono - state.last_periodic_summary >= SUMMARY_INTERVAL
                 ):
                     state.last_periodic_summary = now_mono
-                    emit_summary(emitter, state, active_session)
+                    emit_summary(emitter, state, _providers, _sess_plugin)
 
                 # ── Inactivity alert ──────────────────────────────────────
                 warn_no_kills = cfg_mgr.app_settings.get("WarnNoKills", 20)
@@ -1415,6 +1458,7 @@ def run_monitor(
     trace_mode: bool = False,
     plugin_dispatch: dict | None = None,
     data_provider=None,
+    core=None,
 ) -> None:
     """Outer loop: run monitor_journal, switching files when a new one appears."""
     try:
@@ -1427,6 +1471,7 @@ def run_monitor(
                 journal_file_ref, _edmd_start_mono, trace_mode,
                 plugin_dispatch=plugin_dispatch,
                 data_provider=data_provider,
+                core=core,
             )
             if next_journal:
                 current = next_journal

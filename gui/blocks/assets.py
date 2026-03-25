@@ -31,10 +31,10 @@ from gui.block_base import BlockWidget
 
 
 _TABS = [
-    ("wallet",  "Wallet"),
-    ("ships",   "Ships"),
-    ("modules", "Modules"),
-    ("carrier", "Carrier"),
+    ("wallet",   "Wallet"),
+    ("ships",    "Ships"),
+    ("modules",  "Modules"),
+    ("carrier",  "Fleet Carrier"),
 ]
 
 
@@ -381,6 +381,7 @@ class AssetsBlock(BlockWidget):
         page.append(stack)
         self._tab_stack = stack
 
+        self._tab_labels: dict[str, Gtk.Label] = {}
         for cat, label in _TABS:
             btn = Gtk.Button()
             btn.add_css_class("mat-tab-btn")
@@ -392,6 +393,7 @@ class AssetsBlock(BlockWidget):
             btn.set_child(lbl)
             btn.connect("clicked", self._on_tab_click, cat)
             self._tab_btns[cat] = btn
+            self._tab_labels[cat] = lbl
 
             if cat == "wallet":
                 tab_page = self._build_wallet_tab()
@@ -411,53 +413,201 @@ class AssetsBlock(BlockWidget):
         self._layout_stack.add_named(page, "tabbed")
 
     def _build_wallet_tab(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_margin_top(6)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_margin_top(4)
         box.set_margin_start(6)
         box.set_margin_end(6)
+        box.set_margin_bottom(6)
+        scroll.set_child(box)
 
-        bal_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        bal_key = self.make_label("Credits", css_class="data-key")
-        self._balance_lbl = self.make_label("—", css_class="data-value")
-        self._balance_lbl.set_hexpand(True)
-        self._balance_lbl.set_xalign(1.0)
-        bal_row.append(bal_key)
-        bal_row.append(self._balance_lbl)
-        box.append(bal_row)
+        def _row(key: str, label: str, dim: bool = False) -> Gtk.Label:
+            """Append a key/value row; return the value label."""
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            k = Gtk.Label(label=label)
+            k.add_css_class("data-key")
+            k.set_xalign(0.0)
+            k.set_hexpand(True)
+            v = Gtk.Label(label="—")
+            v.add_css_class("fg-dim" if dim else "data-value")
+            v.set_xalign(1.0)
+            row.append(k)
+            row.append(v)
+            box.append(row)
+            self._wallet_rows[key] = v
+            return v
 
-        # Net Worth (Statistics.Bank_Account.Current_Wealth — liquid + ships + modules + carrier)
-        nw_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        nw_key = self.make_label("Net Worth", css_class="data-key")
-        self._net_worth_lbl = self.make_label("—", css_class="data-value")
-        self._net_worth_lbl.set_hexpand(True)
-        self._net_worth_lbl.set_xalign(1.0)
-        nw_row.append(nw_key)
-        nw_row.append(self._net_worth_lbl)
-        self._net_worth_row = nw_row
-        nw_row.set_visible(False)   # hidden until Statistics event fires
-        box.append(nw_row)
+        def _section(title: str) -> None:
+            hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            hbox.set_margin_top(8)
+            hbox.set_margin_bottom(2)
+            lbl = Gtk.Label(label=title)
+            lbl.add_css_class("section-header")
+            lbl.set_xalign(0.0)
+            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            sep.set_hexpand(True)
+            sep.set_valign(Gtk.Align.CENTER)
+            hbox.append(lbl)
+            hbox.append(sep)
+            box.append(hbox)
 
+        self._wallet_rows: dict[str, Gtk.Label] = {}
+
+        # ── Currencies ────────────────────────────────────────────────────
+        _section("Currencies")
+        _row("credits", "Credits")
+
+        # ── Fleet ─────────────────────────────────────────────────────────
+        _section("Fleet")
+        _row("ships_value",   "Ships")
+        _row("modules_value", "Modules")
+
+        # ── Carrier ───────────────────────────────────────────────────────
+        _section("Fleet Carrier")
+        _row("carrier_hull",    "Hull")                # fixed 150M decommission return
+        _row("carrier_cargo",   "Cargo")               # galactic avg of FC cargo
+        _row("carrier_fredits", "Fredits", dim=True)   # stub — future currency
+
+        # ── Assets At Risk ─────────────────────────────────────────────────
+        _section("Assets At Risk")
+        _row("risk_bounties", "Bounties")
+        _row("risk_bonds",    "Combat bonds")
+        _row("risk_trade",    "Trade vouchers")
+        _row("risk_carto",    "Cartography (est.)")
+        _row("risk_exobio",   "Exobiology (est.)")
+
+        # ── Net Worth ─────────────────────────────────────────────────────
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        nw_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        nw_row.set_margin_top(4)
+        k = Gtk.Label(label="Net Worth")
+        k.add_css_class("section-header")
+        k.set_xalign(0.0)
+        k.set_hexpand(True)
+        v = Gtk.Label(label="—")
+        v.add_css_class("data-value")
+        v.set_xalign(1.0)
+        nw_row.append(k)
+        nw_row.append(v)
+        box.append(nw_row)
+        self._wallet_rows["net_worth"] = v
 
-        sc_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        sc_key = self.make_label("Ships owned", css_class="data-key")
-        self._ship_count_lbl = self.make_label("—", css_class="data-value")
-        self._ship_count_lbl.set_hexpand(True)
-        self._ship_count_lbl.set_xalign(1.0)
-        sc_row.append(sc_key)
-        sc_row.append(self._ship_count_lbl)
-        box.append(sc_row)
+        # Initially hide Fredits and carrier hull (no data yet)
+        self._wallet_rows["carrier_hull"].get_parent().set_visible(False)
+        self._wallet_rows["carrier_fredits"].get_parent().set_visible(False)
 
-        sm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        sm_key = self.make_label("Stored modules", css_class="data-key")
-        self._mod_count_lbl = self.make_label("—", css_class="data-value")
-        self._mod_count_lbl.set_hexpand(True)
-        self._mod_count_lbl.set_xalign(1.0)
-        sm_row.append(sm_key)
-        sm_row.append(self._mod_count_lbl)
-        box.append(sm_row)
-        return box
+        return scroll
 
+    def _refresh_wallet(self, state) -> None:
+        """Populate all wallet tab rows from current state."""
+        r = self._wallet_rows
+
+        # Credits
+        bal = getattr(state, "assets_balance", None)
+        r["credits"].set_label(_fmt_credits(bal))
+
+        # Ships value — sum hull+loadout value of all known ships
+        current_ship   = getattr(state, "assets_current_ship",   None)
+        stored_ships   = getattr(state, "assets_stored_ships",   [])
+        stored_modules = getattr(state, "assets_stored_modules", [])
+        current_id = (current_ship or {}).get("ship_id")
+        all_stored = [s for s in stored_ships if s.get("ship_id") != current_id]
+        all_ships  = ([current_ship] if current_ship else []) + all_stored
+        ships_val  = sum(s.get("value", 0) for s in all_ships if s)
+        r["ships_value"].set_label(_fmt_credits(ships_val) if ships_val else "—")
+
+        # Modules value
+        mods_val = sum(m.get("value", 0) for m in stored_modules)
+        r["modules_value"].set_label(_fmt_credits(mods_val) if mods_val else "—")
+
+        # Carrier — show balance as a proxy for hull value until we can compute return
+        carrier = getattr(state, "assets_carrier", None)
+        if carrier:
+            # Carrier cargo: sum galactic avg of fc_materials if available
+            fc_mats = getattr(state, "assets_fc_materials", [])
+            carrier_cargo_val = sum(
+                m.get("price", 0) * m.get("qty", 0)
+                for m in fc_mats
+            )
+            r["carrier_cargo"].set_label(
+                _fmt_credits(carrier_cargo_val) if carrier_cargo_val else "—"
+            )
+        else:
+            r["carrier_cargo"].set_label("—")
+        if carrier:
+            ctype = carrier.get("carrier_type", "FleetCarrier")
+            decom = 24_850_000_000 if "Squadron" in ctype else 4_850_000_000
+            r["carrier_hull"].set_label(_fmt_credits(decom))
+        r["carrier_hull"].get_parent().set_visible(carrier is not None)
+
+        # At Risk
+        bounties = getattr(state, "holdings_bounties",    0)
+        bonds    = getattr(state, "holdings_bonds",       0)
+        trade    = getattr(state, "holdings_trade",       0)
+        carto    = getattr(state, "holdings_cartography", 0)
+        exobio   = getattr(state, "holdings_exobiology",  0)
+
+        def _risk(key: str, val: int) -> None:
+            lbl = r[key]
+            lbl.set_label(_fmt_credits(val) if val else "—")
+            lbl.get_parent().set_visible(True)
+
+        _risk("risk_bounties", bounties)
+        _risk("risk_bonds",    bonds)
+        _risk("risk_trade",    trade)
+        _risk("risk_carto",    carto)
+        _risk("risk_exobio",   exobio)
+
+        # Net Worth
+        # Start with Frontier's Statistics-sourced total wealth (credits+ships+modules+carrier)
+        # and add what it misses: cargo hold value, carrier cargo, at-risk holdings.
+        # ARX excluded (not tracked) — holds no credits value in-game.
+        total_wealth = getattr(state, "assets_total_wealth", None)
+        cargo_items  = getattr(state, "cargo_items", [])
+        cargo_val    = sum(
+            item.get("sell_price", 0) * item.get("qty", item.get("count", 0))
+            for item in cargo_items
+            if isinstance(item, dict)
+        )
+        risk_total = bounties + bonds + trade + carto + exobio
+        carrier_cargo_val2 = sum(
+            m.get("price", 0) * m.get("qty", 0)
+            for m in getattr(state, "assets_fc_materials", [])
+        )
+
+        if carrier:
+            _ctype = carrier.get("carrier_type", "FleetCarrier")
+            carrier_hull_val = 24_850_000_000 if "Squadron" in _ctype else 4_850_000_000
+        else:
+            carrier_hull_val = 0
+        if total_wealth is not None:
+            nw = int(total_wealth) + cargo_val + carrier_cargo_val2 + risk_total + carrier_hull_val
+            r["net_worth"].set_label(_fmt_credits(nw))
+        else:
+            # Fall back to computed sum
+            nw_parts = [
+                bal or 0, ships_val, mods_val,
+                cargo_val, carrier_cargo_val2, carrier_hull_val, risk_total,
+            ]
+            nw = sum(int(x) for x in nw_parts)
+            r["net_worth"].set_label(_fmt_credits(nw) if nw else "—")
+
+        # Dynamic tab titles
+        n_ships = len(all_ships)
+        n_mods  = len(stored_modules)
+        if hasattr(self, "_tab_labels"):
+            if n_ships:
+                self._tab_labels["ships"].set_label(f"Ships ({n_ships})")
+            else:
+                self._tab_labels["ships"].set_label("Ships")
+            if n_mods:
+                self._tab_labels["modules"].set_label(f"Modules ({n_mods})")
+            else:
+                self._tab_labels["modules"].set_label("Modules")
+
+    # ── Carrier tab helpers ────────────────────────────────────────────────────
     # ── Carrier tab helpers ────────────────────────────────────────────────────
 
     def _carrier_section(self, body: "Gtk.Box", title: str) -> None:
@@ -621,32 +771,16 @@ class AssetsBlock(BlockWidget):
     def refresh(self) -> None:
         state = self.core.state
 
-        bal            = getattr(state, "assets_balance",        None)
-        total_wealth   = getattr(state, "assets_total_wealth",   None)
-        current_ship   = getattr(state, "assets_current_ship",   None)
-        stored_ships   = getattr(state, "assets_stored_ships",   [])
         stored_modules = getattr(state, "assets_stored_modules", [])
 
-        self._balance_lbl.set_label(_fmt_credits(bal))
+        self._refresh_wallet(state)
 
-        if total_wealth is not None:
-            self._net_worth_lbl.set_label(_fmt_credits(total_wealth))
-            self._net_worth_row.set_visible(True)
-        else:
-            self._net_worth_row.set_visible(False)
-
-        # Filter stored ships: remove any entry whose ShipID matches the
-        # current ship (it was stored at some earlier point; it's here now).
+        current_ship   = getattr(state, "assets_current_ship",   None)
+        stored_ships   = getattr(state, "assets_stored_ships",   [])
         current_id = (current_ship or {}).get("ship_id")
         if current_id is not None:
-            stored_ships = [
-                s for s in stored_ships
-                if s.get("ship_id") != current_id
-            ]
-
+            stored_ships = [s for s in stored_ships if s.get("ship_id") != current_id]
         all_ships = ([current_ship] if current_ship else []) + stored_ships
-        self._ship_count_lbl.set_label(str(len(all_ships)) if all_ships else "—")
-        self._mod_count_lbl.set_label(str(len(stored_modules)) if stored_modules else "—")
 
         self._refresh_ships(all_ships)
         # Hide the Modules tab entirely when we have no stored module data.

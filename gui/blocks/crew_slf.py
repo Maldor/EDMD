@@ -115,7 +115,9 @@ class CrewSlfBlock(BlockWidget):
         else:
             rank_str = ""
         self._crew_rank_hdr.set_label(rank_str)
-        self._crew_rank_hdr.set_visible(bool(rank_str))
+        # Keep the rank label visible even when empty — it's the hexpand spacer
+        # that pushes the variant label to the right. Hiding it collapses the space.
+        self._crew_rank_hdr.set_visible(True)
         self._crew_slf_variant_hdr.set_visible(bool(slf_variant))
 
         # ── Hired ─────────────────────────────────────────────────────────────

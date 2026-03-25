@@ -139,7 +139,7 @@ class CrewSlfPlugin(BasePlugin):
                     state.slf_type     = None
                     state.slf_deployed = False
                     state.slf_docked   = False
-                elif state.slf_type is None:
+                elif state.slf_type is None or "(" not in (state.slf_type or ""):
                     # Fighter bay present but type unknown — schedule a
                     # bootstrap scan to recover from RestockVehicle history.
                     import threading as _thr
@@ -184,7 +184,7 @@ class CrewSlfPlugin(BasePlugin):
                 _lo = event.get("Loadout", "")
                 if _ft:
                     state.slf_type = resolve_fighter_name(_ft, _lo)
-                elif state.slf_type is None:
+                elif state.slf_type is None or "(" not in (state.slf_type or ""):
                     import threading as _thr
                     _thr.Thread(
                         target=self._bootstrap_type_from_journals,

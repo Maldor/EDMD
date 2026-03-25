@@ -350,8 +350,9 @@ data_provider.start()   # start CAPI poll thread after plugins loaded
 
 print("\nStarting... (Press Ctrl+C to stop)\n")
 
-from core.journal import bootstrap_slf, bootstrap_crew, bootstrap_missions, bootstrap_burn_rate
+from core.journal import bootstrap_fighter_bay, bootstrap_slf, bootstrap_crew, bootstrap_missions, bootstrap_burn_rate
 
+bootstrap_fighter_bay(state, journal_dir)
 bootstrap_slf(state, journal_dir, trace_mode=trace_mode)
 bootstrap_crew(state, journal_dir, trace_mode=trace_mode)
 bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
@@ -390,7 +391,11 @@ if _update_notice:
 
 load_session_state(journal_file, active_session)
 state.sessionstart(active_session)
-emit_summary(emitter, state, active_session)
+emit_summary(
+    emitter, state,
+    core.session_providers,
+    core._plugins.get("session_stats"),
+)
 
 
 # ── Monitor + launch ──────────────────────────────────────────────────────────
@@ -409,6 +414,7 @@ def run_monitor() -> None:
         trace_mode=trace_mode,
         plugin_dispatch=plugin_dispatch,
         data_provider=data_provider,
+        core=core,
     )
 
 

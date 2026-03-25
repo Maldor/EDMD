@@ -196,6 +196,24 @@ class SessionStatsBlock(BlockWidget):
         gq = self.core.gui_queue
         if gq: gq.put(("stats_update", None))
 
+    def _append_section_header(self, box: Gtk.Box, title: str) -> None:
+        """Render a section header: 'Title ──────────────────' filling the row."""
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hbox.set_margin_top(6)
+        hbox.set_margin_bottom(2)
+
+        lbl = Gtk.Label(label=title)
+        lbl.add_css_class("section-header")
+        lbl.set_xalign(0.0)
+        hbox.append(lbl)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_hexpand(True)
+        sep.set_valign(Gtk.Align.CENTER)
+        hbox.append(sep)
+
+        box.append(hbox)
+
     def refresh(self) -> None:
         core      = self.core
         providers = getattr(core, "session_providers", [])
@@ -204,21 +222,26 @@ class SessionStatsBlock(BlockWidget):
         # --- Summary tab ---
         summary_box = self._clear_tab(self._TAB_SUMMARY)
 
-        # Build all summary rows together so Duration shares the same Grid
-        # as provider rows — guaranteeing label and value column alignment.
+        # Duration row at top, ungrouped
         dur_s = plugin.session_duration_seconds() if plugin else 0.0
-        all_summary: list[dict] = [
+        self._append_rows(summary_box, [
             {"label": "Duration",
              "value": self.fmt_duration(dur_s) if dur_s > 0 else "—",
              "rate": None},
-        ]
-        for p in providers:
-            if p.has_activity():
-                rows = p.get_summary_rows()
-                if rows:
-                    all_summary.extend(rows)
+        ])
 
-        self._append_rows(summary_box, all_summary)
+        # Provider sections sorted alphabetically by tab title
+        active_providers = sorted(
+            [p for p in providers if p.has_activity()],
+            key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", ""),
+        )
+        for p in active_providers:
+            rows = p.get_summary_rows()
+            if not rows:
+                continue
+            title = getattr(p, "ACTIVITY_TAB_TITLE", "Activity")
+            self._append_section_header(summary_box, title)
+            self._append_rows(summary_box, rows)
 
         # --- Activity tabs ---
         active_tab_titles = {self._TAB_SUMMARY}

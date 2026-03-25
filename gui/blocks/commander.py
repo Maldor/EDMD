@@ -362,16 +362,34 @@ class CommanderBlock(BlockWidget):
                 lbl = f"CMDR {s.pilot_name}  —  {sq_rank.upper()}"
             elif s.cmdr_in_slf:
                 lbl = f"CMDR {s.pilot_name}  [IN FIGHTER]"
+            elif getattr(s, "vessel_mode", "ship") == "on_foot":
+                lbl = f"CMDR {s.pilot_name}  [ON FOOT]"
+            elif getattr(s, "vessel_mode", "ship") == "srv":
+                lbl = f"CMDR {s.pilot_name}  [IN SRV]"
             else:
                 lbl = f"CMDR {s.pilot_name}"
             self._cmdr_header_lbl.set_label(lbl)
         else:
             self._cmdr_header_lbl.set_label("COMMANDER")
-        self._cmdr_ship_type_hdr.set_label((s.pilot_ship or "").upper())
+        # Right side of header line 1 and line 2 depend on vehicle mode
+        vessel_mode  = getattr(s, "vessel_mode",  "ship")
+        srv_type     = getattr(s, "srv_type",     "")
+        suit_name    = getattr(s, "suit_name",    "")
+        suit_loadout = getattr(s, "suit_loadout", "")
 
-        parts = [p for p in [s.ship_name, s.ship_ident] if p]
-        if parts:
-            self._cmdr_ship_ident_hdr.set_label(" | ".join(parts))
+        if vessel_mode == "on_foot":
+            self._cmdr_ship_type_hdr.set_label(suit_name.upper() if suit_name else "ON FOOT")
+            ident_str = suit_loadout.upper() if suit_loadout else ""
+        elif vessel_mode == "srv":
+            self._cmdr_ship_type_hdr.set_label(srv_type.upper() if srv_type else "SRV")
+            ident_str = ""
+        else:
+            self._cmdr_ship_type_hdr.set_label((s.pilot_ship or "").upper())
+            parts = [p for p in [s.ship_name, s.ship_ident] if p]
+            ident_str = " | ".join(parts)
+
+        if ident_str:
+            self._cmdr_ship_ident_hdr.set_label(ident_str)
             self._cmdr_ship_ident_hdr.set_visible(True)
         else:
             self._cmdr_ship_ident_hdr.set_visible(False)
@@ -469,27 +487,51 @@ class CommanderBlock(BlockWidget):
             self._pp_rank_bar.set_fraction(0.0)
             self._pp_rank_bar.set_visible(False)
 
-        # ── Info tab: Shields ─────────────────────────────────────────────────
-        shield_str = fmt_shield(s.ship_shields, s.ship_shields_recharging)
-        self._cmdr_shields.set_label(shield_str)
+        # ── Info tab: Shields / Hull — context-aware ─────────────────────────
+        vm = getattr(s, "vessel_mode", "ship")
+
+        # Update Shields label
         for cls in ("health-good", "health-warn", "health-crit"):
             self._cmdr_shields.remove_css_class(cls)
-        if s.ship_shields is None:
-            pass  # leave unstyled
-        elif not s.ship_shields:
-            self._cmdr_shields.add_css_class(
-                "health-warn" if s.ship_shields_recharging else "health-crit"
-            )
+        if vm == "on_foot":
+            suit_up = getattr(s, "suit_shields", True)
+            self._cmdr_shields.set_label("Up" if suit_up else "Down")
+            self._cmdr_shields.add_css_class("health-good" if suit_up else "health-crit")
+        elif vm == "srv":
+            # SRVs have no shields
+            self._cmdr_shields.set_label("—")
         else:
-            self._cmdr_shields.add_css_class("health-good")
+            shield_str = fmt_shield(s.ship_shields, s.ship_shields_recharging)
+            self._cmdr_shields.set_label(shield_str)
+            if s.ship_shields is None:
+                pass
+            elif not s.ship_shields:
+                self._cmdr_shields.add_css_class(
+                    "health-warn" if s.ship_shields_recharging else "health-crit"
+                )
+            else:
+                self._cmdr_shields.add_css_class("health-good")
 
-        # ── Info tab: Hull ────────────────────────────────────────────────────
-        hull_pct = s.ship_hull
-        self._cmdr_hull.set_label(f"{hull_pct}%" if hull_pct is not None else "—")
+        # Update Hull label — show SRV hull when in SRV, hide when on foot
         for cls in ("health-good", "health-warn", "health-crit"):
             self._cmdr_hull.remove_css_class(cls)
-        if hull_pct is not None:
+        if vm == "on_foot":
+            # On-foot health not available from journal alone
+            self._cmdr_hull.set_label("—")
+        elif vm == "srv":
+            hull_pct = getattr(s, "srv_hull", 100)
+            self._cmdr_hull.set_label(f"{hull_pct}%")
             self._cmdr_hull.add_css_class(hull_css(hull_pct))
+        else:
+            hull_pct = s.ship_hull
+            self._cmdr_hull.set_label(f"{hull_pct}%" if hull_pct is not None else "—")
+            if hull_pct is not None:
+                self._cmdr_hull.add_css_class(hull_css(hull_pct))
+
+        # Update hull row label text to match context
+        hull_row_key = self._cmdr_hull.get_parent().get_first_child()
+        if hull_row_key:
+            hull_row_key.set_label("Health" if vm == "on_foot" else "Hull")
 
         # ── Ranks tab ─────────────────────────────────────────────────────────
         capi_ranks    = getattr(s, "capi_ranks",    None)

@@ -367,6 +367,8 @@ class EdmdWindow(Gtk.ApplicationWindow):
                     self._refresh_block("missions")
                 elif msg_type == "stats_update":
                     self._refresh_block("session_stats")
+                elif msg_type == "holdings_update":
+                    self._refresh_block("assets")
                 elif msg_type == "alerts_update":
                     self._refresh_block("alerts")
                 elif msg_type == "capi_updated":

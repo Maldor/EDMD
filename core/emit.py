@@ -290,59 +290,44 @@ class Emitter:
 
 # ── Session summary ───────────────────────────────────────────────────────────
 
-def emit_summary(emitter: Emitter, state, active_session) -> None:
-    """Print a session summary to terminal and Discord.
-    No-ops if no kills have been recorded.
+def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> None:
+    """Print a 15-minute session summary matching the GUI Summary tab exactly.
+
+    providers      — core.session_providers list (ActivityProviderMixin instances)
+    session_plugin — the session_stats plugin (for session_duration_seconds())
     """
-    if active_session.kills == 0:
-        return
+    active = [p for p in providers if p.has_activity()]
+    dur_s  = session_plugin.session_duration_seconds() if session_plugin else 0.0
 
-    logtime  = state.event_time
-    duration = (
-        (logtime - state.session_start_time).total_seconds()
-        if logtime and state.session_start_time
-        else 0
-    )
+    if not active and dur_s < 60:
+        return   # nothing worth reporting
 
-    kph  = rate_per_hour(duration / active_session.kills if active_session.kills else 0, 1)
-    bph  = rate_per_hour(
-        duration / active_session.credit_total if active_session.credit_total else 0, 2
-    )
-    mph  = rate_per_hour(
-        duration / active_session.merits if active_session.merits else 0, 1
-    )
+    logtime      = state.event_time
+    duration_str = fmt_duration(dur_s)
 
-    duration_fmt = fmt_duration(duration)
+    lines = [f"Session Summary — {duration_str}"]
 
-    avg_interval = ""
-    if active_session.kills > 1 and active_session.kill_interval_total > 0:
-        avg_secs     = active_session.kill_interval_total / (active_session.kills - 1)
-        avg_interval = f" | avg {fmt_duration(avg_secs)}/kill"
+    for p in sorted(active, key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "")):
+        rows = p.get_summary_rows()
+        if not rows:
+            continue
+        title = getattr(p, "ACTIVITY_TAB_TITLE", "Activity")
+        lines.append(f"  {title}")
+        for r in rows:
+            label = r.get("label", "")
+            value = r.get("value", "")
+            rate  = r.get("rate")
+            if not value and not rate:
+                continue  # section sub-header rows — skip in text form
+            if rate:
+                lines.append(f"    {label}: {value}  |  {rate}")
+            else:
+                lines.append(f"    {label}: {value}")
 
-    sep = " | "
+    if len(lines) == 1:
+        return   # only the header line — nothing to send
 
-    summary_text = (
-        f"Session Summary:\n"
-        f"- Duration: {duration_fmt}\n"
-        f"- Kills:    {active_session.kills:,}{sep}{kph:,} /hr{avg_interval}\n"
-        f"- Bounties: {fmt_credits(active_session.credit_total)}{sep}"
-        f"{fmt_credits(bph)} /hr\n"
-    )
-
-    if state.stack_value > 0:
-        done      = state.missions_complete
-        total     = len(state.active_missions)
-        remaining = total - done
-        complete_str = (
-            "all complete — turn in!"
-            if remaining == 0
-            else f"{done}/{total} complete, {remaining} remaining"
-        )
-        summary_text += (
-            f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
-        )
-
-    summary_text += f"- Merits:   {active_session.merits:,}{sep}{int(mph):,} /hr"
+    summary_text = "\n".join(lines)
 
     emitter.emit(
         msg_term=summary_text,
@@ -352,3 +337,4 @@ def emit_summary(emitter: Emitter, state, active_session) -> None:
         timestamp=logtime,
         loglevel=2,
     )
+

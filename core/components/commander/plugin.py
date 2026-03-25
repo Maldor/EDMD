@@ -47,10 +47,15 @@ class CommanderPlugin(BasePlugin):
         "NavRoute",
         "EngineerProgress",
         "ReservoirReplenished",   # fuel level updates
-        "HullDamage",             # player ship hull integrity updates
+        "HullDamage",             # player ship/SRV hull integrity updates
         "RepairAll",              # ship repaired — hull to 100%
         "RepairPartial",          # station repair — hull to 100%
-        "ShieldState",            # shield up/down for display
+        "ShieldState",            # shield up/down — ship or suit
+        "LaunchSRV",              # player entered SRV
+        "DockSRV",                # player returned to ship from SRV
+        "Disembark",              # player went on foot
+        "Embark",                 # player entered SRV or ship from on foot
+        "SuitLoadout",            # suit and loadout name when on foot
     ]
 
     # GUI grid defaults
@@ -147,6 +152,12 @@ class CommanderPlugin(BasePlugin):
                             pass
                 state.last_shutdown_time = None
                 if event.get("ShipName"):  state.ship_name  = event["ShipName"]
+                state.vessel_mode  = "ship"
+                state.srv_type     = ""
+                state.srv_hull     = 100
+                state.suit_name    = ""
+                state.suit_loadout = ""
+                state.suit_shields = True
                 if event.get("ShipIdent"): state.ship_ident = event["ShipIdent"]
                 if "GameMode" in event:
                     state.pilot_mode = (
@@ -202,20 +213,55 @@ class CommanderPlugin(BasePlugin):
                 if gq: gq.put(("vessel_update", None))
 
             case "ShieldState":
-                if event.get("ShieldsUp"):
-                    state.ship_shields            = True
-                    state.ship_shields_recharging = False
+                shields_up = bool(event.get("ShieldsUp"))
+                if state.vessel_mode == "on_foot":
+                    state.suit_shields = shields_up
                 else:
-                    state.ship_shields            = False
-                    state.ship_shields_recharging = True
+                    state.ship_shields            = shields_up
+                    state.ship_shields_recharging = not shields_up
                 if gq: gq.put(("vessel_update", None))
 
             case "HullDamage" if event.get("PlayerPilot") and not event.get("Fighter"):
-                state.ship_hull = round(event["Health"] * 100)
+                if state.vessel_mode == "srv":
+                    state.srv_hull = round(event["Health"] * 100)
+                else:
+                    state.ship_hull = round(event["Health"] * 100)
                 if gq: gq.put(("vessel_update", None))
 
             case "RepairAll" | "RepairPartial":
                 state.ship_hull = 100
+                if gq: gq.put(("vessel_update", None))
+
+            case "LaunchSRV":
+                state.vessel_mode = "srv"
+                state.srv_type    = event.get("SRVType_Localised") or event.get("SRVType", "SRV")
+                state.srv_hull    = 100
+                if gq: gq.put(("vessel_update", None))
+
+            case "DockSRV":
+                state.vessel_mode = "ship"
+                state.srv_type    = ""
+                state.srv_hull    = 100
+                if gq: gq.put(("vessel_update", None))
+
+            case "Disembark":
+                if not event.get("Taxi"):
+                    state.vessel_mode  = "on_foot"
+                    state.suit_shields = True
+                    if gq: gq.put(("vessel_update", None))
+
+            case "Embark":
+                if event.get("SRV"):
+                    state.vessel_mode = "srv"
+                elif not event.get("Taxi"):
+                    state.vessel_mode  = "ship"
+                    state.suit_name    = ""
+                    state.suit_loadout = ""
+                if gq: gq.put(("vessel_update", None))
+
+            case "SuitLoadout":
+                state.suit_name    = event.get("SuitName_Localised") or event.get("SuitName", "")
+                state.suit_loadout = event.get("LoadoutName", "")
                 if gq: gq.put(("vessel_update", None))
 
             case "VehicleSwitch":

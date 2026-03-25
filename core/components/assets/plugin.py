@@ -591,6 +591,7 @@ class AssetsPlugin(BasePlugin):
                 "micro_free":   int(cap.get("microresourceCapacityFree", 0)),
                 "micro_used":   int(cap.get("microresourceCapacityUsed", 0)),
                 "services":     services,
+                "carrier_type": "FleetCarrier",  # CAPI does not expose type; assume FC
             }
         except Exception:
             return None
@@ -1128,6 +1129,8 @@ class AssetsPlugin(BasePlugin):
             "micro_used":    space.get("MicroresourceCapacityUsed",  0),
             # Services
             "services":      services,
+            # Carrier type — determines decommission value
+            "carrier_type":  event.get("CarrierType", "FleetCarrier"),
         }
 
     def _save_to_storage(self) -> None:
