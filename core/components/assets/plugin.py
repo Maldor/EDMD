@@ -345,8 +345,14 @@ class AssetsPlugin(BasePlugin):
         "Loadout",
         "ModulesInfo",
         "StoredShips",
-        # Modules
+        "ShipyardSwap",
+        # Modules (move between ship and storage)
         "StoredModules",
+        "ModuleRetrieve",
+        "ModuleStore",
+        "ModuleBuy",
+        "ModuleSell",
+        "ModuleSwap",
         # Fleet carrier
         "CarrierStats",
         "CarrierJump",
@@ -1240,7 +1246,7 @@ class AssetsPlugin(BasePlugin):
                     "name":         event.get("ShipName", ""),
                     "ident":        event.get("ShipIdent", ""),
                     "system":       getattr(state, "pilot_system", None) or "—",
-                    "value":        event.get("HullValue", 0),
+                    "value":        event.get("HullValue", 0) + event.get("ModulesValue", 0),
                     "rebuy":        event.get("Rebuy", 0),
                     "hull":         100,
                     "loadout":      _loadout,
@@ -1275,6 +1281,11 @@ class AssetsPlugin(BasePlugin):
             case "StoredModules":
                 state.assets_stored_modules = self._parse_stored_modules(event)
                 self._save_to_storage()
+                if gq: gq.put(("plugin_refresh", "assets"))
+
+            case "ShipyardSwap" | "ModuleRetrieve" | "ModuleStore" | "ModuleBuy" | "ModuleSell" | "ModuleSwap":
+                # No direct state change — StoredModules / Loadout follow immediately.
+                # Refresh the tab titles so Ships(N) / Modules(N) counts stay current.
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "CarrierStats":

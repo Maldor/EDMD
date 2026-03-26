@@ -78,14 +78,16 @@ def _poll_status_json(
     Status.json is rewritten by the game every ~500ms.  We read it on the
     same cadence.  Fields consumed:
 
-      Flags  (int) — bit 0x08: ShieldsUp, bit 0x2000000: InFighter
+      Flags   (int)   — bit 0x08: ShieldsUp, bit 0x2000000: InFighter
+      Balance (int)   — live credit balance; updates immediately on spend
 
     Status.json does NOT expose hull integrity (Health).  Hull is tracked
     exclusively from HullDamage journal events and repair journal events.
     """
-    status_path = journal_dir / "Status.json"
-    last_flags  = None
-    last_fuel   = None
+    status_path  = journal_dir / "Status.json"
+    last_flags   = None
+    last_fuel    = None
+    last_balance = None
 
     while True:
         try:
@@ -122,9 +124,17 @@ def _poll_status_json(
                         state.fuel_current = float(fuel_main)
                         changed = True
 
+                    # ── Credit balance (live spend tracking) ──────────
+                    balance = data.get("Balance")
+                    if balance is not None and balance != last_balance:
+                        last_balance = balance
+                        state.assets_balance = float(balance)
+                        changed = True
+
                     if changed and gui_queue:
                         gui_queue.put(("vessel_update", None))
                         gui_queue.put(("slf_update",    None))
+                        gui_queue.put(("plugin_refresh", "assets"))
         except Exception:
             pass
         time.sleep(_STATUS_JSON_POLL_INTERVAL)
@@ -239,6 +249,11 @@ def bootstrap_slf(state: MonitorState, journal_dir: Path, trace_mode: bool = Fal
                 if not slf_type_known and ev == "RestockVehicle":
                     ft  = je.get("Type", "")
                     lo  = je.get("Loadout", "")
+                    # Skip restocks without a Loadout — Frontier omits it
+                    # when only one variant is stocked; keep scanning for
+                    # one with a specific variant to get the full name.
+                    if not lo:
+                        continue
                     state.slf_type = resolve_fighter_name(ft, lo)
                     trace(f"SLF bootstrap: type={state.slf_type!r} from RestockVehicle in {jpath.name}", trace_mode)
                     slf_type_known = True

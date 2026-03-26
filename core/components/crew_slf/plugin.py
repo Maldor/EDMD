@@ -87,6 +87,11 @@ class CrewSlfPlugin(BasePlugin):
                         lo = ev.get("Loadout", "")
                         if not ft:
                             continue
+                        # Skip restocks with no Loadout — Frontier omits it when
+                        # only one variant is stocked, making the resolved name
+                        # ambiguous. Keep scanning for one with a Loadout field.
+                        if not lo:
+                            continue
                         # Only use if this restock happened on the current ship
                         if current_sid is None or active_sid == current_sid:
                             self.core.state.slf_known_ft = ft

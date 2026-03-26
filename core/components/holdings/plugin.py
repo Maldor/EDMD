@@ -275,6 +275,96 @@ class HoldingsPlugin(BasePlugin):
         self._seen_bodies = {tuple(b) for b in data.get("seen_bodies", [])}
         self._seen_exobio = set(data.get("seen_exobio", []))
 
+        # First run (no prior holdings.json) — reconstruct voucher balances
+        # from journal history so existing unredeemed vouchers are visible.
+        if not data:
+            self._bootstrap_vouchers()
+
+
+    def _bootstrap_vouchers(self) -> None:
+        """Reconstruct unredeemed voucher balances from journal history.
+
+        Called only on first run (no holdings.json).  Scans all journals from
+        the most recent Died event forward, summing Bounty / FactionKillBond /
+        TradeVoucher events and subtracting RedeemVoucher redemptions.
+        """
+        import json as _j
+        from pathlib import Path as _Path
+
+        jdir = getattr(self.core, "journal_dir", None)
+        if not jdir:
+            return
+
+        journals = sorted(_Path(jdir).glob("Journal*.log"))  # oldest first
+        if not journals:
+            return
+
+        # Find the most recent Died timestamp — only count vouchers earned after
+        last_death_ts = None
+        for jpath in reversed(journals):
+            try:
+                lines = jpath.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in reversed(lines):
+                try:
+                    ev = _j.loads(line)
+                except ValueError:
+                    continue
+                if ev.get("event") == "Died":
+                    last_death_ts = ev.get("timestamp", "")
+                    break
+            if last_death_ts is not None:
+                break
+
+        bounties = 0
+        bonds    = 0
+        trade    = 0
+
+        for jpath in journals:
+            try:
+                lines = jpath.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    ev = _j.loads(line)
+                except ValueError:
+                    continue
+                ts   = ev.get("timestamp", "")
+                name = ev.get("event", "")
+
+                # Skip events before the last death
+                if last_death_ts and ts <= last_death_ts:
+                    continue
+
+                if name == "Bounty":
+                    bounties += ev.get("TotalReward", 0) or ev.get("Reward", 0)
+                elif name == "FactionKillBond":
+                    bonds    += ev.get("Reward", 0)
+                elif name == "TradeVoucher":
+                    trade    += ev.get("Reward", 0)
+                elif name == "RedeemVoucher":
+                    vtype  = ev.get("Type", "")
+                    amount = ev.get("Amount", 0)
+                    pct    = ev.get("BrokerPercentage", 0.0)
+                    face   = round(amount / (1.0 - pct / 100.0)) if pct else amount
+                    if vtype == "bounty":
+                        bounties = max(0, bounties - face)
+                    elif vtype == "CombatBond":
+                        bonds    = max(0, bonds    - face)
+                    elif vtype == "trade":
+                        trade    = max(0, trade    - face)
+                elif name == "Died":
+                    bounties = bonds = trade = 0
+
+        state = self.core.state
+        state.holdings_bounties = bounties
+        state.holdings_bonds    = bonds
+        state.holdings_trade    = trade
+        self._persist()
+        self._notify()
+
     def _persist(self) -> None:
         state = self.core.state
         self.storage.write_json({
