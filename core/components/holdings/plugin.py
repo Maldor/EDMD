@@ -243,10 +243,13 @@ class HoldingsPlugin(BasePlugin):
         super().on_load(core)
         # Per-system cartography: {system_name: estimated_value}
         self._carto: dict[str, int] = {}
-        # Per-sample exobiology: list of {species: key, value: int}
+        # Per-sample exobiology: list of {species: key, value: int, ts: str}
         self._exobio: list[dict] = []
         # Pending DSS: body_id → scan info
         self._pending: dict = {}
+        # Dedup sets — prevent double-counting on journal preload replay
+        self._seen_bodies:  set[tuple] = set()   # (system, body_id)
+        self._seen_exobio:  set[str]   = set()   # event timestamp strings
         # Current system name (from FSDJump/Location via state)
         self._restore()
 
@@ -267,6 +270,11 @@ class HoldingsPlugin(BasePlugin):
         self._exobio = data.get("exobiology", [])
         state.holdings_exobiology = sum(s["value"] for s in self._exobio)
 
+        # Rebuild dedup sets from persisted data so preload cannot re-add
+        # entries that survived from a previous session.
+        self._seen_bodies = {tuple(b) for b in data.get("seen_bodies", [])}
+        self._seen_exobio = set(data.get("seen_exobio", []))
+
     def _persist(self) -> None:
         state = self.core.state
         self.storage.write_json({
@@ -275,6 +283,8 @@ class HoldingsPlugin(BasePlugin):
             "trade":       state.holdings_trade,
             "cartography": self._carto,
             "exobiology":  self._exobio,
+            "seen_bodies": list(self._seen_bodies),
+            "seen_exobio": list(self._seen_exobio),
         })
 
     def _update_carto_state(self) -> None:
@@ -346,12 +356,16 @@ class HoldingsPlugin(BasePlugin):
                 body_id         = event.get("BodyID")
 
                 if planet_class:
+                    body_key = (system, body_id)
+                    if body_id is not None and body_key in self._seen_bodies:
+                        return   # already counted this body
                     mass_em = event.get("MassEM", 1.0) or 1.0
                     val = _scan_value(planet_class, mass_em, terraform_state,
                                       was_discovered, was_mapped,
                                       dss_mapped=False, efficient=False)
                     self._carto[system] = self._carto.get(system, 0) + val
                     if body_id is not None:
+                        self._seen_bodies.add(body_key)
                         self._pending[body_id] = {
                             "system":          system,
                             "planet_class":    planet_class,
@@ -364,11 +378,16 @@ class HoldingsPlugin(BasePlugin):
                     self._update_carto_state(); self._persist(); self._notify()
 
                 elif star_type:
+                    body_key = (system, body_id)
+                    if body_id is not None and body_key in self._seen_bodies:
+                        return   # already counted this star
                     solar_mass = event.get("StellarMass", 1.0) or 1.0
                     star_val   = _star_value(star_type, solar_mass)
                     if not was_discovered:
                         star_val = round(star_val * _FIRST_DISC_SCAN)
                     self._carto[system] = self._carto.get(system, 0) + star_val
+                    if body_id is not None:
+                        self._seen_bodies.add(body_key)
                     self._update_carto_state(); self._persist(); self._notify()
 
             case "SAAScanComplete":
@@ -377,6 +396,8 @@ class HoldingsPlugin(BasePlugin):
                 used      = event.get("ProbesUsed", 99)
                 efficient = (used <= target)
                 pending   = self._pending.get(body_id)
+                # _pending is consumed on first SAAScanComplete — replay
+                # of the same event finds no pending entry and skips.
                 if pending:
                     system   = pending["system"]
                     full_val = _scan_value(
@@ -394,10 +415,13 @@ class HoldingsPlugin(BasePlugin):
                 system = event.get("System", "")
                 if system and system in self._carto:
                     del self._carto[system]
-                    # Clear any pending DSS for this system
                     self._pending = {
                         k: v for k, v in self._pending.items()
                         if v.get("system") != system
+                    }
+                    # Allow re-scanning the same bodies if player returns
+                    self._seen_bodies = {
+                        b for b in self._seen_bodies if b[0] != system
                     }
                     self._update_carto_state(); self._persist(); self._notify()
 
@@ -410,11 +434,14 @@ class HoldingsPlugin(BasePlugin):
                         del self._carto[system]
                         changed = True
                 if changed:
-                    # Clear pending DSS for sold systems
                     sold = {e.get("SystemName","") for e in event.get("Discovered",[])}
                     self._pending = {
                         k: v for k, v in self._pending.items()
                         if v.get("system") not in sold
+                    }
+                    # Allow re-scanning the same bodies if player returns
+                    self._seen_bodies = {
+                        b for b in self._seen_bodies if b[0] not in sold
                     }
                     self._update_carto_state(); self._persist(); self._notify()
 
@@ -423,21 +450,33 @@ class HoldingsPlugin(BasePlugin):
             case "ScanOrganic":
                 if event.get("ScanType") != "Analyse":
                     return
+                # Deduplicate by timestamp — each analysis has a unique timestamp.
+                # Same species from different planets produces different timestamps.
+                ts = event.get("timestamp", "")
+                if ts and ts in self._seen_exobio:
+                    return   # already counted this analysis event
                 species_key    = event.get("Species", "")
                 was_logged     = bool(event.get("WasLogged", True))
                 footfall_bonus = (event.get("WasFootfalled") is False)
                 val = _exobio_value(species_key, was_logged, footfall_bonus)
-                self._exobio.append({"species": species_key, "value": val})
+                self._exobio.append({"species": species_key, "value": val, "ts": ts})
+                if ts:
+                    self._seen_exobio.add(ts)
                 self._update_exobio_state(); self._persist(); self._notify()
 
             case "SellOrganicData":
                 # BioData lists each sold sample with Species and Value.
                 # Match per-sample: for each sold item, remove the first
-                # held entry with that species key.
+                # held entry with that species key and clear its timestamp
+                # from the seen set so a future re-scan of the same species
+                # is counted correctly.
                 for item in event.get("BioData", []):
                     species = item.get("Species", "")
                     for i, held in enumerate(self._exobio):
                         if held.get("species") == species:
+                            ts = held.get("ts", "")
+                            if ts:
+                                self._seen_exobio.discard(ts)
                             self._exobio.pop(i)
                             break
                 self._update_exobio_state(); self._persist(); self._notify()
@@ -451,6 +490,8 @@ class HoldingsPlugin(BasePlugin):
                 self._carto.clear()
                 self._exobio.clear()
                 self._pending.clear()
+                self._seen_bodies.clear()
+                self._seen_exobio.clear()
                 self._update_carto_state()
                 self._update_exobio_state()
                 self._persist(); self._notify()
