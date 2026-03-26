@@ -18,7 +18,7 @@
      *             See https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/font-size
      *             for additional options
      * ------------------------------------------------------------------ */
-    --font-size:       16px
+    --font-size:       16px;
 
     /* ── Backgrounds ──────────────────────────────────────────────────────
      *  bg-deep:   outermost window background
