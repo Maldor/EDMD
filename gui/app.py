@@ -440,17 +440,25 @@ class EdmdApp(Gtk.Application):
         # Switch GTK theme to "Default" (minimal, no Adwaita CSD graphics)
         # before loading our CSS. This removes Adwaita's baked-in button
         # gradients so our window control colours actually take effect.
-        settings = Gtk.Settings.get_default()
-        if settings:
-            settings.set_property("gtk-theme-name", "Default")
-        apply_theme(self._theme)
-        win = EdmdWindow(
-            app=self,
-            core=self._core,
-            program=self._program,
-            version=self._version,
-        )
-        win.present()
+        try:
+            settings = Gtk.Settings.get_default()
+            if settings:
+                settings.set_property("gtk-theme-name", "Default")
+            apply_theme(self._theme)
+            win = EdmdWindow(
+                app=self,
+                core=self._core,
+                program=self._program,
+                version=self._version,
+            )
+            win.present()
+        except Exception:
+            # GLib swallows exceptions raised in do_activate, printing nothing and
+            # leaving the app running with no window. Re-raise after printing so the
+            # traceback is visible on stderr and the process exits cleanly.
+            import traceback, sys
+            traceback.print_exc()
+            sys.exit(1)
 
         signal.signal(signal.SIGINT, lambda *_: self.quit())
         GLib.timeout_add(200, lambda: True)

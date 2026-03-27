@@ -154,10 +154,12 @@ _update_notice: tuple[str, str] | None = None
 def _check_for_update() -> None:
     global _update_notice
     import re as _re
-    import shutil
 
-    # ── 1. Check for a newer tagged release via GitHub API ────────────────────
-    new_release: str | None = None
+    # Check for a newer tagged release via GitHub API.
+    # Compares VERSION against the latest release tag using a (date, suffix) key
+    # so 20260325a < 20260325b < 20260326 all sort correctly.
+    # Commits that land on main after a release do NOT trigger a notice —
+    # users who want nightly builds can run --upgrade themselves.
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         with urlopen(url, timeout=4) as resp:
@@ -168,43 +170,7 @@ def _check_for_update() -> None:
                         m = _re.match(r"^(\d+)([a-z]*)$", v)
                         return (int(m.group(1)), m.group(2)) if m else (0, "")
                     if _vkey(tag) > _vkey(VERSION):
-                        new_release = tag
-    except Exception:
-        pass
-
-    if new_release:
-        _update_notice = ("release", new_release)
-        return  # release notice takes priority; no need to count commits
-
-    # ── 2. Check for new commits on origin/main via git ───────────────────────
-    # Only attempted when: git is on PATH and _HERE is inside a git work tree.
-    if not shutil.which("git"):
-        return
-
-    try:
-        in_tree = _sp.run(
-            ["git", "-C", str(_HERE), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=4,
-        )
-        if in_tree.returncode != 0:
-            return
-
-        # Fetch quietly so the count is current (--dry-run to avoid network
-        # noise; fall back to a real fetch on failure)
-        _sp.run(
-            ["git", "-C", str(_HERE), "fetch", "--quiet", "origin", "main"],
-            capture_output=True, timeout=8,
-        )
-
-        # Count commits on origin/main that are not in HEAD
-        ahead = _sp.run(
-            ["git", "-C", str(_HERE), "rev-list", "--count", "HEAD..origin/main"],
-            capture_output=True, text=True, timeout=4,
-        )
-        if ahead.returncode == 0:
-            n = ahead.stdout.strip()
-            if n.isdigit() and int(n) > 0:
-                _update_notice = ("commits", n)
+                        _update_notice = ("release", tag)
     except Exception:
         pass
 
@@ -358,33 +324,22 @@ bootstrap_crew(state, journal_dir, trace_mode=trace_mode)
 bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
 bootstrap_burn_rate(state, journal_dir, active_session, trace_mode=trace_mode)
 
-
 # ── Update notice ─────────────────────────────────────────────────────────────
 
 _update_thread.join(timeout=2)
 if _update_notice:
-    _kind, _value = _update_notice
+    _kind, _value = _update_notice   # _kind is always "release" now
     _repo_url = f"https://github.com/{GITHUB_REPO}"
-    if _kind == "release":
-        _term_msg = (
-            f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
-            f"  {Terminal.WHITE}{_repo_url}/releases{Terminal.END}\n"
-            f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to update and restart automatically.\n"
-        )
-        _gui_payload = ("release", _value)
-    else:  # "commits"
-        _term_msg = (
-            f"{Terminal.YELL}\u26a0 {_value} new commit(s) available on main{Terminal.END}"
-            f"  {Terminal.WHITE}{_repo_url}/commits/main{Terminal.END}\n"
-            f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to pull and restart automatically.\n"
-        )
-        _gui_payload = ("commits", _value)
-
+    _term_msg = (
+        f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
+        f"  {Terminal.WHITE}{_repo_url}/releases{Terminal.END}\n"
+        f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to update and restart automatically.\n"
+    )
     if not gui_mode:
         print(_term_msg)
     if gui_mode:
-        gui_queue.put(("update_notice", _gui_payload))
-    emitter.set_update_notice(_value if _kind == "release" else f"+{_value} commits")
+        gui_queue.put(("update_notice", ("release", _value)))
+    emitter.set_update_notice(_value)
 
 
 # ── Session restore + startup banner ─────────────────────────────────────────

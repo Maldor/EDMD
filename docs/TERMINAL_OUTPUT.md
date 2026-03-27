@@ -82,20 +82,23 @@ EDMD prints timestamped event lines to the terminal. Each line carries a fixed-w
 
 ## Periodic Summary
 
-Posted every 15 minutes while at least one kill has been recorded — to the terminal/GUI event log and optionally to Discord:
+Posted at :00, :15, :30, and :45 of every hour while at least one activity provider reports data — to the terminal/GUI event log and optionally to Discord:
 
 ```
-Session Summary:
-- Duration: 2:14:33
-- Kills:    67 | 29.9 /hr | avg 0:53/kill
-- Bounties: 5.61M | 2.50M /hr
-- Missions: 386.32M stack (18/20 complete, 2 remaining)
-- Merits:   1072 | 478 /hr
+Session Summary
+Duration:          2:14:33
+  Combat
+    Kills:              67  |  29.9 /hr
+    Bounties:        5.61M  |  2.50M /hr
+  Exploration
+    Distance:       7 jumps  |  175 ly
+    Bodies scanned:     16  |  2.36M
+  Missions
+    Completed:           3  |  397.6k credits
+  PowerPlay
+    Merits:          1,072  |  478 /hr
 ```
 
-The `avg X/kill` interval is included once more than one kill has been recorded.
+Values right-align and the `|` delimiter is column-aligned across all rows. Each section appears only when that activity type has data for the current session. Summaries accumulate across the full session — each one shows the running total, not just the last interval.
 
-<div align="center">
-<img src="../images/terminal_periodic_summary.png" alt="Terminal periodic summary" width="660"/>
-<br><em>Periodic session summary — fires every 15 minutes while active</em>
-</div>
+The summary fires on the first qualifying quarter-hour tick after EDMD starts, then repeats on every subsequent :00/:15/:30/:45 boundary.

@@ -260,16 +260,6 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
         cfg  = core.cfg
         settings = core.app_settings
 
-        # ── Periodic summary ──────────────────────────────────────────────
-        if (
-            self.kills > 0
-            and self.session_start_time is not None
-            and self._last_summary_mono is not None
-            and now - self._last_summary_mono >= SUMMARY_INTERVAL_S
-        ):
-            self._last_summary_mono = now
-            self._emit_summary(state)
-
         # ── Inactivity alert (WarnNoKills) ────────────────────────────────
         notify = core.notify_levels
         warn_no_kills  = settings.get("WarnNoKills",        20)

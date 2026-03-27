@@ -93,19 +93,13 @@ class ActivityMissionsPlugin(BasePlugin, ActivityProviderMixin):
         dur  = self._duration_seconds()
         rows = []
         if self.completed > 0:
-            cr_rate = (f"{fmt_credits(rate_per_hour(dur / self.credits_earned, 2))} /hr"
-                       if dur and self.credits_earned > 0 else "—")
+            cr_rate = (f"{fmt_credits(self.credits_earned)} credits"
+                       if self.credits_earned > 0 else None)
             rows.append({
-                "label": "Missions done",
+                "label": "Completed",
                 "value": str(self.completed),
-                "rate":  None,
+                "rate":  cr_rate,
             })
-            if self.credits_earned > 0:
-                rows.append({
-                    "label": "Mission credits",
-                    "value": fmt_credits(self.credits_earned),
-                    "rate":  cr_rate,
-                })
         if self.failed > 0:
             rows.append({"label": "Failed", "value": str(self.failed), "rate": None})
         return rows

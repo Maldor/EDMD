@@ -576,6 +576,7 @@ def handle_event(
     trace_mode: bool = False,
     plugin_dispatch: dict | None = None,
     data_provider=None,
+    core=None,
 ) -> None:
     try:
         j = json.loads(line)
@@ -603,6 +604,24 @@ def handle_event(
                     f"{Terminal.WARN}Warning:{Terminal.END} "
                     f"Plugin {plugin.PLUGIN_NAME!r} error on {ev_name!r}: {e}"
                 )
+        # Anchor the session clock on LoadGame so ALL activity types (not just
+        # combat) get periodic summaries.  Only set on the first LoadGame seen —
+        # subsequent ones (ship swap back from menu) preserve the existing anchor.
+        if ev_name == "LoadGame" and not state.session_start_time and logtime:
+            state.session_start_time  = logtime
+            state.last_periodic_summary = time.monotonic()
+        # ── Quarter-hour summary — fires at :00, :15, :30, :45 ───────────
+        # Checked on every live event so it fires even when the journal is
+        # written continuously during active play.  Skipped during preload.
+        if not state.in_preload:
+            _qh_slot = (datetime.now().minute // 15) * 15
+            if _qh_slot != getattr(state, "_last_summary_slot", -1):
+                state._last_summary_slot = _qh_slot
+                _providers   = getattr(core, "session_providers", [])
+                _sess_plugin = (core._plugins.get("session_stats")
+                                if core and hasattr(core, "_plugins") else None)
+                if any(p.has_activity() for p in _providers):
+                    emit_summary(emitter, state, _providers, _sess_plugin)
         # Docked/Undocked: notify DataProvider for CAPI dock-gating
         if ev_name in ("Docked", "Location") and data_provider is not None:
             data_provider.notify_docked(True)
@@ -959,6 +978,11 @@ def handle_event(
                     state.pilot_mode = (
                         "Private Group" if j["GameMode"] == "Group" else j["GameMode"]
                     )
+                # Anchor session clock here so ALL activity types trigger summaries,
+                # not just combat.  Only set on first LoadGame of the session.
+                if not state.session_start_time:
+                    state.session_start_time = logtime
+                    state.last_periodic_summary = time.monotonic()
                 if gui_queue: gui_queue.put(("vessel_update", None))
                 cmdrinfo = (
                     f"{state.pilot_ship} / {state.pilot_mode} / "
@@ -1215,6 +1239,7 @@ def monitor_journal(
                 emitter, cfg_mgr, gui_queue, journal_dir, trace_mode,
                 plugin_dispatch=plugin_dispatch,
                 data_provider=data_provider,
+                core=core,
             )
 
         state.in_preload = False
@@ -1235,6 +1260,13 @@ def monitor_journal(
                 state.session_start_time = datetime.fromisoformat(_session_start_iso)
             except ValueError:
                 pass
+
+        # Final fallback: if no LoadGame was in this journal (EDMD launched mid-session
+        # or attached to a journal that started before the game session) and no persisted
+        # session_start_iso, use the last event timestamp so the summary clock has an
+        # anchor.  last_periodic_summary is already set (from edmd.py sessionstart call).
+        if not state.session_start_time and state.event_time:
+            state.session_start_time = state.event_time
 
         print("Preload complete. Monitoring live...\n")
 
@@ -1376,21 +1408,6 @@ def monitor_journal(
                 else:
                     state.offline_since_mono = None
 
-                # ── Periodic summary ──────────────────────────────────────
-                SUMMARY_INTERVAL = 15 * 60
-                _providers    = getattr(core, "session_providers", [])
-                _sess_plugin  = (core._plugins.get("session_stats")
-                                 if core and hasattr(core, "_plugins") else None)
-                _has_activity = any(p.has_activity() for p in _providers)
-                if (
-                    state.session_start_time
-                    and _has_activity
-                    and state.last_periodic_summary is not None
-                    and now_mono - state.last_periodic_summary >= SUMMARY_INTERVAL
-                ):
-                    state.last_periodic_summary = now_mono
-                    emit_summary(emitter, state, _providers, _sess_plugin)
-
                 # ── Inactivity alert ──────────────────────────────────────
                 warn_no_kills = cfg_mgr.app_settings.get("WarnNoKills", 20)
                 warn_initial  = cfg_mgr.app_settings.get("WarnNoKillsInitial", 5)
@@ -1455,6 +1472,7 @@ def monitor_journal(
                 emitter, cfg_mgr, gui_queue, journal_dir, trace_mode,
                 plugin_dispatch=plugin_dispatch,
                 data_provider=data_provider,
+                core=core,
             )
 
     return None

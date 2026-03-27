@@ -178,6 +178,7 @@ class Emitter:
         timestamp=None,
         loglevel: int = 2,
         event=None,
+        force_terminal: bool = False,
     ) -> None:
         state    = self._state
         cfg      = self._cfg
@@ -203,7 +204,7 @@ class Emitter:
         state.logged += 1
 
         # ── Terminal ──────────────────────────────────────────────────────
-        if loglevel > 0 and not self.notify_test and not self.gui_mode:
+        if loglevel > 0 and not self.notify_test and (not self.gui_mode or force_terminal):
             print(f"[{logtime_str}] {term_prefix}{msg_term}")
 
         # ── GUI event log ─────────────────────────────────────────────────
@@ -217,17 +218,10 @@ class Emitter:
             self._discord_update_pending = False
             from core.state import GITHUB_REPO
             repo_url = f"https://github.com/{GITHUB_REPO}"
-            # _update_version is either "1.23" (release) or "+5 commits" (commits)
-            if self._update_version and self._update_version.startswith("+"):
-                content = (
-                    f":arrow_up: **{self._update_version} available on main**"
-                    f"  —  {repo_url}/commits/main"
-                )
-            else:
-                content = (
-                    f":arrow_up: **Update available: v{self._update_version}**"
-                    f"  —  {repo_url}/releases"
-                )
+            content  = (
+                f":arrow_up: **Update available: v{self._update_version}**"
+                f"  —  {repo_url}/releases"
+            )
             try:
                 upd_hook = DiscordWebhook(
                     url=dc.get("WebhookURL", ""),
@@ -291,7 +285,10 @@ class Emitter:
 # ── Session summary ───────────────────────────────────────────────────────────
 
 def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> None:
-    """Print a 15-minute session summary matching the GUI Summary tab exactly.
+    """Emit a session summary at quarter-hour marks.
+
+    Values and | delimiters are column-aligned across every row so the
+    output is easy to read at a glance in both terminal and Discord.
 
     providers      — core.session_providers list (ActivityProviderMixin instances)
     session_plugin — the session_stats plugin (for session_duration_seconds())
@@ -300,32 +297,57 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
     dur_s  = session_plugin.session_duration_seconds() if session_plugin else 0.0
 
     if not active and dur_s < 60:
-        return   # nothing worth reporting
+        return
 
     logtime      = state.event_time
     duration_str = fmt_duration(dur_s)
 
-    lines = [f"Session Summary — {duration_str}"]
+    # ── Collect all data rows ─────────────────────────────────────────────
+    sections: list[tuple[str, list]] = []
 
     for p in sorted(active, key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "")):
-        rows = p.get_summary_rows()
-        if not rows:
+        raw = p.get_summary_rows()
+        if not raw:
             continue
         title = getattr(p, "ACTIVITY_TAB_TITLE", "Activity")
-        lines.append(f"  {title}")
-        for r in rows:
+        rows = []
+        for r in raw:
             label = r.get("label", "")
             value = r.get("value", "")
-            rate  = r.get("rate")
-            if not value and not rate:
-                continue  # section sub-header rows — skip in text form
-            if rate:
-                lines.append(f"    {label}: {value}  |  {rate}")
-            else:
-                lines.append(f"    {label}: {value}")
+            rate  = r.get("rate", None)
+            if not label and not value:
+                continue   # skip blank section-divider rows
+            rows.append((label, value or "—", rate))
+        if rows:
+            sections.append((title, rows))
 
-    if len(lines) == 1:
-        return   # only the header line — nothing to send
+    if not sections:
+        return
+
+    # ── Compute column widths across ALL data rows + Duration ─────────────
+    all_rows = [(l, v, r) for _, rows in sections for l, v, r in rows]
+    max_label = max((len(l) for l, v, r in all_rows), default=0)
+    max_value = max((len(v) for l, v, r in all_rows), default=0)
+    # Duration value may be wider than any data value
+    max_label = max(max_label, len("Duration"))
+    max_value = max(max_value, len(duration_str))
+
+    INDENT = "    "
+
+    def fmt_row(label: str, value: str, rate, indent: str = INDENT) -> str:
+        lc   = f"{label}:"
+        left = f"{indent}{lc:<{max_label + 1}}  {value:>{max_value}}"
+        return f"{left}  |  {rate}" if rate else left
+
+    # Duration header — no indent, no rate
+    dur_lc   = "Duration:"
+    dur_line = f"{dur_lc:<{max_label + 1}}  {duration_str:>{max_value}}"
+
+    lines = ["Session Summary", dur_line]
+    for title, rows in sections:
+        lines.append(f"  {title}")
+        for label, value, rate in rows:
+            lines.append(fmt_row(label, value, rate))
 
     summary_text = "\n".join(lines)
 
@@ -336,5 +358,6 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
         sigil="~  SUMM",
         timestamp=logtime,
         loglevel=2,
+        force_terminal=True,
     )
 

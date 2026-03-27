@@ -242,12 +242,15 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
 
     def get_summary_rows(self) -> list[dict]:
         rows = []
-        if self.samples_analysed > 0:
-            rows.append({"label": "Samples analysed", "value": str(self.samples_analysed), "rate": None})
-        if self.held_value_est > 0:
-            rows.append({"label": "Exobiology held (est.)", "value": fmt_credits(self.held_value_est), "rate": None})
-        if self.credits_earned > 0:
-            rows.append({"label": "Exobio sold", "value": fmt_credits(self.credits_earned), "rate": None})
+        if self.samples_analysed > 0 or self.credits_earned > 0:
+            # Value shown: held estimate if still carrying, sold total if redeemed
+            display_value = self.held_value_est if self.held_value_est > 0 else self.credits_earned
+            value_rate = fmt_credits(display_value) if display_value else None
+            rows.append({
+                "label": "Samples",
+                "value": str(self.samples_analysed),
+                "rate":  f"{value_rate} credits" if value_rate else None,
+            })
         return rows
 
     def get_tab_rows(self) -> list[dict]:

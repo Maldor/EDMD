@@ -1,6 +1,6 @@
 # EDMD Roadmap
 
-Last updated: 20260319b
+Last updated: 20260327
 
 ---
 
@@ -10,236 +10,107 @@ Last updated: 20260319b
 
 ---
 
-## Released in 20260318
+## Released in 20260325
 
-### Hull integrity real-time tracking fix  ✅ shipped
+### At-Risk Holdings Tracker  ✅ shipped
+Persistent cross-session tracker for bounties, combat bonds, trade vouchers, cartography, and exobiology. Survives session resets. Zeroed on death.
 
-## Released in 20260319
+### Assets Block: Wallet Redesign  ✅ shipped
+Fleet, Fleet Carrier, At Risk, and Net Worth sections inline. Dynamic tab counts. Credit balance from Status.json polling.
 
-### Activity plugin architecture  ✅ shipped
-Session boundary model, eight activity plugins, tabbed Session Stats, mode plugin removed.
+### Commander Block: SRV and On-Foot State  ✅ shipped
+Header and vitals reflect vehicle — ship, SRV, or on-foot. Suit name and loadout shown on foot.
 
-## Released in 20260319b
+### EDDN: Schema Compliance and FC Market  ✅ shipped
+Preload guard, NavRoute, fcmaterials_capi/1, commodity/outfitting schema fixes, blackmarket removed.
 
-### Unified DataProvider  ✅ shipped
-`core/data.py` — single source of truth, CAPI absorbed, event ring buffer, typed sub-namespaces.
-Core components moved to `core/components/`. Three-tier plugin loader. Plugin dev guide rewritten.
-Session boundary model, eight activity plugins, tabbed Session Stats, mode plugin removed.
-`builtins/alerts/plugin.py` — ready to ship.
+---
 
-Frontier's `HullDamage` journal event fires reliably for SLF hits but
-inconsistently for mothership damage. Confirmed across 11 hours of RES
-combat: hull dropped from 98% to 88% with zero `HullDamage(PlayerPilot=True)`
-events fired. Two fixes implemented:
+## Released in 20260327
 
-1. **`Loadout` subscription** — The `Loadout` event fires on dock, undock,
-   ship swap, and every SLF dock-back, always carrying accurate `HullHealth`.
-   Alerts plugin now updates `state.ship_hull` on every Loadout.
+### Session Summaries: Fixed and Redesigned  ✅ shipped
+Summaries now fire reliably at :00, :15, :30, and :45 of every hour regardless of activity type (exploration, trade, missions, combat — all covered). The trigger runs on every processed journal event so it fires even during active play when the journal is written continuously. The old combat-only timer is removed.
 
-2. **Shield-triggered CAPI poll** — When `ShieldState: False` fires, a
-   background thread waits 8 seconds then calls `capi.manual_poll()`. CAPI
-   `/profile` returns authoritative hull from Frontier's servers. Rate-limited
-   to once per 5 minutes.
+Output is reformatted with aligned columns: values right-justify to a shared column and the `|` delimiter lines up across all rows. Duration is a header row. Each activity section appears only when it has data.
 
-Deliverable: `builtin_alerts_plugin.py` in outputs from 2026-03-17 session.
+### Session Summaries: Condensed Activity Rows  ✅ shipped
+- **Exploration:** Distance and jump count combined into one row; bodies scanned shows unsold cartography estimate as the rate field
+- **Missions:** Completed count and credits combined into one row
+- **Exobiology:** Samples and held/sold value combined into one row
+- **Mining:** Tonnes refined with galactic average value estimate as the rate field
+
+### Update Notifier: Release-Only  ✅ shipped
+The update check now only notifies when a newer release tag exists on GitHub. Post-release commits on `main` no longer trigger a notification. Version comparison handles lettered patch releases correctly (20260325a < 20260325b < 20260326).
+
+### Assets Block: Module and Credit Updates  ✅ shipped
+Credits update live from `Status.json` (updated every ~500ms by the game) instead of waiting for a CAPI poll. Ship value now correctly includes `ModulesValue` from `Loadout`. `ModuleRetrieve`, `ModuleStore`, `ModuleBuy`, `ModuleSell`, `ModuleSwap`, and `ShipyardSwap` subscribed so tab counts refresh immediately.
+
+### Cargo Block: Station Restore on Startup  ✅ shipped
+The target station now restores correctly from the saved market ID on startup rather than running a fuzzy name search that could match a different station with the same name.
+
+### Holdings Tracker: Voucher Bootstrap  ✅ shipped
+On first run (no prior `holdings.json`), the tracker scans journal history from the most recent `Died` event forward to reconstruct unredeemed voucher balances. Previously earned bounties and bonds that predated EDMD were invisible until cashed out.
+
+### Holdings Tracker: Dedup Fixes  ✅ shipped
+Cartography and exobiology dedup sets persist across restarts via JSON-safe serialisation, preventing double-counting on preload replay.
+
+### NPC Crew / SLF: Bootstrap and Display Fixes  ✅ shipped
+- `bootstrap_fighter_bay` pre-scan ensures the fighter bay flag is set before dependent bootstraps run
+- SLF variant bootstrap skips `RestockVehicle` events with no `Loadout` field (Frontier omits it when only one variant is stocked), scanning further back to find the specific variant
+- Same fix applied in `_bootstrap_type_from_journals`
 
 ---
 
 ## Near-term
 
 ### Context-aware Commander block
-The Commander block currently shows fixed rows: Mode, Combat Rank, System, Body,
-Fuel, Shields/Hull.  These rows should become context-aware and reuse screen
-real-estate intelligently depending on what the player is doing.
+The Commander block shows fixed rows regardless of vehicle. Rows should adapt:
 
-**Ship mode (current behaviour)**
-- Fuel: `XX%  (~Xh Xm)`
-- Shields | Hull: `XX%  |  XX%`
+- **On foot:** Fuel → Battery (suit), Shields/Hull → Suit Shield/Health
+- **SRV:** Fuel → SRV Fuel, Shields/Hull → SRV Hull
+- **Fighter:** Already partially handled (header shows `[In Fighter]`)
 
-**On foot (Odyssey)**
-When `VehicleSwitch` To="OnFoot" or equivalent Odyssey boarding events fire:
-- Fuel → Battery: `XX%  (~Xm)`  (suit battery from Status.json)
-- Shields | Hull → Suit Shield | Health: `XX%  |  XX%`
-
-**SRV mode**
-When `VehicleSwitch` To="SRV":
-- Fuel → SRV Fuel: `XX%`  (Status.json `Fuel.FuelMain` reflects SRV tank when in SRV)
-- Shields | Hull → SRV Hull: `XX%`  (HullDamage events while in SRV)
-
-**Fighter (SLF)**
-Already partially handled — header shows `[In Fighter]`.
-Row labels do not need to change; SLF has no fuel display.
-
-Implementation notes:
-- `pilot_mode` on MonitorState can disambiguate (track "OnFoot" alongside
-  "Open", "Solo", "Private Group")
-- Status.json `Flags` bits 26-27 give on-foot / SRV state if needed
-- Suit health and shield data comes from Status.json and Odyssey journal events
-- All changes are purely in `commander_block.refresh()` — no plugin changes needed
-  beyond subscribing to the relevant boarding/disembarking events
+Data sources: Status.json Flags bits, Odyssey journal events, `VehicleSwitch`.
 
 ---
 
 ## Planned Blocks
 
 ### Mining Block
-Track an active mining session in real time. Planned display:
-- Prospected asteroids: material yield distribution, % core/fracture flagging
-- Refined commodities: per-type count and estimated value at last known market price
-- Session efficiency: average yield per asteroid, time per tonne
-- Source: `ProspectedAsteroid`, `MiningRefined`, and `AsteroidCracked` journal events
+Real-time mining session display: prospected asteroids with yield distribution, refined commodities with value estimate, session efficiency.
 
 ### ExoBiology Block
-Track organic scan progress across bodies in the current system and session.
-Planned display:
-- Species found/analysed per body, with genus/species name and estimated value
-- Unanalysed samples (first/second/third scan indicators)
-- Session earnings from `SellOrganicData`
-- Source: `ScanOrganic`, `SellOrganicData`, `SAAScanComplete`
+Per-body scan progress with species names and estimated values, unanalysed sample indicators, session earnings.
 
 ### Combat Zone Block
-Real-time CZ session tracking separate from the main Session Stats block.
-Planned display:
-- Active conflict zone (system, faction, intensity)
-- Combat bond earnings, bond rate, and kill count for the current CZ
-- War/civil war progress indicators where available from journal
-- Source: `FactionKillBond`, `ReceiveText` (faction intel), `Location`
+Active CZ tracking separate from Session Stats: faction, intensity, bonds and rate for the current zone.
 
 ### Colonisation Block
-Track colony construction contributions and progress.
-Planned display:
-- Active construction site (system, body, type)
-- Resources delivered vs. required, per commodity
-- Progress toward completion
-- Source: `ColonisationContribution`, `ColonisationSystemClaimed`, `Location`
-- Note: FDev event coverage for colonisation is still evolving — this block
-  will be implemented once the journal schema stabilises
+Colony construction contributions and progress. Deferred until Frontier's journal schema for colonisation stabilises.
 
 ---
 
 ## Deferred / Parked
 
 ### Profile Switcher GUI
-- Selector in menu bar or title bar
-- Create-new-profile dialog writing a fully-defaulted `[PROFILENAME]` section to config.toml
-- Restart with `-p PROFILENAME`
+Selector in menu bar, create-new-profile dialog, restart with `-p PROFILENAME`.
 
 ### Squadron Carrier Support
-- Fleet carriers belonging to a squadron (not player-owned) are not currently
-  tracked in the Assets block — journal coverage is incomplete
+Fleet carriers owned by a squadron are not tracked — journal coverage is incomplete.
+
+### Web UI / HTTP Dashboard
+Built-in HTTP server with SSE for browser-based remote monitoring. Deferred until GTK GUI reaches stable feature set. See extended design notes in git history.
 
 ---
 
 ## Known Limitations / Technical Debt
 
-- Stored ship loadouts (modules, engineering) are sourced from journal `Loadout`
-  events accumulated across sessions — the most recent fitting for each confirmed
-  owned ship is persisted in `~/.local/share/EDMD/plugins/assets/data.json`.
-  This data is only as current as the last time each ship was boarded.
-- Carrier finance and capacity field paths are hardened with multiple fallbacks but
-  the exact `/fleetcarrier` JSON structure has not been confirmed in production —
-  run with `--trace` after docking at a carrier if values are missing
-- GTK progressbar warning on close (`GtkGizmo min width -2`) — set aside intentionally
-- Block collapse state is not persisted across restarts — intentional for now
-- SLF shield state is not tracked — the game does not expose this via the journal
-  or `Status.json`
-- Minor faction reputation reflects only the current system and is replaced on each
-  jump; it is absent between sessions
+- Stored ship loadouts are only as current as the last time each ship was boarded
+- Carrier finance field paths have multiple fallbacks but have not been confirmed across all carrier types — use `--trace` if values are missing
+- GTK progressbar warning on close (`GtkGizmo min width -2`) — intentionally set aside
+- Block collapse state is not persisted across restarts
+- SLF shield state is not tracked — not exposed via journal or Status.json
+- Minor faction reputation reflects only the current system; absent between sessions
+- On-foot health not shown (requires Status.json field not currently polled)
 
-**TODO (next release docs):** Document the CAPI tradeoff in the main user
-documentation (not just release notes). Specifically:
-  - When CAPI is enabled: fleet roster is authoritative (Frontier server),
-    sold ships are automatically excluded, hull % and rebuy costs are available.
-  - When CAPI is disabled: roster is sourced from the most recent `StoredShips`
-    journal event (correct at last dock; cannot detect sales between sessions),
-    hull % and rebuy costs are unavailable for stored ships, and phantom ships
-    from recent sales may appear until the next dock. Loadout data is unaffected
-    — it comes from journal `Loadout` events regardless of CAPI status.
-  Suggested location: `docs/CONFIGURATION.md` under a new "CAPI Integration"
-  section, and a brief note in `README.md` features table.
-
----
-
-## Consideration — Web UI / HTTP Dashboard
-
-*Filed for review. Do not implement without explicit confirmation.*
-
-### Background
-EDMD currently supports a thin-client / remote profile mode (Configuration B):
-the daemon runs on a second machine reading journals over SSHFS, GTK4 GUI is
-forwarded via SSH X-forwarding. This works but has friction — X-forwarding has
-latency and requires a desktop session on the remote end.
-
-The question: would a built-in HTTP server serving a browser-based dashboard be
-a better remote interface?
-
-### What would actually be built
-
-A built-in HTTP server (Flask or stdlib `http.server`) exposing:
-- A single-page HTML/JS/CSS dashboard served on a configurable port
-- Server-Sent Events (SSE) stream pushing state updates to the browser
-  (same events that currently drive `gui_queue` would also push JSON to clients)
-- HTTP POST endpoints for interactions (tab switches, target market search,
-  alerts clear, etc.)
-
-Web blocks would be HTML/CSS/JS equivalents of the GTK blocks — new code,
-not a port of the existing GTK implementation.
-
-### Tradeoffs
-
-**For:**
-- Works from any device with a browser — phone, tablet, another PC, no X-forwarding
-- No GTK dependency on the viewing device
-- Genuinely useful for the "check on your session from another room" use case
-- Read-only view would be ~20% of the effort for ~80% of the value
-- CSS theming is conceptually portable (different renderer, but shared design intent)
-
-**Against:**
-- Maintenance burden: every block needs a GTK version AND a web version, forever
-- New blocks take roughly double the development effort
-- Full interactive parity (drag/resize/collapse blocks, search fields) is substantial work
-- Security surface: HTTP server on the LAN needs at minimum config-driven bind address
-  and optional token auth — not complex but must be done properly
-- SSE is simpler than WebSockets but still needs careful connection lifecycle management
-
-### Recommended approach if pursued
-
-**Phase 1 — Read-only monitoring view** (lower effort, high value)
-A "wall display" layout: Commander status, hull/shields, session stats, cargo,
-mission stack, alerts — all live-updating. No interactive elements. Serves the
-primary remote use case.
-
-**Phase 2 — Surgical interactivity** (as needed)
-Add specific interactive endpoints only where genuinely needed for remote use:
-trigger end session, clear alerts, set cargo target market.
-
-**Phase 3 — Full parity** (significant ongoing investment, decide later)
-Full block interaction, theme switching, layout persistence via browser storage.
-
-### Config sketch (if implemented)
-```toml
-[WebUI]
-Enabled   = false         # disabled by default
-Port      = 8642
-BindAddr  = "127.0.0.1"  # "0.0.0.0" for LAN access
-Token     = ""            # optional Bearer token for basic auth
-```
-
-### Decision pending
-Deferred. Revisit once the GTK GUI reaches a stable feature set and the
-maintenance cost of dual-frontend development is better understood.
----
-
-## TODO / Pending Consideration
-
-### Session Stats — value-only row alignment
-Rows without a rate separator currently right-align their value across
-cols 1–3 of the stats grid (the full value+pipe+rate span). This means
-a value-only row's text sits further right than the value portion of a
-value+rate row, which is mildly inconsistent.
-
-Alternative: value-only rows right-align to col 1 only (the value column),
-leaving cols 2–3 empty. Values would then align with the value portion of
-rate rows rather than the rate portion.
-
-Decision deferred — review visually in practice before changing.
+**Pending docs:** Document CAPI vs. journal tradeoffs for the fleet roster in `docs/CONFIGURATION.md` — what is and isn't available when CAPI is disabled.

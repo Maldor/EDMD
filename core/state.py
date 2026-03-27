@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260325"
+VERSION = "20260327"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -676,7 +676,11 @@ class MonitorState:
             self.alerted_no_kills      = None
             self.alerted_kill_rate     = None
             self.last_rate_check       = time.monotonic()
-            self.last_periodic_summary = time.monotonic()
+            # Only reset the summary clock on a forced session reset (warzone drop).
+            # On first-kill sessionstart the LoadGame handler already set it, so
+            # leaving it alone preserves the correct 15-minute window.
+            if reset or self.last_periodic_summary is None:
+                self.last_periodic_summary = time.monotonic()
             self.last_inactive_alert   = None
             self.last_rate_alert       = None
             global _session_start_iso

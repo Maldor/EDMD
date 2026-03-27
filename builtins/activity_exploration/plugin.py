@@ -246,21 +246,16 @@ class ActivityExplorationPlugin(BasePlugin, ActivityProviderMixin):
         rows = []
         if self.jumps > 0:
             rows.append({
-                "label": "Distance jumped",
-                "value": f"{self.distance_ly:,.0f} ly",
-                "rate":  f"{self.jumps} jumps",
+                "label": "Distance",
+                "value": f"{self.jumps} jumps",
+                "rate":  f"{self.distance_ly:,.0f} ly",
             })
         if self.bodies_fss_scanned > 0:
+            carto_rate = fmt_credits(self.unsold_value_est) if self.unsold_value_est > 0 else None
             rows.append({
                 "label": "Bodies scanned",
                 "value": str(self.bodies_fss_scanned),
-                "rate":  None,
-            })
-        if self.unsold_value_est > 0:
-            rows.append({
-                "label": "Cartography unsold (est.)",
-                "value": fmt_credits(self.unsold_value_est),
-                "rate":  None,
+                "rate":  carto_rate,
             })
         total_sold = self.cartography_base + self.cartography_bonus
         if total_sold > 0:

@@ -57,10 +57,20 @@ class SpanshPlugin(BasePlugin):
 
         self._stop = threading.Event()
 
-        # Restore last target from storage and re-fetch on startup
-        saved = self.storage.read_json()
-        last  = saved.get("target_station", "")
-        if last:
+        # Restore last target from storage and re-fetch on startup.
+        # Prefer market_id (unambiguous) over station name (fuzzy search
+        # can return the wrong station when multiple share a name).
+        saved     = self.storage.read_json()
+        market_id = saved.get("target_market_id", 0)
+        last      = saved.get("target_station", "")
+        if market_id:
+            threading.Thread(
+                target=self._fetch_by_id,
+                args=(int(market_id),),
+                daemon=True,
+                name="spansh-startup",
+            ).start()
+        elif last:
             threading.Thread(
                 target=self._fetch_and_store,
                 args=(last,),

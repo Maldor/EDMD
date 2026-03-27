@@ -9,7 +9,7 @@ Tab title: Mining
 
 from core.plugin_loader import BasePlugin
 from core.activity import ActivityProviderMixin
-
+from core.emit import fmt_credits
 
 class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
     PLUGIN_NAME         = "activity_mining"
@@ -71,20 +71,23 @@ class ActivityMiningPlugin(BasePlugin, ActivityProviderMixin):
     def has_activity(self) -> bool:
         return self.tonnes_refined > 0 or self.asteroids_prospected > 0
 
+    def _refined_value_est(self) -> int:
+        """Estimate total value of refined materials using cargo mean prices."""
+        mean_prices = getattr(self.core.state, "cargo_mean_prices", {}) or {}
+        total = 0
+        for material, tonnes in self.material_tally.items():
+            price = mean_prices.get(material.lower(), 0)
+            total += price * tonnes
+        return total
+
     def get_summary_rows(self) -> list[dict]:
         rows = []
         if self.tonnes_refined > 0:
+            value_est = self._refined_value_est()
             rows.append({
                 "label": "Tonnes refined",
                 "value": f"{self.tonnes_refined:.0f} t",
-                "rate":  None,
-            })
-        if self.asteroids_prospected > 0 and self.tonnes_refined > 0:
-            efficiency = self.tonnes_refined / max(1, self.asteroids_prospected)
-            rows.append({
-                "label": "Asteroids prospected",
-                "value": str(self.asteroids_prospected),
-                "rate":  f"{efficiency:.1f} t/ast",
+                "rate":  f"{fmt_credits(value_est)} est." if value_est else None,
             })
         return rows
 

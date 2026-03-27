@@ -1,24 +1,15 @@
 # EDMD GUI on Windows
 
-> **Developer notice:** EDMD is developed and tested exclusively on Linux.
-> The developer does not use Windows as a primary platform and cannot provide
-> direct troubleshooting support for Windows-specific installation issues. This
-> guide represents a best-effort attempt at community documentation based on
-> known-working approaches from the GTK4/PyGObject Windows ecosystem.
+> **Note:** The Windows installer (`EDMD-Setup-{version}.exe`) handles GTK4 installation automatically and is the recommended path for most users. This guide covers manual GTK4 installation for cases where the installer doesn't fit your setup — running EDMD alongside an existing MSYS2 environment, or building GTK4 natively with your own Python interpreter.
 >
-> If you run into problems this guide does not cover, the following external
-> resources are your best avenue:
+> **Developer notice:** EDMD is developed and tested on Linux. The developer cannot provide direct troubleshooting support for Windows-specific installation issues. If the manual paths below prove too complex, the installer is the easier option.
 >
+> External resources:
 > - [PyGObject on Windows (gnome.org)](https://pygobject.gnome.org/getting_started.html#windows-getting-started)
 > - [MSYS2 documentation](https://www.msys2.org/docs/)
 > - [gvsbuild documentation](https://github.com/wingtk/gvsbuild)
-> - [GTK4 Windows notes (gtk.org)](https://gtk.org/docs/installations/windows/)
-> - The EDMD GitHub issue tracker (for code bugs, not installation help)
 >
-> **EDMD terminal mode works on Windows with no special setup.** The GUI is an
-> optional enhancement. If the GTK4 installation proves too complex for your
-> situation, terminal mode with Discord notifications is a complete monitoring
-> experience. See the standard [install.bat](../../install.bat) for that path.
+> **EDMD terminal mode works on Windows with no special setup.** Run `install.bat` for a terminal-only install, or use the full installer for GUI support.
 
 ---
 

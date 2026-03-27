@@ -70,15 +70,13 @@ pip install discord-webhook cryptography --break-system-packages
 
 ## Windows
 
-### ⚠️ Installer (Experimental)
+### Installer (Recommended)
 
 Download **`EDMD-Setup-{version}.exe`** from the [latest release](https://github.com/drworman/EDMD/releases/latest).
 
 The installer handles everything automatically: MSYS2, GTK4, Python, all dependencies, and the EDMD source. See **[docs/guides/WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md)** for full details.
 
 **Requirement:** [Git for Windows](https://git-scm.com/download/win) must be installed and on your PATH before running the installer. Git is required to download the EDMD source and to apply future updates.
-
-> ⚠️ **Experimental.** The Windows installer is new in this release. Terminal mode and GUI mode are both functional, but the installer may encounter issues on unusual Windows configurations. Please report problems via the [issue tracker](https://github.com/drworman/EDMD/issues).
 
 ### Manual installation
 
