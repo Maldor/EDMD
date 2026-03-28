@@ -2,10 +2,8 @@
 core/components/session_manager/plugin.py — Session flush notification shim.
 
 Receives plugin_call("session_manager", "flush_session", reason) calls
-(from KSW and activity_combat no-kill timeout) and emits a Discord alert
-before the game process is killed, so the player has a record of why.
-
-Also updates the KSW GUI block's status label if present.
+and emits a Discord alert so the player has a record of why the session ended.
+Also queues a GUI status update if a session management block is present.
 """
 
 from core.plugin_loader import BasePlugin
@@ -22,9 +20,7 @@ class SessionManagerPlugin(BasePlugin):
         super().on_load(core)
 
     def flush_session(self, reason: str = "") -> None:
-        """Called by KSW and activity_combat to signal a session flush.
-        Emits a Discord notification with the reason before the game closes.
-        """
+        """Signal a session flush. Emits a Discord notification with the reason."""
         core = self.core
         msg = f"Session ended: {reason}" if reason else "Session ended"
         core.emitter.emit(
@@ -34,7 +30,7 @@ class SessionManagerPlugin(BasePlugin):
             timestamp=core.state.event_time,
             loglevel=2,
         )
-        # Notify GUI queue so KSW block can update its status label
+        # Notify GUI queue so the session management block can update its status label
         gq = core.gui_queue
         if gq:
             gq.put(("session_flush", reason))

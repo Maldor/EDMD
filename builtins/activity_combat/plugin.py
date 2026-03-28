@@ -316,7 +316,7 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
                 )
                 self._last_rate_alert_mono = now
 
-        # ── No-kill timeout (KSW/session flush) ───────────────────────────
+        # ── No-kill timeout (session flush) ──────────────────────────────────
         if self._inactivity_alerted:
             return
         if self._last_kill_mono == 0.0:

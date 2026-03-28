@@ -117,7 +117,7 @@ def _poll_status_json(
                     # ── Fuel level (500ms live updates for display) ───────
                     # Status.json Fuel.FuelMain is updated every ~500ms.
                     # We update state.fuel_current here for the display only.
-                    # KSW fuel checks still use ReservoirReplenished events.
+                    # Fuel threshold checks use ReservoirReplenished events.
                     fuel_main = data.get("Fuel", {}).get("FuelMain")
                     if fuel_main is not None and fuel_main != last_fuel:
                         last_fuel = fuel_main

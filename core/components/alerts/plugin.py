@@ -142,7 +142,7 @@ class AlertsPlugin(BasePlugin):
                     )
                 elif state.fuel_current is None:
                     # No prior reading — cap logic unavailable, set to tank size
-                    # as a safe overestimate (KSW will not false-trigger)
+                    # as a safe overestimate for fuel duration calculations
                     state.fuel_current = float(state.fuel_tank_size)
                 gq = core.gui_queue
                 if gq: gq.put(("vessel_update", None))
