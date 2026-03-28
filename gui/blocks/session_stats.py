@@ -119,25 +119,21 @@ class SessionStatsBlock(BlockWidget):
         if self._active_tab not in self._tab_btns:
             self._set_active_tab(self._TAB_SUMMARY)
 
-    def _append_rows(self, box: Gtk.Box, rows: list[dict]) -> None:
-        """Append provider rows to a content box using a Grid for column alignment.
+    def _append_rows(self, grid: "Gtk.Grid", rows: list[dict],
+                     start_row: int = 0) -> int:
+        """Append provider rows into a shared Grid, returning next row index.
+
+        Accepting an existing Grid (rather than creating one per section)
+        ensures GTK sizes all value and rate columns globally, so the |
+        separator lands at the same x position across every section.
 
         Grid columns:
-          0 — label       (hexpand)
-          1 — value       (right-aligned, fixed width from widest value)
-          2 — pipe " | "  (only present when rate exists)
-          3 — rate        (right-aligned, fixed width from widest rate)
-
-        This guarantees all | separators land at the same x position
-        regardless of label or value width variation.
+          0 — label  (hexpand)
+          1 — value  (right-aligned, width from widest value across ALL rows)
+          2 — pipe   (only when rate exists)
+          3 — rate   (right-aligned, width from widest rate across ALL rows)
         """
-        grid = Gtk.Grid()
-        grid.set_column_spacing(4)
-        grid.set_row_spacing(1)
-        grid.add_css_class("stats-grid")
-        box.append(grid)
-
-        row_idx = 0
+        row_idx = start_row
         for r in rows:
             label = r["label"]
             value = r["value"]
@@ -187,6 +183,9 @@ class SessionStatsBlock(BlockWidget):
 
             row_idx += 1
 
+        return row_idx
+
+
     def _on_clear_session(self, *_) -> None:
         """Reset all session counters via session_stats.on_new_session()."""
         try:
@@ -197,7 +196,7 @@ class SessionStatsBlock(BlockWidget):
         if gq: gq.put(("stats_update", None))
 
     def _append_section_header(self, box: Gtk.Box, title: str) -> None:
-        """Render a section header: 'Title ──────────────────' filling the row."""
+        """Render a standalone section header box (used by activity tabs)."""
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         hbox.set_margin_top(6)
         hbox.set_margin_bottom(2)
@@ -214,6 +213,27 @@ class SessionStatsBlock(BlockWidget):
 
         box.append(hbox)
 
+    def _section_header_in_grid(self, grid: "Gtk.Grid",
+                                 title: str, row_idx: int) -> int:
+        """Embed a section header as a spanning row inside a shared Grid."""
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hbox.set_margin_top(6)
+        hbox.set_margin_bottom(2)
+
+        lbl = Gtk.Label(label=title)
+        lbl.add_css_class("section-header")
+        lbl.set_xalign(0.0)
+        hbox.append(lbl)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_hexpand(True)
+        sep.set_valign(Gtk.Align.CENTER)
+        hbox.append(sep)
+
+        grid.attach(hbox, 0, row_idx, 4, 1)
+        return row_idx + 1
+
+
     def refresh(self) -> None:
         core      = self.core
         providers = getattr(core, "session_providers", [])
@@ -222,13 +242,24 @@ class SessionStatsBlock(BlockWidget):
         # --- Summary tab ---
         summary_box = self._clear_tab(self._TAB_SUMMARY)
 
-        # Duration row at top, ungrouped
+        # Build the entire Summary tab into ONE shared Grid so GTK sizes all
+        # value and rate columns globally — keeps the | separator aligned
+        # across Combat, Exploration, Missions, and every other section.
+        summary_grid = Gtk.Grid()
+        summary_grid.set_column_spacing(4)
+        summary_grid.set_row_spacing(1)
+        summary_grid.add_css_class("stats-grid")
+        summary_box.append(summary_grid)
+
+        grid_row = 0
+
+        # Duration row at top
         dur_s = plugin.session_duration_seconds() if plugin else 0.0
-        self._append_rows(summary_box, [
+        grid_row = self._append_rows(summary_grid, [
             {"label": "Duration",
              "value": self.fmt_duration(dur_s) if dur_s > 0 else "—",
              "rate": None},
-        ])
+        ], start_row=grid_row)
 
         # Provider sections sorted alphabetically by tab title
         active_providers = sorted(
@@ -240,10 +271,10 @@ class SessionStatsBlock(BlockWidget):
             if not rows:
                 continue
             title = getattr(p, "ACTIVITY_TAB_TITLE", "Activity")
-            self._append_section_header(summary_box, title)
-            self._append_rows(summary_box, rows)
+            grid_row = self._section_header_in_grid(summary_grid, title, grid_row)
+            grid_row = self._append_rows(summary_grid, rows, start_row=grid_row)
 
-        # --- Activity tabs ---
+        # --- Activity tabs (each gets its own grid — per-tab alignment is fine) ---
         active_tab_titles = {self._TAB_SUMMARY}
         for p in providers:
             if not p.has_activity():
@@ -254,6 +285,11 @@ class SessionStatsBlock(BlockWidget):
             title = getattr(p, "ACTIVITY_TAB_TITLE", "Activity")
             active_tab_titles.add(title)
             tab_box = self._clear_tab(title)
-            self._append_rows(tab_box, tab_rows)
+            tab_grid = Gtk.Grid()
+            tab_grid.set_column_spacing(4)
+            tab_grid.set_row_spacing(1)
+            tab_grid.add_css_class("stats-grid")
+            tab_box.append(tab_grid)
+            self._append_rows(tab_grid, tab_rows, start_row=0)
 
         self._remove_stale_tabs(active_tab_titles)
