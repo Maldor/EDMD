@@ -21,14 +21,6 @@ fail()    { echo -e "${RED}[ FAIL ]${NC} $*"; exit 1; }
 section() { echo -e "\n${WHT}── $* ──${NC}"; }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-echo -e "${CYN}"
-echo "  ███████╗██████╗ ███╗   ███╗██████╗ "
-echo "  ██╔════╝██╔══██╗████╗ ████║██╔══██╗"
-echo "  █████╗  ██║  ██║██╔████╔██║██║  ██║"
-echo "  ██╔══╝  ██║  ██║██║╚██╔╝██║██║  ██║"
-echo "  ███████╗██████╔╝██║ ╚═╝ ██║██████╔╝"
-echo "  ╚══════╝╚═════╝ ╚═╝     ╚═╝╚═════╝ "
-echo -e "${NC}"
 echo -e "${WHT}  ED Monitor Daemon — Linux Installer${NC}"
 echo    "  https://github.com/drworman/EDMD"
 echo
