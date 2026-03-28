@@ -1,6 +1,6 @@
 # EDMD Roadmap
 
-Last updated: 20260327
+Last updated: 20260328
 
 ---
 
@@ -58,6 +58,36 @@ Cartography and exobiology dedup sets persist across restarts via JSON-safe seri
 - `bootstrap_fighter_bay` pre-scan ensures the fighter bay flag is set before dependent bootstraps run
 - SLF variant bootstrap skips `RestockVehicle` events with no `Loadout` field (Frontier omits it when only one variant is stocked), scanning further back to find the specific variant
 - Same fix applied in `_bootstrap_type_from_journals`
+
+---
+
+## Released in 20260328
+
+### JetBrains Mono: Bundled Default Font  ✅ shipped
+Bundled in `fonts/`, copied to `~/.local/share/EDMD/fonts/` on first launch and registered
+with PangoCairo per-process. No system font directories touched. Falls back to system
+monospace if files are absent.
+
+### Font Preferences  ✅ shipped
+Font Family dropdown (monospace-only, from Pango font map) and Font Size spinner (10–24 px)
+in Settings → Appearance. Both saved to `config.toml [GUI]`, require restart.
+
+### CSS Theme Template: Community Contribution  ✅ shipped
+`themes/custom-template.css` overhauled with full inline documentation.
+Contributed by [Maldor](https://github.com/Maldor) via [PR #2](https://github.com/drworman/EDMD/pull/2).
+
+### Session Stats: Pipe Alignment Fixed  ✅ shipped
+Summary tab now uses a single shared `Gtk.Grid` across all sections so `|`
+delimiters align globally regardless of value widths across Combat, Exploration,
+Missions, etc.
+
+### Assets Block: Sold Ships Now Removed Immediately  ✅ shipped
+`ShipyardSell` subscribed — sold ship removed from cache and display without waiting
+for `StoredShips`. `_ship_loadout_cache` also pruned against `StoredShips` on startup
+when CAPI is unavailable.
+
+### Assets Block: Decommissioned Carrier Removed  ✅ shipped
+`CarrierDecommission` subscribed — `assets_carrier` cleared immediately.
 
 ---
 
