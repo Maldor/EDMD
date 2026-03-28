@@ -56,7 +56,8 @@ PP_RANK_NAMES = [
 
 # ── Theme loader ──────────────────────────────────────────────────────────────
 
-THEMES_DIR = Path(__file__).parents[1] / "themes"
+THEMES_DIR     = Path(__file__).parents[1] / "themes"
+FONTS_REPO_DIR = Path(__file__).parents[1] / "fonts"   # bundled TTFs in the repo
 
 _THEME_AVATAR_MAP = {
     "default-blue":   "edmd_avatar_blue_512.png",
@@ -68,12 +69,80 @@ _THEME_AVATAR_MAP = {
 }
 
 
-def load_theme(theme_name: str) -> str:
+def bootstrap_fonts() -> None:
+    """Ensure bundled fonts are present in the EDMD data directory and
+    registered with PangoCairo for this process.
+
+    On every launch:
+      1. Locate the TTF files bundled in the repo's fonts/ directory.
+      2. If any are absent from EDMD_DATA_DIR/fonts/, copy them there,
+         creating the directory if needed.
+      3. Register each TTF with PangoCairo.FontMap so the font is
+         available by family name to GTK4 CSS without touching the
+         system font directories or requiring a font cache rebuild.
+
+    Fails silently — if Pango is unavailable or files can't be copied,
+    EDMD falls back to the system monospace font.
+    """
+    try:
+        from core.state import EDMD_DATA_DIR
+        import shutil
+
+        data_fonts_dir = Path(EDMD_DATA_DIR) / "fonts"
+        data_fonts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy any TTF present in the repo bundle but absent in the data dir
+        if FONTS_REPO_DIR.is_dir():
+            for src in FONTS_REPO_DIR.glob("*.ttf"):
+                dst = data_fonts_dir / src.name
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+
+        # Register all TTFs in the data fonts dir with PangoCairo
+        import gi as _gi
+        _gi.require_version("PangoCairo", "1.0")
+        from gi.repository import PangoCairo
+        fm = PangoCairo.FontMap.get_default()
+        for ttf in sorted(data_fonts_dir.glob("*.ttf")):
+            try:
+                fm.add_font_file(str(ttf))
+            except Exception:
+                pass  # older Pango without add_font_file — font unavailable
+
+    except Exception:
+        pass  # non-fatal — GUI continues with system monospace fallback
+
+
+def list_monospace_fonts() -> list[str]:
+    """Return sorted list of installed monospace font family names.
+
+    Uses Pango's font map, which reflects the same fonts GTK4 will render.
+    Returns an empty list if Pango is unavailable (terminal-only mode).
+    """
+    try:
+        import gi as _gi
+        _gi.require_version("Pango", "1.0")
+        from gi.repository import Pango
+        fm = Pango.FontMap.get_default()
+        return sorted(
+            family.get_name()
+            for family in fm.list_families()
+            if family.is_monospace()
+        )
+    except Exception:
+        return []
+
+
+def load_theme(theme_name: str, font_size: int = 14,
+               font_family: str = "JetBrains Mono") -> str:
     """Load base.css (structure) + palette CSS for the named theme.
 
     base.css holds all structural rules and references CSS variables.
     Theme palette files contain only :root { } variable overrides.
     Falls back to default.css if the named palette is not found.
+
+    font_size and font_family are injected as final overrides so they
+    always win over any palette-defined defaults.
     """
     base_file    = THEMES_DIR / "base.css"
     palette_file = THEMES_DIR / f"{theme_name}.css"
@@ -86,12 +155,25 @@ def load_theme(theme_name: str) -> str:
             parts.append(path.read_text(encoding="utf-8"))
         except OSError:
             pass
+    # Inject font size as a final :root override — wins over any palette default.
+    parts.append(f":root {{ --font-size: {font_size}px; }}")
+    # Inject font family directly on the window class — GTK4 CSS does not support
+    # font-family via CSS custom properties (var()), so we write a real rule.
+    # Fallback chain: user choice → JetBrains Mono → system monospace.
+    if font_family and font_family != "monospace":
+        family_value = f'"{font_family}", "JetBrains Mono", monospace'
+    else:
+        family_value = '"JetBrains Mono", monospace'
+    parts.append(
+        f'.edmd-window {{ font-family: {family_value}; }}'
+    )
     return "\n".join(parts)
 
 
-def apply_theme(theme_name: str) -> None:
+def apply_theme(theme_name: str, font_size: int = 14,
+                font_family: str = "JetBrains Mono") -> None:
     """Apply named CSS theme to the GTK display."""
-    css      = load_theme(theme_name)
+    css      = load_theme(theme_name, font_size, font_family)
     provider = Gtk.CssProvider()
     if css:
         provider.load_from_string(css)

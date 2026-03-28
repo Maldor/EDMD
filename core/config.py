@@ -47,8 +47,10 @@ CFG_DEFAULTS_EXTRA = {
 }
 
 CFG_DEFAULTS_GUI = {
-    "Enabled": False,
-    "Theme":   "default",
+    "Enabled":    False,
+    "Theme":      "default",
+    "FontSize":   14,
+    "FontFamily": "JetBrains Mono",
 }
 
 CFG_DEFAULTS_DISCORD = {

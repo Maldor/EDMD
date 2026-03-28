@@ -10,15 +10,20 @@
  * Colour format: standard CSS hex (#rrggbb) or rgba(r, g, b, a).
  * To find your accent RGB for hover effects, convert your hex accent colour:
  *   e.g.  #e07b20  →  rgba(224, 123, 32, 0.15)  for --accent-hover
+ *
+ * Font and font size are configured in Settings → Appearance, not here.
+ * EDMD uses JetBrains Mono by default; any installed monospace font can be
+ * selected from the Preferences panel.
  */
 
 :root {
      /* ── Font Size ──────────────────────────────────────────────────────
-     *  font-size: Defines the font size for the entire program
+     *  font-size: Defines the base font size for the entire program.
+     *             Overridden by the FontSize setting in config.toml [GUI].
      *             See https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/font-size
-     *             for additional options
+     *             for additional options.
      * ------------------------------------------------------------------ */
-    --font-size:       16px;
+    --font-size:       14px;
 
     /* ── Backgrounds ──────────────────────────────────────────────────────
      *  bg-deep:   outermost window background

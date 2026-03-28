@@ -23,7 +23,7 @@ except ImportError:
         "  pip:           pip install PyGObject"
     )
 
-from gui.helpers  import apply_theme, make_label
+from gui.helpers  import apply_theme, bootstrap_fonts, make_label
 from gui.grid     import BlockGrid
 from gui.menu     import EdmdMenuBar
 from gui.blocks   import (
@@ -434,7 +434,9 @@ class EdmdApp(Gtk.Application):
         self._core    = core
         self._program = program
         self._version = version
-        self._theme   = core.cfg.gui_cfg.get("Theme", "default")
+        self._theme       = core.cfg.gui_cfg.get("Theme",      "default")
+        self._font_size   = core.cfg.gui_cfg.get("FontSize",   14)
+        self._font_family = core.cfg.gui_cfg.get("FontFamily", "JetBrains Mono")
 
     def do_activate(self) -> None:
         # Switch GTK theme to "Default" (minimal, no Adwaita CSD graphics)
@@ -444,7 +446,8 @@ class EdmdApp(Gtk.Application):
             settings = Gtk.Settings.get_default()
             if settings:
                 settings.set_property("gtk-theme-name", "Default")
-            apply_theme(self._theme)
+            bootstrap_fonts()
+            apply_theme(self._theme, self._font_size, self._font_family)
             win = EdmdWindow(
                 app=self,
                 core=self._core,

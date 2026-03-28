@@ -117,8 +117,10 @@ InboundScan      = 0   # Incoming cargo scan from a pirate
 # Requires PyGObject: pacman -S python-gobject gtk4
 #
 [GUI]
-Enabled = false             # set true, or use --gui flag at launch
-Theme   = "default"         # palette filename in themes/ without .css extension
+Enabled    = false             # set true, or use --gui flag at launch
+Theme      = "default"         # palette filename in themes/ without .css extension
+FontFamily = "JetBrains Mono"  # any installed monospace font; leave blank for system default
+FontSize   = 14                # base font size in px (10–24); all em-relative sizes scale with it
                             # built-in: "default", "default-dark",
                             #           "default-light", "default-blue",
                             #           "default-green", "default-purple",

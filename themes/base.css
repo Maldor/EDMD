@@ -12,10 +12,17 @@
 
 /* ── Window & layout ─────────────────────────────────────────────────────── */
 
+/* Default font size — overridden by the user's FontSize preference via an
+   injected :root block appended after all other CSS. */
+:root {
+    --font-size: 14px;
+}
+
 .edmd-window {
     background-color: var(--bg-deep);
     color: var(--fg);
     font-size: var(--font-size);
+    font-family: "JetBrains Mono", monospace;
 }
 
 .root-box {

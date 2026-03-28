@@ -345,6 +345,43 @@ class PreferencesWindow(Gtk.Window):
                       lambda w: self._track_gui("Theme", w.get_active_text() or "default"))
         box.append(self._row("Active Theme", combo, restart_required=True))
 
+        box.append(self._section_label("Font"))
+
+        font_note = Gtk.Label(label="Font changes take effect on next launch.")
+        font_note.set_xalign(0.0)
+        font_note.add_css_class("prefs-note")
+        box.append(font_note)
+
+        # Font family — monospace only
+        current_family = self._cfg.gui_cfg.get("FontFamily", "JetBrains Mono")
+        from gui.helpers import list_monospace_fonts
+        mono_fonts = list_monospace_fonts()
+        # Always include JetBrains Mono as the first option even if not yet
+        # installed (install.sh may not have run yet on this machine).
+        if "JetBrains Mono" not in mono_fonts:
+            mono_fonts = ["JetBrains Mono"] + mono_fonts
+
+        family_combo = Gtk.ComboBoxText()
+        for fam in mono_fonts:
+            family_combo.append_text(fam)
+        try:
+            family_combo.set_active(mono_fonts.index(current_family))
+        except ValueError:
+            family_combo.set_active(0)
+        family_combo.connect(
+            "changed",
+            lambda w: self._track_gui("FontFamily", w.get_active_text() or "JetBrains Mono"),
+        )
+        box.append(self._row("Font Family", family_combo, restart_required=True))
+
+        # Font size
+        current_font_size = self._cfg.gui_cfg.get("FontSize", 14)
+        font_spin = Gtk.SpinButton.new_with_range(10, 24, 1)
+        font_spin.set_value(current_font_size)
+        font_spin.connect("value-changed",
+                          lambda w: self._track_gui("FontSize", int(w.get_value())))
+        box.append(self._row("Font Size (px)", font_spin, restart_required=True))
+
     # ── Change tracking ───────────────────────────────────────────────────────
     #
     # RESTART_REQUIRED keys — must match restart_required=True in the tab builders.
@@ -354,7 +391,7 @@ class PreferencesWindow(Gtk.Window):
         "Settings": {"JournalFolder"},
         "Discord":  {"WebhookURL", "UserID", "Identity",
                      "ForumChannel", "ThreadCmdrNames", "Timestamp"},
-        "GUI":      {"Theme"},
+        "GUI":      {"Theme", "FontSize"},
         "EDDN":     {"Enabled", "UploaderID", "TestMode"},
         "EDSM":     {"Enabled", "CommanderName", "ApiKey"},
         "EDAstro":  {"Enabled", "UploadCarrierEvents"},

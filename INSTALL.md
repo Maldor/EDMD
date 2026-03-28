@@ -132,6 +132,21 @@ development or portable installs.
 
 ---
 
+## Fonts
+
+EDMD bundles **JetBrains Mono** in the `fonts/` directory of the repo. On first launch, EDMD copies those TTF files into `~/.local/share/EDMD/fonts/` (its own data directory) and registers them with Pango for the current process — no system font directories are touched and no font cache rebuild is required. On Windows the data directory is `%APPDATA%\EDMD\fonts\`.
+
+Any installed monospace font can be selected from **Settings → Appearance → Font Family** in the GUI. Font size is adjustable there as well (10–24 px). Both settings require a restart to take effect.
+
+If the `fonts/` directory is empty (e.g. a git clone without the font files), EDMD falls back silently to the system monospace font. To obtain the bundled fonts, download the four TTF files from the [JetBrains Mono releases page](https://github.com/JetBrains/JetBrainsMono/releases/latest) and place them in `fonts/`:
+
+- `JetBrainsMono-Regular.ttf`
+- `JetBrainsMono-Bold.ttf`
+- `JetBrainsMono-Italic.ttf`
+- `JetBrainsMono-BoldItalic.ttf`
+
+---
+
 ## Verifying your install
 
 ```bash

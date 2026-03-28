@@ -193,8 +193,7 @@ else
     warn "Copy example.config.toml to $USER_CONFIG manually before running EDMD."
 fi
 
-# ── Executable bit ────────────────────────────────────────────────────────────
-section "Permissions"
+# ── Permissions ───────────────────────────────────────────────────────────────
 
 chmod +x "$REPO_DIR/edmd.py"
 ok "edmd.py is now executable"
