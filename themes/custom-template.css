@@ -13,6 +13,13 @@
  */
 
 :root {
+     /* ── Font Size ──────────────────────────────────────────────────────
+     *  font-size: Defines the font size for the entire program
+     *             See https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/font-size
+     *             for additional options
+     * ------------------------------------------------------------------ */
+    --font-size:       16px;
+
     /* ── Backgrounds ──────────────────────────────────────────────────────
      *  bg-deep:   outermost window background
      *  bg-mid:    section card background

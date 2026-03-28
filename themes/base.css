@@ -15,6 +15,7 @@
 .edmd-window {
     background-color: var(--bg-deep);
     color: var(--fg);
+    font-size: var(--font-size);
 }
 
 .root-box {
