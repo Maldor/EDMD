@@ -358,6 +358,9 @@ class AssetsPlugin(BasePlugin):
         "CarrierJump",
         "CarrierFinance",
         "FCMaterials",
+        "CarrierDecommission",   # carrier sold/decommissioned
+        # Ships sold/transferred
+        "ShipyardSell",
         # Session boundaries
         "LoadGame",
     ]
@@ -829,6 +832,39 @@ class AssetsPlugin(BasePlugin):
                 orphans = [k for k in self._ship_loadout_cache if k not in valid_ids]
                 for k in orphans:
                     del self._ship_loadout_cache[k]
+            else:
+                # CAPI unavailable: prune against the most recent StoredShips event.
+                # Prevents sold ships from accumulating in the persistent cache.
+                stored_ids: set = set()
+                if current_sid is not None:
+                    stored_ids.add(int(current_sid) if isinstance(current_sid, int)
+                                   else current_sid)
+                for jpath in journals[:SCAN_JOURNALS]:
+                    found = False
+                    try:
+                        for line in reversed(jpath.read_text(encoding="utf-8").splitlines()):
+                            try:
+                                ev = json.loads(line)
+                            except ValueError:
+                                continue
+                            if ev.get("event") == "StoredShips":
+                                for section in ("ShipsHere", "ShipsRemote"):
+                                    for s in ev.get(section, []):
+                                        sid = s.get("ShipID")
+                                        if sid is not None:
+                                            try:    stored_ids.add(int(sid))
+                                            except: stored_ids.add(sid)
+                                found = True
+                                break
+                    except OSError:
+                        continue
+                    if found:
+                        break
+                if stored_ids:
+                    orphans = [k for k in self._ship_loadout_cache
+                               if k not in stored_ids]
+                    for k in orphans:
+                        del self._ship_loadout_cache[k]
             # Persist any newly-discovered loadouts (and pruning)
             self._save_to_storage()
 
@@ -1288,8 +1324,31 @@ class AssetsPlugin(BasePlugin):
                 # Refresh the tab titles so Ships(N) / Modules(N) counts stay current.
                 if gq: gq.put(("plugin_refresh", "assets"))
 
+            case "ShipyardSell":
+                # Remove the sold ship from the loadout cache immediately so it
+                # doesn't reappear at the next roster refresh.
+                sell_id = event.get("SellShipID")
+                if sell_id is not None:
+                    try:    sell_id_i = int(sell_id)
+                    except: sell_id_i = sell_id
+                    self._ship_loadout_cache.pop(sell_id_i, None)
+                    # Also remove from the in-memory stored fleet so the GUI
+                    # updates without waiting for a StoredShips event.
+                    state.assets_stored_ships = [
+                        s for s in getattr(state, "assets_stored_ships", [])
+                        if s.get("ship_id") not in (sell_id, sell_id_i)
+                    ]
+                    self._save_to_storage()
+                if gq: gq.put(("plugin_refresh", "assets"))
+
             case "CarrierStats":
                 state.assets_carrier = self._parse_carrier_stats(event)
+                if gq: gq.put(("plugin_refresh", "assets"))
+
+            case "CarrierDecommission":
+                # Carrier has been sold/decommissioned — clear all carrier state.
+                state.assets_carrier = None
+                self._save_to_storage()
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "CarrierJump":
