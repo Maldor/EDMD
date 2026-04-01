@@ -55,3 +55,4 @@ themes/custom/*.css
 
 # ── Logs and local data ───────────────────────────────────────────────────────
 *.log
+start_edmd.bat
