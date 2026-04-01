@@ -1082,6 +1082,10 @@ def handle_event(
                     timestamp=logtime, loglevel=2,
                 )
 
+            case "Interdiction" if j["Success"] == "true" # specify conditions
+                event_name = "Interdiction Complete"; emoji = "🚨"; sigil = "!  WARN"
+                # Code 
+            
             case "EjectCargo" if not j["Abandoned"] and j["Count"] == 1:
                 name = normalise_ship_name(j.get("Type_Localised") or j.get("Type"))
                 emitter.emit(
