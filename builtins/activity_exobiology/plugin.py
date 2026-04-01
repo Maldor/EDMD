@@ -9,9 +9,14 @@ ScanOrganic stages: Log (1) → Sample (2) → Analyse (3 = complete).
 Value bonuses:
   First discovery (WasLogged=False): 5× base value
   First footfall (body not previously visited): +4× base value on top
-SellOrganicData gives realised credits.
 
-Species value table extracted from EDMC-BioScan (GPL v2).
+Additional tracking:
+  - Per-body bio signal counts from FSSBodySignals and SAASignalsFound,
+    correlated with ScanOrganic completions to show species completion per body
+  - Count of distinct bodies where at least one species was completed
+  - Minimum clonal distance for the current in-progress species
+
+SellOrganicData gives realised credits.
 """
 
 from core.plugin_loader import BasePlugin
@@ -20,7 +25,6 @@ from core.emit import fmt_credits
 
 # ── Species value table ───────────────────────────────────────────────────────
 # Codex species key → (display name, base credit value)
-# Source: EDMC-BioScan species catalog (GPL v2)
 SPECIES_VALUES: dict[str, tuple[str, int]] = {
     '$Codex_Ent_TubeABCD_02_Name;': ('Albidum Sinuous Tubers', 1514500),
     '$Codex_Ent_Aleoids_01_Name;': ('Aleoida Arcus', 7252500),
@@ -142,31 +146,68 @@ SPECIES_VALUES: dict[str, tuple[str, int]] = {
     '$Codex_Ent_TubeEFGH_03_Name;': ('Viride Sinuous Tubers', 1514500),
 }
 
-_FIRST_DISCOVERY_MULT = 5    # WasLogged=False
-_FOOTFALL_MULT        = 4    # first footfall bonus on top of base
+# ── Minimum clonal distances by genus (metres) ────────────────────────────────
+# Required minimum distance between samples of the same species.
+_GENUS_CLONAL_DISTANCE: dict[str, int] = {
+    "aleoida":     150,
+    "bacterium":   500,
+    "cactoida":    300,
+    "clypeus":     150,
+    "concha":      150,
+    "electricae":  1000,
+    "fonticulua":  500,
+    "frutexa":     150,
+    "fumerola":    100,
+    "fungoida":    300,
+    "osseus":      800,
+    "recepta":     150,
+    "stratum":     500,
+    "tubus":       800,
+    "tussock":     200,
+}
+_DEFAULT_CLONAL_DISTANCE = 100
+
+
+def _clonal_distance(species_key: str) -> int:
+    """Return minimum clonal distance in metres for the given species codex key."""
+    key_lower = (species_key or "").lower()
+    for genus, dist in _GENUS_CLONAL_DISTANCE.items():
+        if genus in key_lower:
+            return dist
+    return _DEFAULT_CLONAL_DISTANCE
+
+
+_FIRST_DISCOVERY_MULT = 5
+_FOOTFALL_MULT        = 4
 
 
 def _species_value(codex_key: str, was_logged: bool, footfall_bonus: bool) -> int:
     entry = SPECIES_VALUES.get(codex_key)
     if not entry:
         return 0
-    base = entry[1]
+    base  = entry[1]
     value = base * _FIRST_DISCOVERY_MULT if not was_logged else base
     if footfall_bonus:
         value += base * _FOOTFALL_MULT
     return value
 
 
+def _body_key(system_address: int | None, body_id: int | None) -> tuple:
+    return (system_address or 0, body_id or -1)
+
+
 class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
     PLUGIN_NAME        = "activity_exobiology"
     PLUGIN_DISPLAY     = "Exobiology Activity"
-    PLUGIN_VERSION     = "1.1.0"
-    PLUGIN_DESCRIPTION = "Tracks organic samples, held value, and exobiology credits."
+    PLUGIN_VERSION     = "2.0.0"
+    PLUGIN_DESCRIPTION = "Tracks organic samples, bio signal counts, held value, and clonal distances."
     ACTIVITY_TAB_TITLE = "Exobiology"
 
     SUBSCRIBED_EVENTS = [
         "ScanOrganic",
         "SellOrganicData",
+        "FSSBodySignals",
+        "SAASignalsFound",
         "Location",
         "FSDJump",
         "Embark",
@@ -181,10 +222,19 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
         self.samples_analysed: int  = 0
         self.credits_earned:   int  = 0
         self.held_value_est:   int  = 0
-        self.species_tally:    dict = {}
+        self.species_tally:    dict = {}   # display name → count
         self._current_species: str  = ""
         self._current_stage:   int  = 0
+        self._current_body_id: int | None = None
+        self._current_sys_addr: int | None = None
         self.session_start_time     = None
+
+        # Distinct bodies with at least one completed scan this session
+        self.bodies_with_bio: set[tuple] = set()
+
+        # Per-body bio signal counts:
+        # key → {"bio_count": int, "completed": int, "genuses": list[str]}
+        self._body_signals: dict[tuple, dict] = {}
 
     def on_session_reset(self) -> None:
         self._reset_counters()
@@ -196,14 +246,52 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
 
         match ev:
 
+            case "FSSBodySignals":
+                sys_addr = event.get("SystemAddress")
+                body_id  = event.get("BodyID")
+                bk = _body_key(sys_addr, body_id)
+                bio_count = 0
+                for sig in event.get("Signals", []):
+                    if "Biological" in sig.get("Type", ""):
+                        bio_count = int(sig.get("Count", 0))
+                        break
+                if bio_count > 0:
+                    entry = self._body_signals.setdefault(bk, {"bio_count": 0, "completed": 0, "genuses": []})
+                    entry["bio_count"] = bio_count
+
+            case "SAASignalsFound":
+                sys_addr = event.get("SystemAddress")
+                body_id  = event.get("BodyID")
+                bk = _body_key(sys_addr, body_id)
+                bio_count = 0
+                for sig in event.get("Signals", []):
+                    if "Biological" in sig.get("Type", ""):
+                        bio_count = int(sig.get("Count", 0))
+                        break
+                genuses = [
+                    g.get("Genus_Localised") or g.get("Genus", "")
+                    for g in event.get("Genuses", [])
+                ]
+                if bio_count > 0 or genuses:
+                    entry = self._body_signals.setdefault(bk, {"bio_count": 0, "completed": 0, "genuses": []})
+                    if bio_count > 0:
+                        entry["bio_count"] = max(entry.get("bio_count", 0), bio_count)
+                    if genuses:
+                        entry["genuses"] = genuses
+
             case "ScanOrganic":
-                scan_type   = event.get("ScanType", "")
-                species_key = event.get("Species", "")
+                scan_type    = event.get("ScanType", "")
+                species_key  = event.get("Species", "")
+                body_id      = event.get("Body")
+                sys_addr     = event.get("SystemAddress")
                 stage = {"Log": 1, "Sample": 2, "Analyse": 3}.get(scan_type, 0)
                 if not stage:
                     return
-                self._current_species = species_key
-                self._current_stage   = stage
+
+                self._current_species  = species_key
+                self._current_stage    = stage
+                self._current_body_id  = body_id
+                self._current_sys_addr = sys_addr
 
                 if stage == 3:
                     if self.session_start_time is None:
@@ -217,10 +305,18 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
                     was_logged     = bool(event.get("WasLogged", True))
                     footfall_bonus = (event.get("WasFootfalled") is False)
                     self.held_value_est += _species_value(species_key, was_logged, footfall_bonus)
-                    self._current_species = ""
-                    self._current_stage   = 0
-                    if gq:
-                        gq.put(("stats_update", None))
+
+                    # Mark body as visited with bio life
+                    bk = _body_key(sys_addr, body_id)
+                    self.bodies_with_bio.add(bk)
+                    entry = self._body_signals.setdefault(bk, {"bio_count": 0, "completed": 0, "genuses": []})
+                    entry["completed"] = entry.get("completed", 0) + 1
+
+                    self._current_species  = ""
+                    self._current_stage    = 0
+                    self._current_body_id  = None
+                    self._current_sys_addr = None
+                    if gq: gq.put(("stats_update", None))
 
             case "SellOrganicData":
                 total = sum(
@@ -229,13 +325,15 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
                 )
                 self.credits_earned += total
                 self.held_value_est  = max(0, self.held_value_est - total)
-                if gq:
-                    gq.put(("stats_update", None))
+                if gq: gq.put(("stats_update", None))
 
             case "Location" | "FSDJump" | "Embark":
+                # Jump/embark mid-scan discards the in-progress scan
                 if self._current_stage < 3:
-                    self._current_species = ""
-                    self._current_stage   = 0
+                    self._current_species  = ""
+                    self._current_stage    = 0
+                    self._current_body_id  = None
+                    self._current_sys_addr = None
 
     def has_activity(self) -> bool:
         return self.samples_analysed > 0 or self.credits_earned > 0
@@ -243,7 +341,6 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
     def get_summary_rows(self) -> list[dict]:
         rows = []
         if self.samples_analysed > 0 or self.credits_earned > 0:
-            # Value shown: held estimate if still carrying, sold total if redeemed
             display_value = self.held_value_est if self.held_value_est > 0 else self.credits_earned
             value_rate = fmt_credits(display_value) if display_value else None
             rows.append({
@@ -251,16 +348,63 @@ class ActivityExobiologyPlugin(BasePlugin, ActivityProviderMixin):
                 "value": str(self.samples_analysed),
                 "rate":  f"{value_rate} credits" if value_rate else None,
             })
+        if self.bodies_with_bio:
+            rows.append({
+                "label": "Bodies with bio",
+                "value": str(len(self.bodies_with_bio)),
+                "rate":  None,
+            })
         return rows
 
     def get_tab_rows(self) -> list[dict]:
         rows = self.get_summary_rows()
+
+        # In-progress scan
         if self._current_species:
             name  = SPECIES_VALUES.get(self._current_species, ("Scanning…",))[0]
             stage = {1: "Log", 2: "Sample", 3: "Analyse"}.get(self._current_stage, "")
-            rows.append({"label": f"  In progress ({stage})", "value": name, "rate": None})
+            dist  = _clonal_distance(self._current_species)
+            dist_str = f"{dist} m min. distance"
+            rows.append({
+                "label": f"  In progress ({stage})",
+                "value": name,
+                "rate":  dist_str,
+            })
+            # Show current body progress if known
+            if self._current_body_id is not None:
+                bk = _body_key(self._current_sys_addr, self._current_body_id)
+                bsig = self._body_signals.get(bk)
+                if bsig and bsig.get("bio_count", 0) > 0:
+                    done  = bsig.get("completed", 0)
+                    total = bsig["bio_count"]
+                    rows.append({
+                        "label": "  Body progress",
+                        "value": f"{done}/{total} species",
+                        "rate":  None,
+                    })
+
+        # Per-body signal summary for bodies with known bio counts
+        visible_bodies = [
+            (bk, info) for bk, info in self._body_signals.items()
+            if info.get("bio_count", 0) > 0 or info.get("completed", 0) > 0
+        ]
+        if visible_bodies:
+            rows.append({"label": "─── Bodies ───", "value": "", "rate": None})
+            for bk, info in visible_bodies:
+                done  = info.get("completed", 0)
+                total = info.get("bio_count", 0) or done
+                genuses = info.get("genuses", [])
+                genus_str = ", ".join(g for g in genuses if g) if genuses else ""
+                rows.append({
+                    "label": f"  Body {bk[1]}",
+                    "value": f"{done}/{total} species",
+                    "rate":  genus_str or None,
+                })
+
+        # Completed species tally
         if self.species_tally:
             rows.append({"label": "─── Species ───", "value": "", "rate": None})
             for species, count in sorted(self.species_tally.items(), key=lambda x: -x[1]):
                 rows.append({"label": f"  {species}", "value": str(count), "rate": None})
+
         return rows

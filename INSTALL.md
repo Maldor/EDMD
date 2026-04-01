@@ -70,30 +70,11 @@ pip install discord-webhook cryptography --break-system-packages
 
 ## Windows
 
-### Installer (Recommended)
-
 Download **`EDMD-Setup-{version}.exe`** from the [latest release](https://github.com/drworman/EDMD/releases/latest).
 
-The installer handles everything automatically: MSYS2, GTK4, Python, all dependencies, and the EDMD source. See **[docs/guides/WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md)** for full details.
+The installer handles everything automatically: MSYS2, GTK4, Python, all pip dependencies, Start Menu shortcuts for both GUI and terminal mode, and the EDMD source. See **[docs/guides/WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md)** for full details.
 
 **Requirement:** [Git for Windows](https://git-scm.com/download/win) must be installed and on your PATH before running the installer. Git is required to download the EDMD source and to apply future updates.
-
-### Manual installation
-
-```bat
-install.bat
-```
-
-This installs terminal-mode dependencies (`psutil`, `discord-webhook`, `cryptography`) and creates your config file. Terminal mode is fully functional without the GUI.
-
-**GUI mode** requires GTK4. Two manual paths are available:
-
-| Path | Summary |
-|---|---|
-| [MSYS2](docs/guides/WINDOWS_GUI.md#option-a--msys2-recommended) | Recommended. GTK4 via MSYS2's pacman. |
-| [gvsbuild](docs/guides/WINDOWS_GUI.md#option-b--gvsbuild-advanced) | Advanced. Builds GTK4 natively. |
-
-See **[docs/guides/WINDOWS_GUI.md](docs/guides/WINDOWS_GUI.md)** for full instructions.
 
 > **Developer notice:** EDMD is developed and tested on Linux. Windows support is best-effort — the developer cannot provide direct troubleshooting for Windows-specific issues.
 
@@ -168,7 +149,7 @@ The GUI requires PyGObject with GTK4 bindings. If these are not available EDMD f
 |---|---|---|
 | Linux | ✅ First-class | System package manager — see distro sections above |
 | macOS | ⚠️ Best-effort | Homebrew — see [MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) |
-| Windows | ⚠️ Experimental | Installer (recommended) or manual MSYS2/gvsbuild — see [WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md) |
+| Windows | ⚠️ Experimental | Installer — see [WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md) |
 
 GTK4 availability is checked at runtime — if `--gui` is passed but PyGObject cannot be loaded, EDMD prints a clear error and falls back to terminal mode.
 

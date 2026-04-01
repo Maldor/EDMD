@@ -69,13 +69,24 @@ class MissionsPlugin(BasePlugin):
                     exp    = mission.get("Expires", 0)
                     exp_ok = (exp == 0) or (exp > 0)
                     if "Mission_Massacre" in mission["Name"] and exp_ok:
-                        state.active_missions.append(mission["MissionID"])
+                        mid = mission["MissionID"]
+                        state.active_missions.append(mid)
                         if (
                             "Reward" in mission
-                            and mission["MissionID"] not in state.mission_value_map
+                            and mid not in state.mission_value_map
                         ):
                             state.stack_value += mission["Reward"]
-                            state.mission_value_map[mission["MissionID"]] = mission["Reward"]
+                            state.mission_value_map[mid] = mission["Reward"]
+                        if mid not in state.mission_detail_map:
+                            state.mission_detail_map[mid] = {
+                                "faction":        mission.get("Faction", ""),
+                                "kill_count":     mission.get("KillCount", 0),
+                                "target_faction": mission.get("TargetFaction", ""),
+                                "target_system":  mission.get("DestinationSystem", ""),
+                                "target_type":    mission.get("TargetType_Localised") or mission.get("TargetType", ""),
+                                "wing":           mission.get("Wing", False),
+                                "reward":         mission.get("Reward", 0),
+                            }
 
                 # Count missions already redirected before EDMD launched
                 if state.active_missions:
@@ -118,12 +129,22 @@ class MissionsPlugin(BasePlugin):
                 "Mission_Massacre" in event.get("Name", "")
                 and not state.in_preload
             ):
-                state.active_missions.append(event["MissionID"])
+                mid = event["MissionID"]
+                state.active_missions.append(mid)
                 if "Reward" in event:
                     state.stack_value += event["Reward"]
-                    state.mission_value_map[event["MissionID"]] = event["Reward"]
+                    state.mission_value_map[mid] = event["Reward"]
                 if "TargetFaction" in event:
-                    state.mission_target_faction_map[event["MissionID"]] = event["TargetFaction"]
+                    state.mission_target_faction_map[mid] = event["TargetFaction"]
+                state.mission_detail_map[mid] = {
+                    "faction":        event.get("Faction", ""),
+                    "kill_count":     event.get("KillCount", 0),
+                    "target_faction": event.get("TargetFaction", ""),
+                    "target_system":  event.get("DestinationSystem", ""),
+                    "target_type":    event.get("TargetType_Localised") or event.get("TargetType", ""),
+                    "wing":           event.get("Wing", False),
+                    "reward":         event.get("Reward", 0),
+                }
                 total_now = len(state.active_missions)
                 core.emitter.emit(
                     msg_term=f"Accepted massacre mission (active: {total_now})",
@@ -150,6 +171,7 @@ class MissionsPlugin(BasePlugin):
                 if reward:
                     state.stack_value -= reward
                 state.mission_target_faction_map.pop(mid, None)
+                state.mission_detail_map.pop(mid, None)
                 state.active_missions.remove(mid)
                 if state.missions_complete > 0:
                     state.missions_complete -= 1

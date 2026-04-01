@@ -1032,6 +1032,15 @@ class AssetsPlugin(BasePlugin):
                     if sid is None:
                         continue
                     sid_i = int(sid) if isinstance(sid, int) else sid
+                    # Sanitise type_display — if it looks like an unprocessed
+                    # internal name (contains "_" with no spaces, e.g. "type9_military")
+                    # refresh it through the localisation pipeline.  This corrects
+                    # any stale values written by an older version of the code.
+                    td = ship.get("type_display", "")
+                    if td and "_" in td and " " not in td:
+                        refreshed = self._localised_ship_name(ship.get("type", ""))
+                        if refreshed:
+                            ship["type_display"] = refreshed
                     # Apply loadout from cache if ship has none
                     if not ship.get("loadout"):
                         ship["loadout"] = self._ship_loadout_cache.get(sid_i, [])
@@ -1294,23 +1303,32 @@ class AssetsPlugin(BasePlugin):
                 if gq: gq.put(("plugin_refresh", "assets"))
 
             case "StoredShips":
-                # Merge — don't overwrite.  This event omits the active ship.
+                # StoredShips lists every ship in every storage location
+                # (ShipsHere + ShipsRemote) — it is authoritative and complete.
+                # Replace the stored list entirely rather than merging, so that
+                # ships the player has sold or transferred are removed immediately
+                # without waiting for a CAPI poll.
+                #
+                # The one entry StoredShips never includes is the player's active
+                # ship (it's boarded, not stored).  Preserve that from the existing
+                # list if it's there, so state always holds the complete fleet.
                 incoming = {
                     d["ship_id"]: d
                     for d in self._parse_stored_ships(event)
                     if d.get("ship_id") is not None
                 }
-                existing = {
+                current_id = (getattr(state, "assets_current_ship", None) or {}).get("ship_id")
+                existing   = {
                     d["ship_id"]: d
                     for d in getattr(state, "assets_stored_ships", [])
                     if d.get("ship_id") is not None
                 }
-                merged = {**existing, **incoming}
-                # Do NOT strip current ship here — state holds the full fleet.
-                # The block's refresh() deduplicates against assets_current_ship
-                # at render time.  Stripping here causes permanent data loss
-                # when preload replays events out of order.
-                state.assets_stored_ships = list(merged.values())
+                # Build the new list: authoritative incoming + current ship entry
+                # (if present in existing and not already in incoming).
+                result = dict(incoming)
+                if current_id is not None and current_id not in result and current_id in existing:
+                    result[current_id] = existing[current_id]
+                state.assets_stored_ships = list(result.values())
                 self._save_to_storage()
                 if gq: gq.put(("plugin_refresh", "assets"))
 

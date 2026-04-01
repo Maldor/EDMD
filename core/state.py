@@ -563,6 +563,7 @@ class MonitorState:
         self.last_sc_exit_mono       = None   # monotonic time of last SC exit
         self.last_shutdown_time      = None   # datetime of last Shutdown event
         self.mission_value_map       = {}
+        self.mission_detail_map      = {}  # MissionID → {faction, kill_count, target_faction, target_system, target_type, wing, reward}
         self.stack_value             = 0
         self.has_fighter_bay         = False
         self.mission_target_faction_map = {}
@@ -705,6 +706,7 @@ class MonitorState:
         self.missions_complete          = 0
         self.stack_value                = 0
         self.mission_value_map          = {}
+        self.mission_detail_map         = {}
         self.mission_target_faction_map = {}
 
 

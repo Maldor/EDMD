@@ -292,4 +292,6 @@ class SessionStatsBlock(BlockWidget):
             tab_box.append(tab_grid)
             self._append_rows(tab_grid, tab_rows, start_row=0)
 
+        # Register permanent tabs before pruning so they are never removed
+
         self._remove_stale_tabs(active_tab_titles)

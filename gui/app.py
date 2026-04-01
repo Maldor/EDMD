@@ -35,6 +35,8 @@ from gui.blocks   import (
     CargoBlock,
     EngineeringBlock,
     AssetsBlock,
+    ColonisationBlock,
+    CareerBlock,
 )
 
 GLib.set_prgname("edmd")
@@ -42,14 +44,16 @@ GLib.set_application_name("EDMD")
 
 # Built-in block registry — (name, BlockWidget subclass, display title)
 _BUILTIN_REGISTRY = [
-    ("commander",     CommanderBlock,    "Commander"),
-    ("session_stats", SessionStatsBlock, "Session Stats"),
-    ("crew_slf",      CrewSlfBlock,      "Crew / SLF"),
-    ("missions",      MissionsBlock,     "Mission Stack"),
-    ("alerts",        AlertsBlock,       "Alerts"),
-    ("cargo",         CargoBlock,        "Cargo"),
-    ("engineering",   EngineeringBlock,  "Engineering"),
-    ("assets",        AssetsBlock,       "Assets"),
+    ("commander",     CommanderBlock,     "Commander"),
+    ("session_stats", SessionStatsBlock,  "Session Stats"),
+    ("crew_slf",      CrewSlfBlock,       "Crew / SLF"),
+    ("missions",      MissionsBlock,      "Mission Stack"),
+    ("alerts",        AlertsBlock,        "Alerts"),
+    ("cargo",         CargoBlock,         "Cargo"),
+    ("engineering",   EngineeringBlock,   "Engineering"),
+    ("assets",        AssetsBlock,        "Assets"),
+    ("colonisation",  ColonisationBlock,  "Colonisation"),
+    ("career",        CareerBlock,        "Career"),
 ]
 
 
@@ -371,6 +375,8 @@ class EdmdWindow(Gtk.ApplicationWindow):
                     self._refresh_block("assets")
                 elif msg_type == "alerts_update":
                     self._refresh_block("alerts")
+                elif msg_type == "career_update":
+                    self._refresh_block("career")
                 elif msg_type == "capi_updated":
                     # A CAPI endpoint refreshed — refresh all blocks that
                     # might display CAPI-sourced data

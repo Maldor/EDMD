@@ -48,8 +48,34 @@ from core.emit import (
 
 _ED_PROCESS_NAMES = {"EliteDangerous64.exe", "EliteDangerous32.exe", "EliteDangerous.exe"}
 
+# Maximum age (seconds) for Status.json to be considered evidence the game is running.
+# Status.json is rewritten every ~500ms while the game is active.  90 seconds is
+# generous enough to cover loading screens and carrier-jump freezes.
+_STATUS_FRESH_THRESHOLD = 90
 
-def _ed_client_running() -> bool:
+
+def _ed_client_running(journal_dir: Path | None = None) -> bool:
+    """Return True if Elite Dangerous appears to be running.
+
+    Primary signal: Status.json freshness.  The game rewrites Status.json
+    every ~500ms while active, so a recently-modified file is definitive
+    proof the game is running regardless of platform or process name.
+
+    Fallback: psutil process-name scan.  Reliable on Windows; may be
+    unreliable on Linux/Proton depending on the Proton version.
+    """
+    # Primary: Status.json mtime (platform-agnostic, no process lookup needed)
+    if journal_dir is not None:
+        try:
+            status_path = Path(journal_dir) / "Status.json"
+            if status_path.is_file():
+                age_wall = time.time() - status_path.stat().st_mtime
+                if age_wall < _STATUS_FRESH_THRESHOLD:
+                    return True
+        except Exception:
+            pass
+
+    # Fallback: process name (Windows-reliable; Linux best-effort)
     try:
         for proc in psutil.process_iter(["name"]):
             if proc.info.get("name") in _ED_PROCESS_NAMES:
@@ -620,8 +646,10 @@ def handle_event(
                 _providers   = getattr(core, "session_providers", [])
                 _sess_plugin = (core._plugins.get("session_stats")
                                 if core and hasattr(core, "_plugins") else None)
-                if any(p.has_activity() for p in _providers):
-                    emit_summary(emitter, state, _providers, _sess_plugin)
+                # Always attempt — emit_summary's own guard suppresses output
+                # when dur < 60s and nothing to report.  Fuel is now included
+                # unconditionally so summaries fire during any active session.
+                emit_summary(emitter, state, _providers, _sess_plugin)
         # Docked/Undocked: notify DataProvider for CAPI dock-gating
         if ev_name in ("Docked", "Location") and data_provider is not None:
             data_provider.notify_docked(True)
@@ -1385,7 +1413,7 @@ def monitor_journal(
                         _grace_ok = True
 
                     if _grace_ok:
-                        _ed_up   = _ed_client_running()
+                        _ed_up   = _ed_client_running(journal_dir)
                         _reason  = (
                             "Elite Dangerous client not detected"
                             if not _ed_up

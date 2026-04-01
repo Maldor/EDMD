@@ -874,17 +874,13 @@ class CAPISource:
                 "capi":         True,
             })
         if stored:
-            # Merge: CAPI data updates ships it knows about, but preserves
-            # journal-derived ships that CAPI may not have seen yet
-            # (e.g. after a swap since the last CAPI poll).
-            existing = {
-                s["ship_id"]: s
-                for s in (getattr(state, "assets_stored_ships", None) or [])
-                if s.get("ship_id") is not None
-            }
-            for s in stored:
-                existing[s["ship_id"]] = s   # CAPI wins for known ships
-            state.assets_stored_ships = list(existing.values())
+            # CAPI /profile ships{} is the authoritative owned-ship list.
+            # Replace state directly — do not merge with any prior list.
+            # Ships absent from this response are no longer owned (sold,
+            # transferred, etc.).  journal_extra location/hot enrichment
+            # is already applied per-ship during the stored[] construction
+            # above, so no data is lost by replacing rather than merging.
+            state.assets_stored_ships = stored
 
         try:
             self._storage.write_json({

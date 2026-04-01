@@ -14,6 +14,8 @@ from gui.blocks.alerts        import AlertsBlock
 from gui.blocks.cargo         import CargoBlock
 from gui.blocks.engineering   import EngineeringBlock
 from gui.blocks.assets        import AssetsBlock
+from gui.blocks.colonisation  import ColonisationBlock
+from gui.blocks.career        import CareerBlock
 
 __all__ = [
     "CommanderBlock",
@@ -24,4 +26,6 @@ __all__ = [
     "CargoBlock",
     "EngineeringBlock",
     "AssetsBlock",
+    "ColonisationBlock",
+    "CareerBlock",
 ]
