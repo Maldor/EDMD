@@ -112,6 +112,7 @@ jobs:
       # dist\runtime\. Validates that all required imports work before proceeding.
       - name: Collect bundled runtime
         shell: pwsh
+        timeout-minutes: 15
         run: |
           # Priority 1: use the msys2-location output from the setup step
           $msys2 = "${{ steps.msys2_setup.outputs.msys2-location }}"

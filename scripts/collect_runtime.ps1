@@ -86,11 +86,34 @@ Get-ChildItem (Join-Path $ucrt "bin") -Filter "*.dll" | ForEach-Object {
 }
 Write-Host "      $dll_count DLLs copied."
 
-# ── 3. Python stdlib + site-packages ─────────────────────────────────────────
-# Copy the full Python lib tree — stdlib, lib-dynload (.pyd extension modules),
-# and site-packages (gi, psutil, etc. from MSYS2 pacman).
+# ── 3. Install pip-managed packages into MSYS2 Python (before copying) ───────
+# discord-webhook and cryptography are not available via pacman.
+# We install them into the ORIGINAL MSYS2 Python here so they are present in
+# ucrt64\lib\python3.x\site-packages\ when the lib tree is copied in step 4.
+# Installing into the copied runtime Python fails because the copied exe cannot
+# reliably report its own platform tags to pip, causing pip to select the source
+# distribution for cryptography (which requires maturin/Rust to compile).
+# --only-binary :all: prevents any source builds.
+# --break-system-packages bypasses MSYS2's PEP 668 externally-managed marker.
 
-Write-Host "[3/8] Copying Python stdlib and site-packages..."
+Write-Host "[3/8] Installing pip-managed packages into MSYS2 Python..."
+$ucrt_python_exe = Join-Path $ucrt "bin\python.exe"
+& $ucrt_python_exe -m pip install `
+    --break-system-packages `
+    --only-binary :all: `
+    --no-warn-script-location `
+    "discord-webhook>=1.3.0" `
+    "cryptography>=41.0.0"
+if ($LASTEXITCODE -ne 0) {
+    throw "pip install into MSYS2 Python failed (exit code $LASTEXITCODE)"
+}
+Write-Host "      pip packages installed into MSYS2 Python."
+
+# ── 4. Python stdlib + site-packages ─────────────────────────────────────────
+# Copy the full Python lib tree — stdlib, lib-dynload (.pyd extension modules),
+# and site-packages (gi, psutil, discord_webhook, cryptography, etc.).
+
+Write-Host "[4/8] Copying Python stdlib and site-packages..."
 $py_lib_src = Join-Path $ucrt "lib\python$py_xy"
 if (-not (Test-Path $py_lib_src)) {
     throw "Python lib not found at $py_lib_src"
@@ -99,9 +122,9 @@ $py_lib_dst = Join-Path $OutDir $lib_rel
 Copy-Item $py_lib_src $py_lib_dst -Recurse -Force
 Write-Host "      Copied: $py_lib_src"
 
-# ── 4. GI typelibs ────────────────────────────────────────────────────────────
+# ── 5. GI typelibs ────────────────────────────────────────────────────────────
 
-Write-Host "[4/8] Copying GI typelibs..."
+Write-Host "[5/8] Copying GI typelibs..."
 $typelib_src = Join-Path $ucrt "lib\girepository-1.0"
 if (Test-Path $typelib_src) {
     $typelib_dst = Join-Path $OutDir "lib\girepository-1.0"
@@ -112,10 +135,10 @@ if (Test-Path $typelib_src) {
     Write-Warning "GI typelib directory not found — gi imports may fail."
 }
 
-# ── 5. GLib schemas ───────────────────────────────────────────────────────────
+# ── 6. GLib schemas ───────────────────────────────────────────────────────────
 # Must be compiled; glib-compile-schemas produces gschemas.compiled.
 
-Write-Host "[5/8] Copying and compiling GLib schemas..."
+Write-Host "[6/8] Copying and compiling GLib schemas..."
 $schema_src = Join-Path $ucrt "share\glib-2.0\schemas"
 $schema_dst = Join-Path $OutDir "share\glib-2.0\schemas"
 if (Test-Path $schema_src) {
@@ -133,9 +156,9 @@ if (Test-Path $schema_src) {
     Write-Warning "GLib schemas directory not found."
 }
 
-# ── 6. Adwaita icon theme ─────────────────────────────────────────────────────
+# ── 7. Adwaita icon theme ─────────────────────────────────────────────────────
 
-Write-Host "[6/8] Copying Adwaita icon theme..."
+Write-Host "[7/8] Copying Adwaita icon theme..."
 $icons_src = Join-Path $ucrt "share\icons\Adwaita"
 if (Test-Path $icons_src) {
     $icons_dst = Join-Path $OutDir "share\icons\Adwaita"
@@ -151,16 +174,13 @@ if (Test-Path $hicolor_src) {
     Copy-Item $hicolor_src (Join-Path $OutDir "share\icons\hicolor") -Recurse -Force
 }
 
-# ── 7. Install pip packages into runtime site-packages ────────────────────────
-# discord-webhook and cryptography are pip-only — not in MSYS2 pacman.
-# Install them directly into the runtime's site-packages using the copied Python.
+# ── 8. Create ._pth file ──────────────────────────────────────────────────────
+# Tells the copied python.exe where to find its stdlib relative to its own
+# directory, overriding the hardcoded MSYS2 prefix in the original binary.
+# pip packages (discord_webhook, cryptography) were installed into MSYS2 Python
+# in step 3 and are now present in the copied site-packages from step 4.
 
-Write-Host "[7/8] Installing pip-managed packages into runtime..."
-
-# Create a ._pth file FIRST so python.exe can find its own stdlib when called here.
-# Without this, the copied python.exe would look for its stdlib at the original
-# MSYS2 path (C:\msys64\ucrt64\lib\python3.12) which may not exist on the build
-# runner if MSYS2 is installed elsewhere.
+Write-Host "[8/8] Creating python._pth file..."
 $pth_content = @"
 $lib_rel
 $lib_rel\lib-dynload
@@ -171,20 +191,14 @@ $pth_file = Join-Path $OutDir "${py_dir}._pth"
 Set-Content -Path $pth_file -Value $pth_content -Encoding ASCII
 Write-Host "      Created $pth_file"
 
-# Now install packages using the runtime python (which can now find its stdlib)
-$runtime_python = Join-Path $OutDir "python.exe"
-& $runtime_python -m pip install `
-    --no-warn-script-location `
-    "discord-webhook>=1.3.0" `
-    "cryptography>=41.0.0"
-if ($LASTEXITCODE -ne 0) {
-    throw "pip install failed (exit code $LASTEXITCODE)"
-}
-Write-Host "      pip packages installed."
+# ── 9. Verify the runtime ─────────────────────────────────────────────────────
+# We verify that Python runs and that pip-installed packages are importable.
+# GTK4 is NOT imported here — initialising it on a headless CI runner blocks
+# indefinitely waiting for a display subsystem that doesn't exist.
+# DLL presence is confirmed implicitly by the import of gi (PyGObject), which
+# loads libgobject and its chain at import time without opening a window.
 
-# ── 8. Verify the runtime ─────────────────────────────────────────────────────
-
-Write-Host "[8/8] Verifying runtime imports..."
+Write-Host "[9/9] Verifying runtime imports..."
 
 $verify_script = @"
 import sys
@@ -201,7 +215,8 @@ def check(name, code):
         failures.append(name)
 
 check('gi (PyGObject)',      'import gi')
-check('GTK4',                'import gi; gi.require_version("Gtk","4.0"); from gi.repository import Gtk')
+# GTK4 not checked here — from gi.repository import Gtk blocks on headless runners.
+# The DLLs are verified to exist by collect_runtime.ps1 before this step runs.
 check('psutil',              'import psutil')
 check('discord_webhook',     'import discord_webhook')
 check('cryptography',        'import cryptography')
@@ -229,8 +244,19 @@ foreach ($k in $env_vars.Keys) {
 }
 
 try {
-    & $runtime_python $verify_py
-    $rc = $LASTEXITCODE
+    # Use Start-Process with a 60-second timeout so a blocked import cannot hang
+    # the entire CI job. If the timeout fires, the runner kills the process and
+    # the build fails with a clear message rather than timing out silently.
+    $proc = Start-Process `
+        -FilePath    $runtime_python `
+        -ArgumentList $verify_py `
+        -PassThru `
+        -NoNewWindow
+    if (-not $proc.WaitForExit(60000)) {
+        $proc.Kill()
+        throw "Runtime verification timed out after 60 s. A Python import is blocking (possibly gi init). Check collect_runtime.ps1."
+    }
+    $rc = $proc.ExitCode
 } finally {
     foreach ($k in $env_backup.Keys) {
         [System.Environment]::SetEnvironmentVariable($k, $env_backup[$k])
@@ -239,7 +265,7 @@ try {
 }
 
 if ($rc -ne 0) {
-    throw "Runtime verification failed. Fix the errors above before building the installer."
+    throw "Runtime verification failed (exit $rc). Fix the errors above before building the installer."
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
