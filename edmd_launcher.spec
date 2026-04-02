@@ -10,14 +10,48 @@
 #
 # This design preserves the git-based upgrade path (edmd.py --upgrade).
 
+import glob
 import os
 
 block_cipher = None
 
+# ── Bundle libgcc_s_seh-1.dll ─────────────────────────────────────────────────
+# PyInstaller compiled with the MSYS2 MinGW64 toolchain depends on this GCC
+# runtime DLL. Without it, EDMD.exe fails immediately with "libgcc_s_seh-1.dll
+# was not found". We bundle it alongside the exe so users don't need MinGW on
+# PATH. Search common MSYS2 install locations; fall back gracefully if absent
+# (e.g., when building with UCRT64 toolchain which uses a different runtime).
+_GCC_DLL_NAME = "libgcc_s_seh-1.dll"
+_GCC_SEARCH   = [
+    r"C:\msys64\mingw64\bin",
+    r"C:\msys64\ucrt64\bin",
+    r"C:\msys2\mingw64\bin",
+    r"C:\msys2\ucrt64\bin",
+    os.path.join(os.environ.get("MSYS2_ROOT", r"C:\msys64"), "mingw64", "bin"),
+    os.path.join(os.environ.get("MSYS2_ROOT", r"C:\msys64"), "ucrt64",  "bin"),
+]
+_gcc_dll = None
+for _d in _GCC_SEARCH:
+    _candidate = os.path.join(_d, _GCC_DLL_NAME)
+    if os.path.isfile(_candidate):
+        _gcc_dll = _candidate
+        break
+# Also try glob for non-standard MSYS2 install paths
+if _gcc_dll is None:
+    _hits = (
+        glob.glob(r"C:\msys*\mingw64\bin\libgcc_s_seh-1.dll") +
+        glob.glob(r"C:\msys*\ucrt64\bin\libgcc_s_seh-1.dll")
+    )
+    if _hits:
+        _gcc_dll = _hits[0]
+
+_extra_binaries = [(_gcc_dll, ".")] if _gcc_dll else []
+# ─────────────────────────────────────────────────────────────────────────────
+
 a = Analysis(
     [os.path.join(SPECPATH, 'edmd_launcher.py')],
     pathex=[SPECPATH],
-    binaries=[],
+    binaries=_extra_binaries,
     datas=[],
     hiddenimports=[
         'ctypes',

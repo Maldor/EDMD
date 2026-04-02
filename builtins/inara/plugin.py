@@ -55,7 +55,8 @@ HTTP_TIMEOUT_S  = 20
 SEND_INTERVAL_S = 30        # 2 requests/minute hard limit from Inara
 STARTUP_DELAY_S = 8         # wait before first send so preload finishes
 BATCH_MAX       = 100       # events per request (Inara has no documented per-batch limit)
-QUEUE_FILE: Path = EDMD_DATA_DIR / "inara_queue.jsonl"
+def _queue_file() -> Path:
+    return cmdr_data_dir() / "inara_queue.jsonl"
 
 # Journal Rank keys → Inara rankName strings
 _RANK_KEYS = {
@@ -231,7 +232,7 @@ class _Sender(threading.Thread):
                     time.sleep(SEND_INTERVAL_S)
 
         try:
-            QUEUE_FILE.unlink(missing_ok=True)
+            self._queue_file.unlink(missing_ok=True)
         except Exception:
             pass
 

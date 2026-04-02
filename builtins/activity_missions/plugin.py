@@ -181,9 +181,7 @@ class ActivityMissionsPlugin(BasePlugin, ActivityProviderMixin):
     # ── ActivityProviderMixin ─────────────────────────────────────────────────
 
     def has_activity(self) -> bool:
-        return self.completed > 0 or self.failed > 0 or bool(
-            getattr(self.core.state, "active_missions", [])
-        )
+        return self.completed > 0 or self.failed > 0 or self.accepted > 0
 
     def _duration_seconds(self) -> float:
         if not self.session_start_time:
@@ -194,103 +192,28 @@ class ActivityMissionsPlugin(BasePlugin, ActivityProviderMixin):
         return 0.0
 
     def get_summary_rows(self) -> list[dict]:
-        state = self.core.state
-        rows  = []
-
-        # Active massacre stack summary
-        analysis = self._build_massacre_analysis(state)
-        if analysis:
-            n   = analysis["mission_count"]
-            rew = analysis["total_reward"]
-            rows.append({
-                "label": "Active missions",
-                "value": f"{n}/20",
-                "rate":  fmt_credits(rew) if rew else None,
-            })
-            rows.append({
-                "label": "Stack height",
-                "value": str(analysis["stack_height"]),
-                "rate":  None,
-            })
-
+        rows = []
+        if self.accepted > 0:
+            rows.append({"label": "Accepted", "value": str(self.accepted), "rate": None})
         if self.completed > 0:
             cr_rate = (f"{fmt_credits(self.credits_earned)} credits"
                        if self.credits_earned > 0 else None)
-            rows.append({
-                "label": "Completed",
-                "value": str(self.completed),
-                "rate":  cr_rate,
-            })
+            rows.append({"label": "Completed", "value": str(self.completed),
+                         "rate": cr_rate})
         if self.failed > 0:
             rows.append({"label": "Failed", "value": str(self.failed), "rate": None})
         return rows
 
     def get_tab_rows(self) -> list[dict]:
-        state = self.core.state
-        rows  = []
+        rows = []
 
-        # ── Massacre stack breakdown ──────────────────────────────────────────
-        analysis = self._build_massacre_analysis(state)
-        if analysis:
-            stack_h  = analysis["stack_height"]
-            second_h = analysis["second_height"]
-            n        = analysis["mission_count"]
-            rew      = analysis["total_reward"]
-            wing_rew = analysis["total_wing_reward"]
-
-            rows.append({
-                "label": "Active missions",
-                "value": f"{n}/20",
-                "rate":  fmt_credits(rew) if rew else None,
-            })
-
-            # Per-faction rows sorted by kill count descending
-            factions = analysis["factions"]
-            for faction in sorted(factions, key=lambda f: -factions[f]["kill_count"]):
-                info  = factions[faction]
-                kc    = info["kill_count"]
-                rew_f = info["reward"]
-                wing_f= info["wing_reward"]
-
-                # Delta: positive = kills still needed to match stack height
-                delta = stack_h - kc
-                if delta == 0:
-                    # This faction IS the max; show gap to next
-                    delta_str = f"Δ{second_h - kc:+d}" if second_h != kc else "★ max"
-                else:
-                    delta_str = f"Δ{-delta:+d}"
-
-                rew_str  = f"{rew_f/1_000_000:.1f}M"
-                if wing_f and wing_f != rew_f:
-                    rew_str += f" ({wing_f/1_000_000:.1f}M wing)"
-
-                rows.append({
-                    "label": f"  {faction}",
-                    "value": f"{kc} kills",
-                    "rate":  f"{rew_str}  {delta_str}",
-                })
-
-            rows.append({
-                "label": "Stack height",
-                "value": str(stack_h),
-                "rate":  (f"wing {fmt_credits(wing_rew)}"
-                          if wing_rew else None),
-            })
-
-            for warn in analysis["warnings"]:
-                rows.append({"label": f"  ⚠ {warn}", "value": "", "rate": None})
-
-            rows.append({"label": "─── Session ───", "value": "", "rate": None})
-
-        # ── Session totals ────────────────────────────────────────────────────
+        if self.accepted > 0:
+            rows.append({"label": "Accepted",  "value": str(self.accepted),  "rate": None})
         if self.completed > 0:
             cr_rate = (f"{fmt_credits(self.credits_earned)} credits"
                        if self.credits_earned > 0 else None)
-            rows.append({
-                "label": "Completed",
-                "value": str(self.completed),
-                "rate":  cr_rate,
-            })
+            rows.append({"label": "Completed", "value": str(self.completed),
+                         "rate": cr_rate})
         if self.failed > 0:
             rows.append({"label": "Failed",    "value": str(self.failed),    "rate": None})
         if self.abandoned > 0:
@@ -298,9 +221,7 @@ class ActivityMissionsPlugin(BasePlugin, ActivityProviderMixin):
 
         if self.type_tally:
             rows.append({"label": "─── Mission types ───", "value": "", "rate": None})
-            for mtype, count in sorted(
-                self.type_tally.items(), key=lambda x: -x[1]
-            ):
+            for mtype, count in sorted(self.type_tally.items(), key=lambda x: -x[1]):
                 rows.append({"label": f"  {mtype}", "value": str(count), "rate": None})
 
         return rows

@@ -120,6 +120,10 @@ class JournalHistoryPlugin(BasePlugin):
         income_missions   = 0
         income_trade      = 0
 
+        # Statistics — most recent event from game (authoritative career totals)
+        latest_statistics: dict = {}
+        latest_statistics_ts  = ""
+
         # Track current system for PP merit attribution
         current_system = ""
 
@@ -254,6 +258,12 @@ class JournalHistoryPlugin(BasePlugin):
                 elif name == "MarketSell":
                     income_trade += ev.get("TotalSale", 0)
 
+                elif name == "Statistics":
+                    ts = ev.get("timestamp", "")
+                    if ts > latest_statistics_ts:
+                        latest_statistics_ts = ts
+                        latest_statistics = ev
+
         # ── Publish results ───────────────────────────────────────────────────
         self.results = {
             "career": {
@@ -298,6 +308,7 @@ class JournalHistoryPlugin(BasePlugin):
                 "missions": income_missions,
                 "trade":    income_trade,
             },
+            "statistics": latest_statistics,
         }
 
         self.scan_done.set()

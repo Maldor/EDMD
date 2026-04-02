@@ -39,7 +39,8 @@ HTTP_TIMEOUT_S        = 30
 SEND_INTERVAL_S       = 10      # ~6/min, leaves comfortable headroom under 100/15 min
 BATCH_MAX             = 30
 STARTUP_DELAY_S       = 12      # stagger slightly behind EDSM startup
-QUEUE_FILE: Path      = EDMD_DATA_DIR / "edastro_queue.jsonl"
+def _queue_file() -> Path:
+    return cmdr_data_dir() / "edastro_queue.jsonl"
 
 # Carrier events that require explicit opt-in
 _CARRIER_EVENTS = frozenset({

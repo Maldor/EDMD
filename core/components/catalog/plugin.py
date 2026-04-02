@@ -39,10 +39,8 @@ import sqlite3
 from pathlib import Path
 
 from core.plugin_loader import BasePlugin
-from core.state import EDMD_DATA_DIR
+from core.state import cmdr_data_dir
 
-
-_DB_PATH = EDMD_DATA_DIR / "catalog" / "bodies.db"
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS bodies (
@@ -94,12 +92,13 @@ class CatalogPlugin(BasePlugin):
     def on_load(self, core) -> None:
         super().on_load(core)
         self._db: sqlite3.Connection | None = None
+        self._db_path = cmdr_data_dir() / "catalog" / "bodies.db"
         self._init_db()
 
     def _init_db(self) -> None:
         try:
-            _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-            self._db = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._db.executescript(_CREATE_SQL)
             self._db.commit()
         except Exception as exc:

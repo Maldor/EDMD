@@ -96,6 +96,11 @@ class CommanderPlugin(BasePlugin):
             case "Commander":
                 if not state.pilot_name:
                     state.pilot_name = event.get("Name")
+                fid = event.get("FID", "")
+                if fid and not state.pilot_fid:
+                    state.pilot_fid = fid
+                    from core.state import set_active_fid
+                    set_active_fid(fid)
 
             case "Rank":
                 state.pilot_rank = RANK_NAMES[event["Combat"]]
@@ -124,6 +129,11 @@ class CommanderPlugin(BasePlugin):
                 state.offline_since_mono = None
                 state.last_offline_alert = None
                 state.pilot_ship = event.get("Ship_Localised") or event.get("Ship")
+                fid = event.get("FID", "")
+                if fid and not state.pilot_fid:
+                    state.pilot_fid = fid
+                    from core.state import set_active_fid
+                    set_active_fid(fid)
                 # Reset timing anchors on every game launch — prevents a stale
                 # anchor from a previous session (e.g. crash, no Shutdown event)
                 # producing a wildly wrong burn rate estimate. The rate itself is

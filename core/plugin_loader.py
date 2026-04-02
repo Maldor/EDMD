@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from core.emit import Terminal
-from core.state import EDMD_DATA_DIR
+from core.state import EDMD_DATA_DIR, cmdr_data_dir
 
 
 # ── PluginStorage ─────────────────────────────────────────────────────────────
@@ -142,6 +142,24 @@ class PluginStorage:
                 return json.load(f)
             except (json.JSONDecodeError, ValueError):
                 return {}
+
+    def write_sibling_json(self, plugin_name: str, filename: str, data: dict) -> None:
+        """Write a JSON file to another plugin's data directory.
+
+        Only permitted for files in _ALLOWED_NAMES.  Used by assets plugin to
+        update CAPI's persisted capi_profile.json when a ship is sold, so that
+        the sold ship does not reappear on the next restart before a fresh poll.
+        """
+        if "/" in filename or "\\" in filename or ".." in filename:
+            raise ValueError(f"Filename must be bare (got {filename!r})")
+        if filename not in self._ALLOWED_NAMES:
+            raise ValueError(f"Filename {filename!r} not in allowlist")
+        p = self._dir.parent / plugin_name / filename
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        with builtins.open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        tmp.replace(p)
 
     def read_toml(self, filename: str = "config.toml") -> dict:
         """Read a TOML file from the plugin data directory.
@@ -271,15 +289,20 @@ def _make_sandboxed_open(allowed_dir: Path, plugin_name: str):
 
 # ── Plugin state persistence ──────────────────────────────────────────────────
 
-_STATES_FILE = EDMD_DATA_DIR / "plugin_states.json"
+# ── Plugin state persistence ──────────────────────────────────────────────────
+
+
+def _states_file() -> Path:
+    return cmdr_data_dir() / "plugin_states.json"
 
 
 def _load_plugin_states() -> dict[str, bool]:
     """Read persisted enabled/disabled overrides.  Missing = use class default."""
-    if not _STATES_FILE.exists():
+    p = _states_file()
+    if not p.exists():
         return {}
     try:
-        with builtins.open(_STATES_FILE, "r", encoding="utf-8") as f:
+        with builtins.open(p, "r", encoding="utf-8") as f:
             raw = json.load(f)
             return {k: bool(v) for k, v in raw.items() if isinstance(k, str)}
     except Exception:
@@ -287,11 +310,12 @@ def _load_plugin_states() -> dict[str, bool]:
 
 
 def _save_plugin_states(states: dict[str, bool]) -> None:
-    EDMD_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = _STATES_FILE.with_suffix(".tmp")
+    p   = _states_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
     with builtins.open(tmp, "w", encoding="utf-8") as f:
         json.dump(states, f, indent=2)
-    tmp.replace(_STATES_FILE)
+    tmp.replace(p)
 
 
 # ── Loader ────────────────────────────────────────────────────────────────────
@@ -421,7 +445,7 @@ class PluginLoader:
             # ── Write sandbox ───────────────────────────────────────────────
             # Patch open() in this module's namespace before execution so that
             # any write attempt outside the plugin's data dir is blocked.
-            storage_dir = EDMD_DATA_DIR / "plugins" / dir_name
+            storage_dir = cmdr_data_dir() / "plugins" / dir_name
             module.__builtins__ = vars(builtins).copy()
             module.__builtins__["open"] = _make_sandboxed_open(storage_dir, dir_name)
 

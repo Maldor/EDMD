@@ -1,15 +1,24 @@
 """
-gui/grid.py — 24-column snap grid layout engine for the EDMD dashboard.
+gui/grid.py — 32-column snap grid layout engine for the EDMD dashboard.
 
 Manages block positions in grid units, handles persistence to layout.json,
 and provides the GTK Fixed container that blocks are placed into.
 
-Grid model:
-  - 24 columns, each = 1/24 of the available canvas width
-  - Row height units = ROW_PX pixels each (default 40)
-  - 8px gap between all blocks
-  - Minimum block: 4 wide × 2 tall
-  - Layout persisted to ~/.local/share/EDMD/layout.json
+Grid model
+──────────
+  Columns    32  — each = 1/32 of the available canvas width
+  Row height ROW_PX pixels each (default 10px)
+  Gap        GAP px between all blocks (default 2px)
+  Min block  3 wide × 1 tall
+  Layout     persisted to ~/.local/share/EDMD/<cmdr>/layout.json
+
+Layout file versioning
+──────────────────────
+  The layout file carries a "version" key.  When the grid constants change
+  (column count, row height) the persisted col/row/width/height values would
+  no longer produce the intended pixel geometry, so on a version mismatch
+  the file is discarded and the built-in DEFAULT_LAYOUT is applied and saved.
+  Current layout version: 2  (introduced with 32-col / 10px-row grid).
 """
 
 import json
@@ -23,32 +32,33 @@ try:
 except ImportError:
     raise ImportError("PyGObject / GTK4 not found.")
 
-from core.state import EDMD_DATA_DIR
+from core.state import EDMD_DATA_DIR, cmdr_data_dir
 
-LAYOUT_FILE = Path(EDMD_DATA_DIR) / "layout.json"
 
-COLS     = 24
-ROW_PX   = 20
-GAP      = 4
-MIN_W    = 4
+def _layout_file() -> Path:
+    """Per-commander layout file path (evaluated lazily after FID is set)."""
+    return cmdr_data_dir() / "layout.json"
+
+
+LAYOUT_VERSION = 2          # increment when COLS or ROW_PX change
+COLS     = 32
+ROW_PX   = 10
+GAP      = 2
+MIN_W    = 3
 MIN_H    = 1
 
-# Default block layout — used when layout.json is absent or malformed.
-# Heights doubled from original values to compensate for halved ROW_PX.
+# Default block layout — three columns at col 0 (w=11), col 11 (w=11), col 22 (w=10).
 DEFAULT_LAYOUT = {
-    # Strict 3-column layout — each column is 8 grid units (cols 0-8, 8-16, 16-24).
-    #
-    # Left col:   commander → missions → alerts
-    # Mid col:    session_stats (tabbed, taller) → cargo → engineering
-    # Right col:  crew_slf → assets
-    "commander":    {"col": 0,  "row": 0,  "width": 8, "height": 14},
-    "session_stats":{"col": 8,  "row": 0,  "width": 8, "height": 18},
-    "crew_slf":     {"col": 16, "row": 0,  "width": 8, "height": 12},
-    "missions":     {"col": 0,  "row": 14, "width": 8, "height": 9},
-    "cargo":        {"col": 8,  "row": 18, "width": 8, "height": 10},
-    "engineering":  {"col": 8,  "row": 28, "width": 8, "height": 10},
-    "alerts":       {"col": 0,  "row": 23, "width": 8, "height": 10},
-    "assets":       {"col": 16, "row": 12, "width": 8, "height": 25},
+    "career":       {"col": 0,  "row": 0,   "width": 11, "height": 57},
+    "session_stats":{"col": 0,  "row": 56,  "width": 11, "height": 45},
+    "colonisation": {"col": 0,  "row": 100, "width": 11, "height": 39},
+    "commander":    {"col": 11, "row": 0,   "width": 11, "height": 29},
+    "alerts":       {"col": 11, "row": 40,  "width": 11, "height": 27},
+    "missions":     {"col": 11, "row": 66,  "width": 11, "height": 34},
+    "cargo":        {"col": 11, "row": 99,  "width": 11, "height": 40},
+    "crew_slf":     {"col": 22, "row": 0,   "width": 10, "height": 32},
+    "assets":       {"col": 22, "row": 31,  "width": 10, "height": 70},
+    "engineering":  {"col": 22, "row": 100, "width": 10, "height": 39},
 }
 
 
@@ -83,12 +93,22 @@ class BlockGrid:
     def _load(self) -> None:
         """Load layout from disk, falling back to defaults.
 
-        After loading, any block present in DEFAULT_LAYOUT but absent from the
-        saved file (e.g. a newly introduced block) is inserted at its default
-        position and the file is re-saved so the entry persists for next time.
+        Version check: if the saved file carries a version < LAYOUT_VERSION
+        (or no version at all), the constants have changed and the stored
+        grid-unit values would produce the wrong pixel geometry.  In that
+        case we discard the file and apply DEFAULT_LAYOUT so the dashboard
+        looks correct immediately; the new layout is then saved so future
+        launches load cleanly.
+
+        After loading, any block present in DEFAULT_LAYOUT but absent from
+        the saved file (e.g. a newly introduced block) is inserted at its
+        default position and the file is re-saved.
         """
         try:
-            data = json.loads(LAYOUT_FILE.read_text(encoding="utf-8"))
+            data   = json.loads(_layout_file().read_text(encoding="utf-8"))
+            if int(data.get("version", 1)) < LAYOUT_VERSION:
+                # Grid constants changed — old unit values are invalid.
+                raise ValueError("stale layout version")
             blocks = data.get("blocks", {})
             for name, d in blocks.items():
                 self._cells[name] = GridCell(
@@ -116,9 +136,12 @@ class BlockGrid:
     def save(self) -> None:
         """Persist current layout to disk."""
         try:
-            LAYOUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-            data = {"blocks": {n: asdict(c) for n, c in self._cells.items()}}
-            LAYOUT_FILE.write_text(
+            _layout_file().parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "version": LAYOUT_VERSION,
+                "blocks":  {n: asdict(c) for n, c in self._cells.items()},
+            }
+            _layout_file().write_text(
                 json.dumps(data, indent=2), encoding="utf-8"
             )
         except OSError:
@@ -194,7 +217,7 @@ class BlockGrid:
     def _natural_row_extent(self) -> int:
         """Total rows spanned by the current layout (max row + height)."""
         if not self._cells:
-            return 24   # fallback
+            return 48   # fallback (≈ old 24 at double density)
         return max(c.row + c.height for c in self._cells.values())
 
     def pixel_rect(self, cell: GridCell) -> tuple[int, int, int, int]:

@@ -688,10 +688,11 @@ class AssetsPlugin(BasePlugin):
             # roster immediately — same file _load_capi_profile_from_disk used.
             capi_raw = getattr(state, "capi_raw", {})
             capi_ships_raw = (capi_raw.get("profile") or {}).get("ships") or {}
+            _capi_profile_data: dict = {}
             if not capi_ships_raw:
                 try:
-                    _pdata = self.storage.read_sibling_json("capi", "capi_profile.json")
-                    capi_ships_raw = (_pdata.get("ships") or {})
+                    _capi_profile_data = self.storage.read_sibling_json("capi", "capi_profile.json")
+                    capi_ships_raw = (_capi_profile_data.get("ships") or {})
                 except Exception:
                     pass
             capi_owned_ids: set = set()
@@ -699,6 +700,46 @@ class AssetsPlugin(BasePlugin):
                 for sid_str in capi_ships_raw:
                     try:    capi_owned_ids.add(int(sid_str))
                     except: capi_owned_ids.add(sid_str)
+
+            # Include the ship that was CURRENT at the time of the last CAPI poll.
+            # It lives in profile["ship"]["id"], not in ships{}.  After the player
+            # swaps ships before the next poll, the formerly-current ship moves to
+            # stored but CAPI still shows it as current — so it's absent from ships{}
+            # and would be dropped from the roster.
+            if not _capi_profile_data:
+                try:
+                    _capi_profile_data = self.storage.read_sibling_json("capi", "capi_profile.json")
+                except Exception:
+                    pass
+            _capi_current_sid = (_capi_profile_data.get("ship") or {}).get("id")
+            if _capi_current_sid is not None:
+                try:    capi_owned_ids.add(int(_capi_current_sid))
+                except: capi_owned_ids.add(_capi_current_sid)
+
+            # Supplement with ships from the most recent StoredShips journal event.
+            # CAPI may lag by minutes to hours; StoredShips is written in real time.
+            if capi_owned_ids:
+                for _jpath in journals[:SCAN_JOURNALS]:
+                    _found_ss = False
+                    try:
+                        for _line in reversed(_jpath.read_text(encoding="utf-8").splitlines()):
+                            try:
+                                _sev = json.loads(_line)
+                            except ValueError:
+                                continue
+                            if _sev.get("event") == "StoredShips":
+                                for _sect in ("ShipsHere", "ShipsRemote"):
+                                    for _s in _sev.get(_sect, []):
+                                        _sid = _s.get("ShipID")
+                                        if _sid is not None:
+                                            try:    capi_owned_ids.add(int(_sid))
+                                            except: capi_owned_ids.add(_sid)
+                                _found_ss = True
+                                break
+                    except OSError:
+                        continue
+                    if _found_ss:
+                        break
 
             # ── Phase 2: most recent Loadout → current ship identity ──────────
             current_ship: dict | None = None
@@ -923,7 +964,56 @@ class AssetsPlugin(BasePlugin):
                         "hot":          False,
                         "loadout":      sv_loadout,
                     }
-            else:
+
+                # Ships in capi_owned_ids that have no entry in capi_ships_raw
+                # (e.g. the ship that was current at CAPI poll time and has since
+                # been swapped out, or ships added from StoredShips journal scan)
+                # need to be built from journal StoredShips data.
+                _jonly = capi_owned_ids - {int(k) for k in capi_ships_raw} - (
+                    {int(current_sid)} if current_sid is not None else set()
+                )
+                if _jonly:
+                    for _jp2 in journals[:SCAN_JOURNALS]:
+                        if not _jonly:
+                            break
+                        try:
+                            _jp2_lines = _jp2.read_text(encoding="utf-8").splitlines()
+                        except OSError:
+                            continue
+                        for _line2 in reversed(_jp2_lines):
+                            if not _jonly:
+                                break
+                            try:
+                                _ev2 = json.loads(_line2)
+                            except ValueError:
+                                continue
+                            if _ev2.get("event") == "StoredShips":
+                                for _sect2 in ("ShipsHere", "ShipsRemote"):
+                                    for _s2 in _ev2.get(_sect2, []):
+                                        _sid2 = _s2.get("ShipID")
+                                        if _sid2 is None:
+                                            continue
+                                        try:    _sid2_i = int(_sid2)
+                                        except: _sid2_i = _sid2
+                                        if _sid2_i in _jonly:
+                                            _st2 = _s2.get("ShipType", "")
+                                            _disp2 = (_s2.get("ShipType_Localised")
+                                                      or self._localised_ship_name(_st2))
+                                            loadout_by_id[_sid2_i] = {
+                                                "_key":         f"ship_{_sid2_i}",
+                                                "ship_id":      _sid2_i,
+                                                "current":      False,
+                                                "type":         _st2,
+                                                "type_display": _disp2,
+                                                "name":         _s2.get("Name", ""),
+                                                "ident":        _s2.get("Ident", ""),
+                                                "system":       _s2.get("StarSystem", "—"),
+                                                "value":        _s2.get("Value", 0),
+                                                "hot":          _s2.get("Hot", False),
+                                                "loadout":      self._ship_loadout_cache.get(
+                                                                    _sid2_i, []),
+                                            }
+                                            _jonly.discard(_sid2_i)
                 # Fallback: most recent StoredShips event only
                 for jpath in journals[:SCAN_JOURNALS]:
                     if loadout_by_id:
@@ -1037,9 +1127,15 @@ class AssetsPlugin(BasePlugin):
                     # refresh it through the localisation pipeline.  This corrects
                     # any stale values written by an older version of the code.
                     td = ship.get("type_display", "")
-                    if td and "_" in td and " " not in td:
+                    # Re-localise if type_display looks like an unprocessed internal name.
+                    # Catches two patterns CAPI can produce:
+                    #   "Type9_Military"  — has underscore, no spaces (existing check)
+                    #   "Smallnx01"       — no underscore, no spaces, mixed-case (new)
+                    # We attempt re-localisation whenever there are no spaces AND the
+                    # display value differs from what _localised_ship_name would produce.
+                    if td and " " not in td.strip():
                         refreshed = self._localised_ship_name(ship.get("type", ""))
-                        if refreshed:
+                        if refreshed and refreshed != td:
                             ship["type_display"] = refreshed
                     # Apply loadout from cache if ship has none
                     if not ship.get("loadout"):
@@ -1056,6 +1152,19 @@ class AssetsPlugin(BasePlugin):
             else:
                 # No CAPI data — use journal-sourced roster
                 state.assets_stored_ships = list(loadout_by_id.values())
+
+            # Sanitise current ship type_display with the same logic applied to
+            # stored ships above.  Catches cases where _load_capi_profile_from_disk
+            # or a stale capi_profile.json left a raw internal name (e.g.
+            # "Type9_Military") in assets_current_ship before _build_roster ran.
+            _cur = state.assets_current_ship
+            if _cur:
+                _td = _cur.get("type_display", "")
+                if _td and " " not in _td.strip():
+                    _refreshed = self._localised_ship_name(_cur.get("type", ""))
+                    if _refreshed and _refreshed != _td:
+                        _cur["type_display"] = _refreshed
+
             self._save_to_storage()
         except Exception:
             pass
@@ -1242,7 +1351,15 @@ class AssetsPlugin(BasePlugin):
 
             case "Loadout":
                 ship_type   = event.get("Ship", "")
-                ship_type_l = event.get("Ship_Localised") or self._localised_ship_name(ship_type)
+                ship_type_l = (event.get("Ship_Localised")
+                               or self._localised_ship_name(ship_type)
+                               or ship_type)
+                # If localised name still looks like an internal string (no spaces),
+                # force it through the static map.
+                if ship_type_l and " " not in ship_type_l.strip():
+                    _fixed = self._localised_ship_name(ship_type)
+                    if _fixed:
+                        ship_type_l = _fixed
                 # Also prime the name cache from this event's localised name
                 if ship_type_l and ship_type:
                     self._shiptype_cache[ship_type.lower()] = ship_type_l
@@ -1350,12 +1467,29 @@ class AssetsPlugin(BasePlugin):
                     try:    sell_id_i = int(sell_id)
                     except: sell_id_i = sell_id
                     self._ship_loadout_cache.pop(sell_id_i, None)
-                    # Also remove from the in-memory stored fleet so the GUI
-                    # updates without waiting for a StoredShips event.
+                    # Remove from in-memory stored fleet
                     state.assets_stored_ships = [
                         s for s in getattr(state, "assets_stored_ships", [])
                         if s.get("ship_id") not in (sell_id, sell_id_i)
                     ]
+                    # Remove from persisted capi_profile.json so the ship
+                    # does not reappear on the next restart before a fresh
+                    # CAPI poll overwrites the file.
+                    try:
+                        profile = self.storage.read_sibling_json("capi", "capi_profile.json")
+                        if profile:
+                            ships = profile.get("ships") or {}
+                            for key in list(ships.keys()):
+                                try:
+                                    if int(key) in (sell_id, sell_id_i):
+                                        del ships[key]
+                                except (ValueError, TypeError):
+                                    if key in (str(sell_id), str(sell_id_i)):
+                                        del ships[key]
+                            profile["ships"] = ships
+                            self.storage.write_sibling_json("capi", "capi_profile.json", profile)
+                    except Exception:
+                        pass
                     self._save_to_storage()
                 if gq: gq.put(("plugin_refresh", "assets"))
 

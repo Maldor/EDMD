@@ -244,6 +244,37 @@ try:
 except OSError:
     pass
 
+# ── Commander FID — for per-commander data directory ─────────────────────────
+# Scan backwards through journals to find FID.  The current journal may only
+# contain a Fileheader if the game just created it; prior journals are reliable.
+
+def _scan_fid_from_journals(jdir: Path) -> str:
+    """Return the Frontier account FID from the most recent journal that has one."""
+    for _jp in sorted(jdir.glob("Journal*.log"), reverse=True):
+        try:
+            for _line in reversed(_jp.read_text(encoding="utf-8", errors="replace").splitlines()):
+                try:
+                    _ev = json.loads(_line.strip())
+                    if _ev.get("event") in ("Commander", "LoadGame") and _ev.get("FID"):
+                        return _ev["FID"]
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+    return ""
+
+from core.state import set_active_fid, get_last_fid, migrate_legacy_cmdr_files
+
+_fid = _scan_fid_from_journals(journal_dir) or get_last_fid()
+if _fid:
+    # Migrate legacy flat files to per-commander directory (no-op if already done)
+    migrate_legacy_cmdr_files(_fid)
+    set_active_fid(_fid)
+    state.pilot_fid = _fid
+    print(f"{Terminal.YELL}Commander FID:{Terminal.END} {_fid}")
+else:
+    print(f"{Terminal.YELL}Commander FID:{Terminal.END} (not yet determined)")
+
 print(f"{Terminal.YELL}Commander name:{Terminal.END} {state.pilot_name or '(unknown)'}")
 
 _config_profile = args.config_profile
@@ -282,10 +313,10 @@ from core.core_api      import CoreAPI
 from core.plugin_loader import PluginLoader, PluginStorage
 from core.journal       import build_dispatch_map
 from core.data          import DataProvider
-from core.state         import EDMD_DATA_DIR
+from core.state         import EDMD_DATA_DIR, cmdr_data_dir
 
 # DataProvider — unified source of truth, instantiated before CoreAPI
-_dp_storage = PluginStorage(EDMD_DATA_DIR / "core")
+_dp_storage = PluginStorage(cmdr_data_dir() / "core")
 data_provider = DataProvider(
     state=state,
     storage=_dp_storage,

@@ -318,7 +318,7 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
             h_rem = int(secs_left // 3600)
             m_rem = int((secs_left % 3600) // 60)
             remaining = f"~{h_rem}h {m_rem}m" if h_rem > 0 else f"~{m_rem}m"
-            fuel_rate_str = f"{fuel_rate:.2f} t/hr  ({remaining} remaining)"
+            fuel_rate_str = remaining
         sections.append(("Fuel", [("Fuel", fuel_val, fuel_rate_str)]))
 
     for p in sorted(active, key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "")):

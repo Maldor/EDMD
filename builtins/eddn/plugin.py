@@ -59,7 +59,8 @@ SOFTWARE_NAME    = PROGRAM
 SOFTWARE_VERSION = VERSION
 
 # Retry queue on disk
-QUEUE_FILE       = EDMD_DATA_DIR / "eddn_queue.jsonl"
+def _queue_file() -> Path:
+    return cmdr_data_dir() / "eddn_queue.jsonl"
 
 # How often (seconds) the sender thread wakes to process the retry queue
 RETRY_INTERVAL_S = 60

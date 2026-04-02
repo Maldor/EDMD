@@ -40,7 +40,8 @@ HTTP_TIMEOUT_S     = 15
 SEND_INTERVAL_S    = 12      # minimum gap between POST requests (~5/min, well under 360/hr)
 BATCH_MAX          = 50      # maximum events per POST
 STARTUP_DELAY_S    = 10      # seconds after load before we begin uploading
-QUEUE_FILE: Path   = EDMD_DATA_DIR / "edsm_queue.jsonl"
+def _queue_file() -> Path:
+    return cmdr_data_dir() / "edsm_queue.jsonl"
 
 # Events that are always suppressed regardless of discard list
 _ALWAYS_SKIP = frozenset({
