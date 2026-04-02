@@ -42,11 +42,8 @@ modules:
           /app/share/applications/io.github.drworman.EDMD.desktop
       - install -Dm644 flatpak/io.github.drworman.EDMD.metainfo.xml
           /app/share/metainfo/io.github.drworman.EDMD.metainfo.xml
-      - |
-        if [ -f images/edmd.png ]; then
-          install -Dm644 images/edmd.png \
-            /app/share/icons/hicolor/256x256/apps/io.github.drworman.EDMD.png
-        fi
+      - install -Dm644 images/edmd_avatar_512.png
+          /app/share/icons/hicolor/512x512/apps/io.github.drworman.EDMD.png
     sources:
       - type: git
         url: https://github.com/drworman/EDMD.git

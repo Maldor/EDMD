@@ -19,5 +19,6 @@
   <releases>
     <release version="20260402" date="2026-04-02"/>
   </releases>
+  <icon type="stock">io.github.drworman.EDMD</icon>
   <content_rating type="oars-1.1"/>
 </component>

@@ -63,7 +63,7 @@ jobs:
       - name: Install manifest generation tools
         run: |
           pip install pyyaml
-          pip install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=pip
+          # pip and pyyaml are all that's needed — no flatpak-pip-generator
 
       # ── 4. Generate the Flathub-ready manifest ────────────────────────────────
       - name: Generate release manifest

@@ -5,23 +5,31 @@ scripts/generate_flatpak_release.py
 Generates a Flathub-ready Flatpak manifest from the development manifest.
 
 Two transformations are applied:
-  1. The python3-edmd-deps module's live pip install is replaced with the
-     output of flatpak-pip-generator, which contains pre-resolved wheel URLs
-     and SHA256 hashes for all packages and their transitive dependencies.
-     Flathub's build environment has no network access during the build phase;
-     all sources must be declared explicitly in the manifest.
+  1. The python3-edmd-deps module's live pip install is replaced with an
+     offline module containing pre-resolved wheel URLs and SHA256 hashes for
+     all packages and their transitive dependencies.  Flathub's build
+     environment has no network access during the build phase; all sources
+     must be declared explicitly in the manifest.
 
   2. The edmd source is pinned from 'branch: main' to a specific tag and
      commit SHA, making the build fully reproducible.
 
-Usage (called by CI workflows):
+Wheel resolution uses 'pip download --only-binary :all: --report' (pip 22.2+).
+This produces a JSON report containing the canonical PyPI URL and SHA256 for
+every wheel selected, including transitive dependencies.  No third-party tools
+are required beyond pip and pyyaml.
+
+--only-binary :all: is non-negotiable: cryptography uses maturin (Rust) and
+psutil uses C extensions — neither can build from source in the GNOME SDK.
+
+Usage:
     python3 scripts/generate_flatpak_release.py \\
         --tag 20260402 \\
         --commit abc123def456... \\
         --output flathub-release/io.github.drworman.EDMD.yml
 
 Requirements:
-    pip install pyyaml flatpak-pip-generator
+    pip install pyyaml
 """
 
 import argparse
@@ -37,102 +45,171 @@ except ImportError:
     print("ERROR: pyyaml not installed. Run: pip install pyyaml", file=sys.stderr)
     sys.exit(1)
 
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-BASE_MANIFEST  = Path(__file__).parent.parent / "flatpak" / "io.github.drworman.EDMD.yml"
-APP_ID         = "io.github.drworman.EDMD"
-GITHUB_URL     = "https://github.com/drworman/EDMD.git"
+BASE_MANIFEST = Path(__file__).parent.parent / "flatpak" / "io.github.drworman.EDMD.yml"
 
-# Packages to install via pip.  These must exactly match what edmd requires.
+# Direct pip dependencies — transitive deps are resolved automatically.
 PIP_PACKAGES = [
     "discord-webhook>=1.3.0",
     "cryptography>=41.0.0",
     "psutil>=5.9.0",
 ]
 
+# Target platform for wheel selection.
+# org.gnome.Platform//49 runs on Python 3.13, x86_64 Linux.
+# manylinux_2_28 is the minimum glibc version for the Flatpak SDK base.
+PIP_PLATFORM       = "manylinux_2_28_x86_64"
+PIP_PYTHON_VERSION = "313"   # Python 3.13
+PIP_IMPLEMENTATION = "cp"
 
-# ── flatpak-pip-generator wrapper ─────────────────────────────────────────────
 
-def _find_fpg() -> list[str]:
+# ── Wheel download ────────────────────────────────────────────────────────────
+
+def _wheel_to_source(whl_path: Path) -> dict:
     """
-    Locate the flatpak-pip-generator command.
+    Build a Flatpak source entry for a downloaded wheel file.
 
-    The tool may be installed as a console script (flatpak-pip-generator)
-    or run via python3 -m flatpak_pip_generator depending on how it was
-    installed.  Returns the command list to use with subprocess.
+    Computes the SHA256 from the file on disk, then queries the PyPI JSON API
+    to get the canonical HTTPS URL.  The API lookup also cross-checks that our
+    hash matches PyPI's reported hash, detecting any corruption.
     """
-    import shutil
-    if shutil.which("flatpak-pip-generator"):
-        return ["flatpak-pip-generator"]
-    # Try running as a module
-    result = subprocess.run(
-        [sys.executable, "-m", "flatpak_pip_generator", "--help"],
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        return [sys.executable, "-m", "flatpak_pip_generator"]
+    import hashlib
+    import urllib.request
+    import urllib.error
+
+    filename = whl_path.name
+    sha256   = hashlib.sha256(whl_path.read_bytes()).hexdigest()
+
+    # Wheel filenames: {name}-{version}-{python}-{abi}-{platform}.whl
+    # Underscores in the name part map to hyphens in the PyPI package name.
+    parts    = filename[:-4].split("-")       # strip .whl, split on '-'
+    pkg_name = parts[0].lower().replace("_", "-")
+    version  = parts[1]
+
+    api_url = f"https://pypi.org/pypi/{pkg_name}/{version}/json"
+    try:
+        with urllib.request.urlopen(api_url, timeout=30) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        print(
+            f"  ERROR: PyPI API returned {e.code} for {pkg_name} {version}.\n"
+            f"  URL tried: {api_url}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    for release_file in data.get("urls", []):
+        if release_file["filename"] == filename:
+            pypi_sha256 = release_file["digests"]["sha256"]
+            if pypi_sha256 != sha256:
+                print(
+                    f"  ERROR: SHA256 mismatch for {filename}!\n"
+                    f"  Local : {sha256}\n"
+                    f"  PyPI  : {pypi_sha256}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return {
+                "type":          "file",
+                "url":           release_file["url"],
+                "sha256":        pypi_sha256,
+                "dest-filename": filename,
+            }
+
     print(
-        "ERROR: flatpak-pip-generator not found.\n"
-        "Install with:  pip install flatpak-pip-generator\n"
-        "Or from source: pip install "
-        "git+https://github.com/flatpak/flatpak-builder-tools.git"
-        "#subdirectory=pip",
+        f"  ERROR: {filename} not found in PyPI API response for {pkg_name} {version}.\n"
+        f"  This usually means the wheel was renamed or is not a standard release.\n"
+        f"  API URL: {api_url}",
         file=sys.stderr,
     )
     sys.exit(1)
 
 
-def generate_pip_module(packages: list[str]) -> dict:
+def download_wheels(packages: list[str]) -> list[dict]:
     """
-    Run flatpak-pip-generator for the given packages and return the resulting
-    module dict.
+    Download binary wheels for the target platform and return Flatpak source
+    entries: [{type, url, sha256, dest-filename}, ...] for every wheel,
+    including all transitive dependencies.
 
-    flatpak-pip-generator resolves all transitive dependencies and produces a
-    single Flatpak module definition containing:
-      - build-commands: pip3 install calls for each top-level package
-      - sources:        list of {type, url, sha256, dest-filename} for every
-                        wheel or sdist that needs to be downloaded
-
-    The sources are downloaded during flatpak-builder's fetch phase (which has
-    network access) and installed from local files during the build phase
-    (which does not).
+    Uses plain 'pip download --only-binary :all:' (universally supported),
+    then resolves canonical PyPI URLs and verifies SHA256 hashes via the
+    PyPI JSON API.  No pip internals, no --report flag, no third-party tools.
     """
-    fpg = _find_fpg()
-
     with tempfile.TemporaryDirectory() as tmpdir:
-        out_stem = Path(tmpdir) / "pip-module"
-        # --only-binary :all: forces wheel downloads; avoids maturin/Rust
-        # requirement from cryptography sdist and C compilation for psutil.
-        cmd = fpg + ["--only-binary", ":all:"] + packages + ["--output", str(out_stem)]
-        print(f"  Running: {' '.join(cmd)}")
+        dest_dir = Path(tmpdir) / "wheels"
+        dest_dir.mkdir()
+
+        cmd = [
+            sys.executable, "-m", "pip", "download",
+            "--only-binary", ":all:",
+            "--dest",           str(dest_dir),
+            "--platform",       PIP_PLATFORM,
+            "--python-version", PIP_PYTHON_VERSION,
+            "--implementation", PIP_IMPLEMENTATION,
+            "--quiet",
+        ] + packages
+
+        print(f"  Running pip download:")
+        print(f"    {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"flatpak-pip-generator failed:\n{result.stderr}", file=sys.stderr)
-            sys.exit(1)
-
-        out_file = out_stem.with_suffix(".json")
-        if not out_file.exists():
             print(
-                f"ERROR: flatpak-pip-generator did not produce {out_file}",
+                f"pip download failed (exit {result.returncode}):\n"
+                f"{result.stderr.strip()}",
                 file=sys.stderr,
             )
             sys.exit(1)
 
-        module = json.loads(out_file.read_text())
+        wheels = sorted(dest_dir.glob("*.whl"))
+        if not wheels:
+            print("ERROR: pip download produced no .whl files.", file=sys.stderr)
+            sys.exit(1)
 
-    # Standardise the module name regardless of how the tool names it
-    module["name"] = "python3-edmd-deps"
-    return module
+        print(f"  Downloaded {len(wheels)} wheels — resolving PyPI URLs...")
+        sources = []
+        for whl in wheels:
+            print(f"    {whl.name}")
+            sources.append(_wheel_to_source(whl))
+
+    return sources
+
+
+def generate_pip_module(packages: list[str]) -> dict:
+    """
+    Build the complete Flatpak module dict for pip-managed dependencies.
+
+    The build command uses --no-index --find-links to install from the
+    pre-downloaded wheel files in 'sources', never touching the network.
+    """
+    sources = download_wheels(packages)
+
+    # Strip version specifiers for the install command — the wheels are
+    # already version-pinned by the sources list.
+    names = [p.split(">=")[0].split("==")[0].split("!=")[0].strip() for p in packages]
+    quoted = " ".join(f'"{n}"' for n in names)
+
+    install_cmd = (
+        "pip3 install --verbose --no-build-isolation --no-index "
+        "--only-binary :all: "
+        '--find-links="file://${PWD}" '
+        "--prefix=${FLATPAK_DEST} "
+        + quoted
+    )
+
+    return {
+        "name":           "python3-edmd-deps",
+        "buildsystem":    "simple",
+        "build-commands": [install_cmd],
+        "sources":        sources,
+    }
 
 
 # ── Manifest transformation ───────────────────────────────────────────────────
 
 def patch_manifest(manifest: dict, tag: str, commit: str, pip_module: dict) -> dict:
-    """
-    Apply the two Flathub-required transformations to the manifest dict.
-
-    Returns a new dict (does not mutate the input).
-    """
+    """Replace the pip module and pin the EDMD source. Returns a new dict."""
     import copy
     m = copy.deepcopy(manifest)
     new_modules = []
@@ -144,12 +221,10 @@ def patch_manifest(manifest: dict, tag: str, commit: str, pip_module: dict) -> d
 
         name = module.get("name", "")
 
-        # 1. Replace the pip module with the offline version
-        if name.startswith("python3-edmd-deps") or name.startswith("python3-discord-webhook"):
+        if name.startswith("python3-edmd-deps") or name.startswith("python3-discord"):
             new_modules.append(pip_module)
             continue
 
-        # 2. Pin the EDMD source to the release tag + commit
         if name == "edmd":
             mod = dict(module)
             new_sources = []
@@ -174,12 +249,6 @@ def patch_manifest(manifest: dict, tag: str, commit: str, pip_module: dict) -> d
 # ── YAML output ───────────────────────────────────────────────────────────────
 
 def _yaml_dump(data: dict) -> str:
-    """
-    Dump a manifest dict to YAML with Flatpak-friendly formatting.
-
-    PyYAML's default dumper converts multi-line strings to block style and
-    preserves key order (Python 3.7+ dicts are ordered).
-    """
     return yaml.dump(
         data,
         default_flow_style=False,
@@ -195,65 +264,64 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate a Flathub-ready Flatpak manifest for an EDMD release."
     )
-    parser.add_argument("--tag",    required=True, help="Release version tag, e.g. 20260402")
+    parser.add_argument("--tag",    required=True, help="Release tag, e.g. 20260402")
     parser.add_argument("--commit", required=True, help="Full git commit SHA for the tag")
     parser.add_argument(
         "--output",
         default="flathub-release/io.github.drworman.EDMD.yml",
-        help="Output path for the generated manifest",
+        help="Output path (default: %(default)s)",
     )
     parser.add_argument(
-        "--skip-pip-gen",
+        "--dry-run",
         action="store_true",
-        help="Skip flatpak-pip-generator (use for dry-runs without network)",
+        help="Skip wheel download; produces a manifest with empty sources (structure test only)",
     )
     args = parser.parse_args()
 
     print(f"Generating Flathub manifest for EDMD {args.tag} @ {args.commit[:12]}...")
 
-    # Load base manifest
     if not BASE_MANIFEST.exists():
         print(f"ERROR: Base manifest not found at {BASE_MANIFEST}", file=sys.stderr)
         sys.exit(1)
-    manifest = yaml.safe_load(BASE_MANIFEST.read_text())
+    manifest = yaml.safe_load(BASE_MANIFEST.read_text(encoding="utf-8"))
 
-    # Generate pip module with offline sources
-    if args.skip_pip_gen:
-        print("  --skip-pip-gen: using placeholder pip module (not for Flathub submission)")
+    if args.dry_run:
+        print("  --dry-run: skipping wheel download")
         pip_module = {
-            "name": "python3-edmd-deps",
-            "buildsystem": "simple",
-            "build-commands": [
-                'pip3 install --no-build-isolation --prefix=/app '
-                '"discord-webhook>=1.3.0" "cryptography>=41.0.0" "psutil>=5.9.0"'
-            ],
-            "sources": [],
+            "name":           "python3-edmd-deps",
+            "buildsystem":    "simple",
+            "build-commands": ["echo 'DRY RUN — sources not populated'"],
+            "sources":        [],
         }
     else:
-        print("  Running flatpak-pip-generator (resolving wheels and dependencies)...")
+        print(
+            f"  Packages  : {', '.join(PIP_PACKAGES)}\n"
+            f"  Platform  : {PIP_PLATFORM}\n"
+            f"  Python    : {PIP_PYTHON_VERSION}\n"
+            f"  (resolves all transitive dependencies)"
+        )
         pip_module = generate_pip_module(PIP_PACKAGES)
-        n_sources = len(pip_module.get("sources", []))
-        print(f"  Resolved {n_sources} package sources.")
+        print(f"  Wheels    : {len(pip_module['sources'])} sources resolved")
 
-    # Apply transformations
     release_manifest = patch_manifest(manifest, args.tag, args.commit, pip_module)
 
-    # Write output
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(_yaml_dump(release_manifest), encoding="utf-8")
 
-    print(f"  Written: {output}")
-    print(f"  App ID : {release_manifest.get('app-id')}")
-    print(f"  Tag    : {args.tag}")
-    print(f"  Commit : {args.commit}")
-    source_count = sum(
+    total_src = sum(
         len(m.get("sources", []))
         for m in release_manifest.get("modules", [])
         if isinstance(m, dict)
     )
-    print(f"  Total sources in manifest: {source_count}")
-    print("Done.")
+    print(
+        f"  Written   : {output}\n"
+        f"  App ID    : {release_manifest.get('app-id')}\n"
+        f"  Tag       : {args.tag}\n"
+        f"  Commit    : {args.commit}\n"
+        f"  Sources   : {total_src} total manifest entries\n"
+        "Done."
+    )
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ jobs:
       - name: Install manifest generation tools
         run: |
           pip install pyyaml
-          pip install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=pip
+          # pip and pyyaml are all that's needed — no flatpak-pip-generator
 
       # ── 3. Generate release-style manifest with offline pip sources ───────────
       # We generate an offline-source manifest (same as what Flathub uses)
