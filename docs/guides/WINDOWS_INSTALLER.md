@@ -26,7 +26,7 @@ Download `EDMD-Setup-{version}.exe` from the
    **No MSYS2, no pacman, no internet connection required at install time.**
 
 3. **Clones the EDMD source** from GitHub into `%LOCALAPPDATA%\EDMD\src\`
-   as a real git repository, enabling upgrade-in-place.
+   as a real git repository, enabling updates via `git pull`.
 
 4. **Installs EDMD.exe.** A small launcher stub placed in
    `%LOCALAPPDATA%\EDMD\` that finds `runtime\python.exe` and launches
@@ -57,12 +57,14 @@ TOML parse error.
 
 ## Updating EDMD
 
+To update the EDMD source, run `git pull` inside `%LOCALAPPDATA%\EDMD\src`:
+
 ```
-EDMD.exe --upgrade
+cd %LOCALAPPDATA%\EDMD\src
+git pull
 ```
 
-This runs `git pull` on the source and relaunches. To update the bundled
-runtime (GTK4, Python, pip packages), re-run the full installer.
+To update the bundled runtime (GTK4, Python, pip packages), re-run the full installer.
 
 ---
 
@@ -106,7 +108,7 @@ Re-run the installer to restore `runtime\`.
 ```
 If this fails, re-run the installer.
 
-**"git not found" during --upgrade**
+**"git not found" when running `git pull`**
 Add `C:\Program Files\Git\cmd` to your PATH via Environment Variables in
 System Properties.
 

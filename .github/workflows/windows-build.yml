@@ -93,6 +93,7 @@ jobs:
       # The resulting dist\runtime\ directory is what ships to users —
       # they do not need MSYS2 installed on their machines.
       - name: Set up MSYS2 (build-time only)
+        id: msys2_setup
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -112,13 +113,30 @@ jobs:
       - name: Collect bundled runtime
         shell: pwsh
         run: |
-          # msys2/setup-msys2 installs to C:\msys64 by default
-          $msys2 = "C:\msys64"
-          if (-not (Test-Path "$msys2\ucrt64\bin\python.exe")) {
-            # Fallback: find wherever setup-msys2 put it
-            $msys2 = $env:MSYS2_PATH
-            if (-not $msys2) { throw "Cannot locate MSYS2" }
+          # Priority 1: use the msys2-location output from the setup step
+          $msys2 = "${{ steps.msys2_setup.outputs.msys2-location }}"
+
+          # Priority 2: common fixed paths (windows-latest typically uses C:\msys64)
+          if (-not $msys2 -or -not (Test-Path "$msys2\ucrt64\bin\python.exe")) {
+            foreach ($c in @("C:\msys64", "D:\msys64", "C:\msys2", "D:\msys2")) {
+              if (Test-Path "$c\ucrt64\bin\python.exe") { $msys2 = $c; break }
+            }
           }
+
+          # Priority 3: derive root from bash.exe in PATH
+          # setup-msys2 always adds {root}\usr\bin to PATH
+          if (-not $msys2 -or -not (Test-Path "$msys2\ucrt64\bin\python.exe")) {
+            $bash = (Get-Command bash -ErrorAction SilentlyContinue)?.Source
+            if ($bash) {
+              $msys2 = (Get-Item $bash).Directory.Parent.FullName
+              Write-Host "Derived MSYS2 root from bash: $msys2"
+            }
+          }
+
+          if (-not $msys2 -or -not (Test-Path "$msys2\ucrt64\bin\python.exe")) {
+            throw "Cannot locate MSYS2. setup-msys2 output was: '${{ steps.msys2_setup.outputs.msys2-location }}'"
+          }
+
           Write-Host "MSYS2 root: $msys2"
           .\scripts\collect_runtime.ps1 -Msys2Root $msys2 -OutDir dist\runtime
 

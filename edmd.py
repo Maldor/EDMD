@@ -45,90 +45,7 @@ parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
 parser.add_argument("-g", "--gui", action="store_true", default=None,
                     help="Launch GTK4 GUI (Linux only; requires PyGObject)")
-parser.add_argument("--upgrade",         action="store_true", default=False,
-                    help="Pull latest release and restart")
-parser.add_argument("--upgrade-nightly", action="store_true", default=False,
-                    help="Pull latest commit (nightly/dev) and restart")
-
 args = parser.parse_args()
-
-
-
-# ── In-place upgrade (self-contained — runs before full package import) ────────
-
-def _do_upgrade(nightly: bool = False) -> None:
-    repo_dir = _HERE
-    mode_label = "Nightly (dev)" if nightly else "Release"
-    print(f"{Terminal.CYAN}{'=' * 52}\n  EDMD Upgrade — {mode_label}\n{'=' * 52}{Terminal.END}\n")
-
-    import shutil
-    if not shutil.which("git"):
-        print(f"{Terminal.WARN}ERROR:{Terminal.END} git not found on PATH.")
-        sys.exit(1)
-
-    r = _sp.run(["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"{Terminal.WARN}ERROR:{Terminal.END} {repo_dir} is not a git repository.")
-        sys.exit(1)
-
-    dirty = _sp.run(["git", "-C", str(repo_dir), "status", "--porcelain"],
-                    capture_output=True, text=True)
-    def _is_user_file(line: str) -> bool:
-        """Return True if this git status line refers to a user-owned path
-        that should not block or warn on upgrade."""
-        path = line.strip().lstrip("?! MADRCU").strip()
-        return (
-            path.endswith("config.toml")
-            or path.endswith("config.toml.bak")
-            or path.startswith("plugins/")
-            or path.startswith("plugins\\")
-        )
-    modified = [l for l in dirty.stdout.splitlines() if not _is_user_file(l)]
-
-    label = "latest commit" if nightly else "latest release"
-    print(f"  Current version : {VERSION}\n  Pulling         : {label} from origin/main")
-    # Discard any local modifications to tracked files before pulling.
-    # User data lives outside the repo (config.toml in ~/.local/share/EDMD/).
-    _sp.run(["git", "-C", str(repo_dir), "checkout", "."],
-            capture_output=True)
-    pull_cmd = ["git", "-C", str(repo_dir), "pull"]
-    if not nightly:
-        pull_cmd.append("--ff-only")
-    pull = _sp.run(pull_cmd, capture_output=True, text=True)
-    if pull.returncode != 0:
-        print(f"\n{Terminal.WARN}ERROR:{Terminal.END} git pull failed:")
-        print(pull.stderr.strip() or pull.stdout.strip()); sys.exit(1)
-    if "Already up to date" in pull.stdout:
-        print(f"\n  Already up to date (v{VERSION}). Nothing to do.\n")
-        # If we were launched from the GUI, relaunch it rather than dying
-        if "--gui" in sys.argv:
-            new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")]
-            os.execv(sys.executable, [sys.executable] + new_argv)
-        sys.exit(0)
-    print(pull.stdout.strip()); print()
-
-
-    install_sh = repo_dir / "install.sh"
-    if install_sh.exists() and _pl.system() != "Windows":
-        print("  Running install.sh...\n")
-        inst = _sp.run(["bash", str(install_sh)], cwd=str(repo_dir))
-        if inst.returncode != 0:
-            print(f"\n{Terminal.WARN}Warning:{Terminal.END} install.sh exited with errors.")
-    elif _pl.system() == "Windows":
-        install_bat = repo_dir / "install.bat"
-        if install_bat.exists():
-            print("  Running install.bat...\n")
-            _sp.run([str(install_bat)], cwd=str(repo_dir), shell=True)
-
-    new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")]
-    print(f"\n{Terminal.GOOD}  Upgrade complete. Relaunching EDMD...{Terminal.END}\n")
-    os.execv(sys.executable, [sys.executable] + new_argv)
-
-
-if args.upgrade or getattr(args, "upgrade_nightly", False):
-    _do_upgrade(nightly=getattr(args, "upgrade_nightly", False))
-    sys.exit(0)  # unreachable — execv replaces process
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -158,8 +75,7 @@ def _check_for_update() -> None:
     # Check for a newer tagged release via GitHub API.
     # Compares VERSION against the latest release tag using a (date, suffix) key
     # so 20260325a < 20260325b < 20260326 all sort correctly.
-    # Commits that land on main after a release do NOT trigger a notice —
-    # users who want nightly builds can run --upgrade themselves.
+    # Commits that land on main after a release do NOT trigger a notice.
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         with urlopen(url, timeout=4) as resp:
@@ -364,7 +280,6 @@ if _update_notice:
     _term_msg = (
         f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
         f"  {Terminal.WHITE}{_repo_url}/releases{Terminal.END}\n"
-        f"  Run {Terminal.CYAN}edmd.py --upgrade{Terminal.END} to update and restart automatically.\n"
     )
     if not gui_mode:
         print(_term_msg)
