@@ -1,16 +1,19 @@
 name: Windows Installer Build
 
-# Builds EDMD.exe (PyInstaller launcher) and the Inno Setup installer.
-# Triggers on release tags and can be run manually.
+# Builds EDMD.exe (PyInstaller launcher), collects the bundled GTK4 + Python
+# runtime from MSYS2, and compiles the Inno Setup installer.
+#
+# The resulting installer ships a self-contained runtime — no MSYS2 required
+# on user machines.
 #
 # Artifacts produced:
-#   EDMD-Setup-{version}.exe   — Inno Setup installer
-#   EDMD-launcher-{version}.zip — raw PyInstaller output (for testing)
+#   EDMD-Setup-{version}.exe     — Inno Setup installer (~300 MB)
+#   EDMD-launcher-{version}.zip  — raw PyInstaller output (debugging)
 
 on:
   push:
     tags:
-      - '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*'   # date-based version tags
+      - '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*'
   workflow_dispatch:
     inputs:
       version_override:
@@ -27,13 +30,13 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # ── 1. Checkout ───────────────────────────────────────────────────────
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
-      # ── 2. Determine version string ───────────────────────────────────────
+      # ── 2. Determine version string ──────────────────────────────────────────
       - name: Write version helper script
         shell: bash
         run: |
@@ -58,8 +61,8 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building version: ${VERSION}"
 
-      # ── 3. Standard Python for PyInstaller (no MSYS2 needed for launcher) ─
-      - name: Set up Python
+      # ── 3. Standard Python for PyInstaller ───────────────────────────────────
+      - name: Set up Python (for PyInstaller)
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -68,28 +71,70 @@ jobs:
         shell: cmd
         run: pip install pyinstaller
 
-      # ── 4. Build EDMD.exe launcher with PyInstaller ───────────────────────
-      # ── 4. Build EDMD.exe launcher with PyInstaller ───────────────────────
+      # ── 4. Build EDMD.exe launcher ───────────────────────────────────────────
       - name: Build launcher exe
         shell: cmd
         run: |
-          echo Working dir: %CD%
-          dir edmd_launcher.spec
           pyinstaller "%GITHUB_WORKSPACE%\edmd_launcher.spec" --noconfirm --clean
           dir dist\EDMD\
 
-      # ── 5. Verify launcher builds and basic structure is present ──────────
       - name: Verify launcher
         shell: cmd
         run: |
           if not exist "dist\EDMD\EDMD.exe" (
-            echo ERROR: EDMD.exe not found in dist\EDMD\
+            echo ERROR: EDMD.exe not found
             exit /b 1
           )
           echo EDMD.exe built successfully.
           dir dist\EDMD\EDMD.exe
 
-      # ── 6. Update version in Inno Setup script ────────────────────────────
+      # ── 5. Set up MSYS2 with GTK4 + Python stack ─────────────────────────────
+      # MSYS2 is used at BUILD TIME ONLY to collect the runtime.
+      # The resulting dist\runtime\ directory is what ships to users —
+      # they do not need MSYS2 installed on their machines.
+      - name: Set up MSYS2 (build-time only)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-python-psutil
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+
+      # ── 6. Collect bundled runtime ────────────────────────────────────────────
+      # Runs scripts\collect_runtime.ps1 which copies GTK4 DLLs, Python stdlib,
+      # PyGObject, psutil, and pip-installs discord-webhook + cryptography into
+      # dist\runtime\. Validates that all required imports work before proceeding.
+      - name: Collect bundled runtime
+        shell: pwsh
+        run: |
+          # msys2/setup-msys2 installs to C:\msys64 by default
+          $msys2 = "C:\msys64"
+          if (-not (Test-Path "$msys2\ucrt64\bin\python.exe")) {
+            # Fallback: find wherever setup-msys2 put it
+            $msys2 = $env:MSYS2_PATH
+            if (-not $msys2) { throw "Cannot locate MSYS2" }
+          }
+          Write-Host "MSYS2 root: $msys2"
+          .\scripts\collect_runtime.ps1 -Msys2Root $msys2 -OutDir dist\runtime
+
+      - name: Verify runtime size
+        shell: pwsh
+        run: |
+          $size = (Get-ChildItem dist\runtime -Recurse | Measure-Object -Property Length -Sum).Sum
+          $mb = [math]::Round($size / 1MB, 1)
+          Write-Host "Runtime size: ${mb} MB uncompressed"
+          if ($size -lt 50MB) {
+            Write-Error "Runtime looks too small (${mb} MB) — collection may have failed"
+            exit 1
+          }
+          Write-Host "Runtime size OK."
+
+      # ── 7. Update version in Inno Setup script ────────────────────────────────
       - name: Patch version in EDMD.iss
         shell: python
         run: |
@@ -105,14 +150,14 @@ jobs:
           )
           with open(path, "w", encoding="utf-8") as f:
               f.write(content)
-          print(f"Patched AppVersion to {version!r} in {path}")
+          print(f"Patched AppVersion to {version!r}")
 
-      # ── 7. Create output directory for installer ──────────────────────────
+      # ── 8. Create installer output directory ──────────────────────────────────
       - name: Create installer output dir
         shell: cmd
         run: mkdir dist\installer
 
-      # ── 8. Compile Inno Setup installer ──────────────────────────────────
+      # ── 9. Compile Inno Setup installer ───────────────────────────────────────
       - name: Build Inno Setup installer
         shell: pwsh
         run: |
@@ -121,40 +166,40 @@ jobs:
             $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
           }
           if (-not (Test-Path $iscc)) {
-            Write-Host "Inno Setup not found. Installing via choco..."
+            Write-Host "Inno Setup not found — installing via choco..."
             choco install innosetup --no-progress -y
             $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           }
-          Write-Host "Using Inno Setup at $iscc"
+          Write-Host "Using Inno Setup: $iscc"
           & $iscc installer\EDMD.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dir dist\installer\
 
-      # ── 9. Verify installer was produced ──────────────────────────────────
+      # ── 10. Verify installer was produced ─────────────────────────────────────
       - name: Verify installer
         shell: python
         run: |
           import pathlib, sys
           version = "${{ steps.version.outputs.version }}"
-          expected = pathlib.Path(f"dist/installer/EDMD-Setup-{version}.exe")
-          if not expected.exists():
-              # Try any .exe in dist/installer/
-              matches = list(pathlib.Path("dist/installer").glob("EDMD-Setup-*.exe"))
-              if not matches:
-                  print("ERROR: No EDMD-Setup-*.exe found in dist/installer/")
-                  sys.exit(1)
-              print(f"Found: {matches[0]} ({matches[0].stat().st_size // 1024 // 1024} MB)")
-          else:
-              print(f"Found: {expected} ({expected.stat().st_size // 1024 // 1024} MB)")
+          matches = list(pathlib.Path("dist/installer").glob("EDMD-Setup-*.exe"))
+          if not matches:
+              print("ERROR: No EDMD-Setup-*.exe found in dist/installer/")
+              sys.exit(1)
+          p = matches[0]
+          size_mb = p.stat().st_size // 1024 // 1024
+          print(f"Installer: {p.name}  ({size_mb} MB)")
+          if size_mb < 50:
+              print(f"ERROR: Installer suspiciously small ({size_mb} MB)")
+              sys.exit(1)
 
-      # ── 10. Zip raw launcher for debugging ────────────────────────────────
+      # ── 11. Zip raw launcher for debugging ────────────────────────────────────
       - name: Zip launcher
         shell: pwsh
         run: |
           Compress-Archive -Path dist\EDMD\* `
             -DestinationPath "dist\installer\EDMD-launcher-${{ steps.version.outputs.version }}.zip"
 
-      # ── 11. Upload artifacts ──────────────────────────────────────────────
+      # ── 12. Upload artifacts ──────────────────────────────────────────────────
       - name: Upload installer artifact
         uses: actions/upload-artifact@v6
         with:
@@ -164,7 +209,7 @@ jobs:
             dist/installer/EDMD-launcher-*.zip
           retention-days: 30
 
-      # ── 12. Attach to GitHub Release if triggered by a tag ────────────────
+      # ── 13. Attach to GitHub Release if triggered by a tag ───────────────────
       - name: Upload to GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2

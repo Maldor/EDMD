@@ -23,6 +23,7 @@ except ImportError:
     raise ImportError("PyGObject / GTK4 not found.")
 
 from core.state import VERSION, AUTHOR, GITHUB_REPO
+from core.install_context import install_context
 
 KOFI_URL   = "https://ko-fi.com/drworman"
 PAYPAL_URL = "https://paypal.me/DavidWorman"
@@ -111,8 +112,22 @@ class EdmdMenuBar:
         pop = self._popover()
         box = self._vbox()
 
-        box.append(self._menu_btn("⬆  Upgrade  (Release)", self._on_upgrade))
-        box.append(self._menu_btn("⬆  Upgrade  (Nightly)", self._on_upgrade_nightly))
+        mode = install_context.upgrade_mode
+
+        if mode == "flatpak":
+            # Inside a Flatpak sandbox: git pull is not possible.
+            # Direct the user to the system package manager.
+            box.append(self._menu_btn("⬆  Check for Updates", self._on_upgrade_flatpak))
+        elif mode == "windows":
+            # Windows installer: git pull for source updates;
+            # full installer re-run for runtime updates.
+            box.append(self._menu_btn("⬆  Upgrade  (Release)", self._on_upgrade))
+            box.append(self._menu_btn("⬆  Upgrade  (Nightly)", self._on_upgrade_nightly))
+        else:
+            # Plain git clone on Linux / macOS: full upgrade paths available.
+            box.append(self._menu_btn("⬆  Upgrade  (Release)", self._on_upgrade))
+            box.append(self._menu_btn("⬆  Upgrade  (Nightly)", self._on_upgrade_nightly))
+
         box.append(self._separator())
         box.append(self._menu_btn("✕  Exit", self._on_exit))
 
@@ -216,6 +231,72 @@ class EdmdMenuBar:
             pass
         new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")] + ["--upgrade-nightly"]
         os.execv(sys.executable, [sys.executable] + new_argv)
+
+    def _on_upgrade_flatpak(self, *_) -> None:
+        """
+        Show a dialog telling the user how to update via Flatpak.
+
+        EDMD cannot update itself inside a Flatpak sandbox — the /app tree is
+        read-only by design.  Updates are delivered by the Flatpak runtime via
+        'flatpak update', either through a software centre or the terminal.
+        """
+        from core.install_context import FLATPAK_APP_ID
+
+        dlg = Gtk.Window(title="Update EDMD")
+        dlg.set_transient_for(self._win)
+        dlg.set_modal(True)
+        dlg.set_resizable(False)
+        dlg.set_default_size(400, -1)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(20)
+        box.set_margin_bottom(20)
+        box.set_margin_start(24)
+        box.set_margin_end(24)
+        dlg.set_child(box)
+
+        title = Gtk.Label(label="Updating EDMD (Flatpak)")
+        title.add_css_class("about-title")
+        title.set_halign(Gtk.Align.CENTER)
+        box.append(title)
+
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        body = Gtk.Label()
+        body.set_markup(
+            "EDMD is running inside a Flatpak sandbox.\n"
+            "Updates are delivered through the Flatpak runtime.\n\n"
+            "To update, open a terminal and run:\n"
+        )
+        body.set_wrap(True)
+        body.set_xalign(0.0)
+        body.add_css_class("doc-para")
+        box.append(body)
+
+        cmd_lbl = Gtk.Label(label=f"flatpak update {FLATPAK_APP_ID}")
+        cmd_lbl.add_css_class("section-header")
+        cmd_lbl.set_selectable(True)
+        cmd_lbl.set_halign(Gtk.Align.CENTER)
+        box.append(cmd_lbl)
+
+        note = Gtk.Label(
+            label="Or use your desktop software centre (GNOME Software,\n"
+                  "KDE Discover, etc.) to check for updates."
+        )
+        note.set_wrap(True)
+        note.set_xalign(0.0)
+        note.add_css_class("doc-para")
+        box.append(note)
+
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        close_btn = Gtk.Button(label="Close")
+        close_btn.add_css_class("about-close")
+        close_btn.set_halign(Gtk.Align.CENTER)
+        close_btn.connect("clicked", lambda *_: dlg.close())
+        box.append(close_btn)
+
+        dlg.present()
 
     def _on_exit(self, *_) -> None:
         self._win.get_application().quit()

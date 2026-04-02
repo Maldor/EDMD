@@ -1,0 +1,163 @@
+name: Flatpak Release
+
+# On every tagged release, generates a Flathub-ready manifest and opens a pull
+# request against the EDMD Flathub repository
+# (github.com/flathub/io.github.drworman.EDMD).
+#
+# Prerequisites before this workflow will function:
+#   1. The initial Flathub submission PR has been merged (see INSTALL.md).
+#      Flathub will have created github.com/flathub/io.github.drworman.EDMD.
+#   2. A GitHub Personal Access Token with `repo` scope for the Flathub repo
+#      has been created and stored as the FLATHUB_TOKEN repository secret.
+#
+# Once both prerequisites are met, every tagged release automatically submits
+# a manifest update to Flathub.  A Flathub maintainer reviews and merges the
+# PR, which triggers Flathub's own build pipeline and publishes the update.
+
+on:
+  push:
+    tags:
+      - '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to submit (e.g. 20260402)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak-release:
+    name: Submit Flathub update PR
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout at the release tag ───────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # needed to resolve tag → commit SHA
+
+      # ── 2. Determine version and commit ──────────────────────────────────────
+      - name: Set version and commit
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            COMMIT=$(git rev-parse "refs/tags/${TAG}" 2>/dev/null || git rev-parse HEAD)
+          else
+            TAG="${{ github.ref_name }}"
+            COMMIT=$(git rev-parse HEAD)
+          fi
+          echo "tag=${TAG}"       >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "Release: ${TAG} @ ${COMMIT}"
+
+      # ── 3. Python + tools ────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install manifest generation tools
+        run: |
+          pip install pyyaml
+          pip install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=pip
+
+      # ── 4. Generate the Flathub-ready manifest ────────────────────────────────
+      - name: Generate release manifest
+        run: |
+          python3 scripts/generate_flatpak_release.py \
+            --tag    "${{ steps.meta.outputs.tag }}" \
+            --commit "${{ steps.meta.outputs.commit }}" \
+            --output flathub-release/io.github.drworman.EDMD.yml
+
+          echo "=== Generated manifest preview ==="
+          head -60 flathub-release/io.github.drworman.EDMD.yml
+
+      # ── 5. Validate the manifest before submitting ────────────────────────────
+      # Build the Flatpak to catch any issues before the PR is opened.
+      # If this step fails, no PR is opened — protecting Flathub from a broken build.
+      - name: Build and validate Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: edmd-${{ steps.meta.outputs.tag }}.flatpak
+          manifest-path: flathub-release/io.github.drworman.EDMD.yml
+          cache-key: flatpak-release-${{ steps.meta.outputs.tag }}
+
+      - name: Smoke test
+        run: |
+          flatpak --user install --noninteractive edmd-${{ steps.meta.outputs.tag }}.flatpak
+          flatpak run --command=python3 io.github.drworman.EDMD \
+            -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk;
+                import discord_webhook, cryptography, psutil
+                print('smoke test OK')"
+
+      # ── 6. Check Flathub token is available ──────────────────────────────────
+      # This step fails early with a clear message if the secret is missing,
+      # rather than letting the checkout step fail with a cryptic auth error.
+      - name: Verify FLATHUB_TOKEN is configured
+        env:
+          TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "ERROR: FLATHUB_TOKEN secret is not set."
+            echo ""
+            echo "To configure it:"
+            echo "  1. Create a GitHub PAT with 'repo' scope at:"
+            echo "     https://github.com/settings/tokens/new"
+            echo "  2. The token must have write access to:"
+            echo "     github.com/flathub/io.github.drworman.EDMD"
+            echo "     (you get this after the initial Flathub submission is merged)"
+            echo "  3. Add it as a repository secret named FLATHUB_TOKEN at:"
+            echo "     https://github.com/drworman/EDMD/settings/secrets/actions"
+            exit 1
+          fi
+          echo "FLATHUB_TOKEN is configured."
+
+      # ── 7. Checkout the Flathub app repository ───────────────────────────────
+      - name: Checkout Flathub repository
+        uses: actions/checkout@v5
+        with:
+          repository: flathub/io.github.drworman.EDMD
+          token: ${{ secrets.FLATHUB_TOKEN }}
+          path: flathub-repo
+
+      # ── 8. Copy updated manifest into the Flathub repo ───────────────────────
+      - name: Update manifest in Flathub repo
+        run: |
+          cp flathub-release/io.github.drworman.EDMD.yml \
+             flathub-repo/io.github.drworman.EDMD.yml
+          echo "Manifest updated in flathub-repo/"
+
+      # ── 9. Open (or update) the PR ───────────────────────────────────────────
+      # peter-evans/create-pull-request@v6 creates a new PR or updates the
+      # branch if one already exists for the same version.
+      - name: Create Flathub PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.FLATHUB_TOKEN }}
+          path: flathub-repo
+          branch: release-${{ steps.meta.outputs.tag }}
+          base: master
+          commit-message: "Update EDMD to ${{ steps.meta.outputs.tag }}"
+          title: "Update EDMD to version ${{ steps.meta.outputs.tag }}"
+          body: |
+            Automated update to EDMD v${{ steps.meta.outputs.tag }}.
+
+            **Source commit:** ${{ steps.meta.outputs.commit }}
+            **GitHub release:** https://github.com/drworman/EDMD/releases/tag/${{ steps.meta.outputs.tag }}
+            **Release notes:** https://github.com/drworman/EDMD/blob/main/docs/releases/RELEASE_NOTES_${{ steps.meta.outputs.tag }}.md
+
+            This PR was generated automatically by the EDMD release workflow.
+            The manifest was validated against a full Flatpak build before this
+            PR was opened — if this PR exists, the build passed.
+
+      # ── 10. Upload bundle as artifact ────────────────────────────────────────
+      - name: Upload validated bundle
+        uses: actions/upload-artifact@v6
+        with:
+          name: edmd-flatpak-${{ steps.meta.outputs.tag }}
+          path: edmd-${{ steps.meta.outputs.tag }}.flatpak
+          retention-days: 30

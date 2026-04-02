@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=EDMD
+GenericName=Elite Dangerous Monitor Daemon
+Comment=AFK session monitor for Elite Dangerous
+Exec=edmd --gui %U
+Icon=io.github.drworman.EDMD
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+Keywords=elite;dangerous;monitor;edmd;
+StartupNotify=true

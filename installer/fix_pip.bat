@@ -3,32 +3,30 @@ setlocal EnableDelayedExpansion
 
 :: fix_pip.bat — EDMD pip fix for existing installations
 ::
-:: Installs mingw-w64-ucrt-x86_64-python-pip via pacman, then
-:: installs all pip-managed EDMD dependencies (discord-webhook,
-:: cryptography) that may have failed during the original setup.
+:: Calls MSYS2's Windows-native executables directly — no bash, no login
+:: shell, no temp scripts. This avoids the MSYSTEM / PATH initialisation
+:: issues that caused the previous version to fail on many machines.
 ::
 :: Run as your normal user account — administrator is not required.
-:: Double-click to run, or launch from a command prompt.
+:: Double-click or run from a command prompt.
 
 echo.
 echo  EDMD pip fix
 echo  ============
-echo  This script installs pip into your MSYS2 Python environment
-echo  and pulls in all pip-managed EDMD dependencies.
+echo  Installs pip and all pip-managed EDMD packages into your MSYS2
+echo  Python environment using MSYS2's native Windows executables.
 echo.
 
 :: ── Locate MSYS2 ─────────────────────────────────────────────────────────────
 
 set "MSYS2_ROOT="
 
-:: Check environment variable set by the EDMD installer first
 if defined EDMD_MSYS2_ROOT (
-    if exist "%EDMD_MSYS2_ROOT%\usr\bin\bash.exe" (
+    if exist "%EDMD_MSYS2_ROOT%\ucrt64\bin\python.exe" (
         set "MSYS2_ROOT=%EDMD_MSYS2_ROOT%"
     )
 )
 
-:: Fall back to common install locations
 if not defined MSYS2_ROOT (
     for %%D in (
         "C:\msys64"
@@ -39,7 +37,7 @@ if not defined MSYS2_ROOT (
         "%ProgramFiles%\msys2"
     ) do (
         if not defined MSYS2_ROOT (
-            if exist "%%~D\usr\bin\bash.exe" (
+            if exist "%%~D\ucrt64\bin\python.exe" (
                 set "MSYS2_ROOT=%%~D"
             )
         )
@@ -47,97 +45,105 @@ if not defined MSYS2_ROOT (
 )
 
 if not defined MSYS2_ROOT (
-    echo  ERROR: MSYS2 not found.
+    echo  ERROR: Could not find MSYS2 with ucrt64\bin\python.exe.
     echo.
     echo  Checked:
-    echo    %%EDMD_MSYS2_ROOT%%
-    echo    C:\msys64
-    echo    C:\msys2
+    echo    %%EDMD_MSYS2_ROOT%%  (%EDMD_MSYS2_ROOT%)
+    echo    C:\msys64, C:\msys2
     echo    %%LOCALAPPDATA%%\msys64 / msys2
     echo    %%ProgramFiles%%\msys64 / msys2
     echo.
-    echo  If MSYS2 is installed in a non-standard location, set the
-    echo  EDMD_MSYS2_ROOT environment variable to its root path and
-    echo  re-run this script.
+    echo  If MSYS2 is installed elsewhere, set EDMD_MSYS2_ROOT:
+    echo    setx EDMD_MSYS2_ROOT "D:\msys64"
+    echo  Then re-run this script.
     echo.
     pause
     exit /b 1
 )
 
+set "PACMAN=%MSYS2_ROOT%\ucrt64\bin\pacman.exe"
+set "PYTHON=%MSYS2_ROOT%\ucrt64\bin\python.exe"
+
 echo  Found MSYS2 at: %MSYS2_ROOT%
+echo  Using pacman:   %PACMAN%
+echo  Using python:   %PYTHON%
 echo.
 
-:: ── Write the fix script ──────────────────────────────────────────────────────
+:: ── Step 1: Install pip via pacman ───────────────────────────────────────────
 
-set "SCRIPT=%MSYS2_ROOT%\edmd_fix_pip.sh"
-
-(
-    echo #!/usr/bin/env bash
-    echo set -euo pipefail
+echo  [1/3] Installing mingw-w64-ucrt-x86_64-python-pip via pacman...
+echo.
+"%PACMAN%" -S --needed --noconfirm mingw-w64-ucrt-x86_64-python-pip
+if %ERRORLEVEL% neq 0 (
     echo.
-    echo log^(^) { echo "[EDMD fix] $*"; }
+    echo  ERROR: pacman failed (exit code %ERRORLEVEL%).
+    echo  This may be a transient network issue. Try again, or open
+    echo  an MSYS2 UCRT64 terminal and run:
+    echo    pacman -S mingw-w64-ucrt-x86_64-python-pip
     echo.
-    echo export PATH="/ucrt64/bin:${PATH}"
-    echo.
-    echo # ── Step 1: install pip via pacman ──────────────────────────────────
-    echo log "Installing mingw-w64-ucrt-x86_64-python-pip via pacman..."
-    echo pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python-pip
-    echo log "pip installed."
-    echo.
-    echo # ── Step 2: upgrade pip itself ───────────────────────────────────────
-    echo log "Upgrading pip..."
-    echo python -m pip install --upgrade pip
-    echo.
-    echo # ── Step 3: install pip-managed EDMD dependencies ────────────────────
-    echo log "Installing discord-webhook and cryptography..."
-    echo python -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0"
-    echo.
-    echo # ── Step 4: verify ───────────────────────────────────────────────────
-    echo FAILED=0
-    echo.
-    echo if python -c "import discord_webhook" 2^>/dev/null; then
-    echo     log "  discord-webhook  OK"
-    echo else
-    echo     log "  discord-webhook  FAILED"
-    echo     FAILED=1
-    echo fi
-    echo.
-    echo if python -c "import cryptography" 2^>/dev/null; then
-    echo     log "  cryptography     OK"
-    echo else
-    echo     log "  cryptography     FAILED"
-    echo     FAILED=1
-    echo fi
-    echo.
-    echo if [ "$FAILED" -eq 0 ]; then
-    echo     log "All packages installed successfully. Discord webhook posting should now work."
-    echo else
-    echo     log "One or more packages failed to install. Check the output above for errors."
-    echo     exit 1
-    echo fi
-) > "%SCRIPT%"
-
-:: ── Run it via MSYS2 bash ─────────────────────────────────────────────────────
-
-echo  Running fix script via MSYS2 bash...
-echo  (pacman and pip output will appear below)
+    pause
+    exit /b 1
+)
+echo.
+echo  pip installed.
 echo.
 
-set MSYSTEM=UCRT64
-"%MSYS2_ROOT%\usr\bin\bash.exe" --login -c "/edmd_fix_pip.sh"
-set "RC=%ERRORLEVEL%"
+:: ── Step 2: Upgrade pip ───────────────────────────────────────────────────────
 
-:: Clean up the temp script
-del "%SCRIPT%" 2>nul
+echo  [2/3] Upgrading pip...
+echo.
+"%PYTHON%" -m pip install --upgrade pip
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo  WARNING: pip self-upgrade failed. Continuing with installed pip version.
+    echo.
+)
+echo.
+
+:: ── Step 3: Install pip-managed EDMD packages ────────────────────────────────
+
+echo  [3/3] Installing discord-webhook and cryptography...
+echo.
+"%PYTHON%" -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0"
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo  ERROR: pip install failed (exit code %ERRORLEVEL%).
+    echo  Check the output above for details.
+    echo.
+    pause
+    exit /b 1
+)
+echo.
+
+:: ── Verify ───────────────────────────────────────────────────────────────────
+
+echo  Verifying installed packages...
+echo.
+
+set "FAILED=0"
+
+"%PYTHON%" -c "import discord_webhook; print('  discord-webhook  OK')"
+if %ERRORLEVEL% neq 0 (
+    echo   discord-webhook  FAILED
+    set "FAILED=1"
+)
+
+"%PYTHON%" -c "import cryptography; print('  cryptography     OK')"
+if %ERRORLEVEL% neq 0 (
+    echo   cryptography     FAILED
+    set "FAILED=1"
+)
 
 echo.
-if "%RC%"=="0" (
-    echo  Done. Restart EDMD for the changes to take effect.
+if "%FAILED%"=="0" (
+    echo  All packages installed successfully.
+    echo  Discord webhook posting and other pip-dependent features should
+    echo  now work. Restart EDMD for the changes to take effect.
 ) else (
-    echo  Fix did not complete cleanly (exit code %RC%).
-    echo  Check the output above. If pacman failed, try running
-    echo  this script again — a partial download may have caused
-    echo  a transient error.
+    echo  One or more packages failed the import check.
+    echo  Try running this script again. If the problem persists, open an
+    echo  MSYS2 UCRT64 terminal and run:
+    echo    python -m pip install discord-webhook cryptography
 )
 
 echo.
