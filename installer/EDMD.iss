@@ -467,6 +467,7 @@ begin
     Script.Add('    mingw-w64-ucrt-x86_64-python');
     Script.Add('    mingw-w64-ucrt-x86_64-python-gobject');
     Script.Add('    mingw-w64-ucrt-x86_64-python-psutil');
+    Script.Add('    mingw-w64-ucrt-x86_64-python-pip');
     Script.Add('    mingw-w64-ucrt-x86_64-adwaita-icon-theme');
     Script.Add(')');
     Script.Add('pacman -S --needed --noconfirm "${PKGS[@]}"');
