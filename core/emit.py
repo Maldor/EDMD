@@ -305,6 +305,22 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
     # ── Collect all data rows ─────────────────────────────────────────────
     sections: list[tuple[str, list]] = []
 
+    # ── Fuel row — always included when data is available ─────────────────
+    fuel_current  = getattr(state, "fuel_current",  None)
+    fuel_tank     = getattr(state, "fuel_tank_size", None)
+    fuel_rate     = getattr(state, "fuel_burn_rate", None)
+    if fuel_current is not None and fuel_tank and fuel_tank > 0:
+        fuel_pct = fuel_current / fuel_tank * 100
+        fuel_val = f"{fuel_pct:.0f}%"
+        fuel_rate_str = None
+        if fuel_rate and fuel_rate > 0:
+            secs_left = (fuel_current / fuel_rate) * 3600
+            h_rem = int(secs_left // 3600)
+            m_rem = int((secs_left % 3600) // 60)
+            remaining = f"~{h_rem}h {m_rem}m" if h_rem > 0 else f"~{m_rem}m"
+            fuel_rate_str = remaining
+        sections.append(("Fuel", [("Fuel", fuel_val, fuel_rate_str)]))
+
     for p in sorted(active, key=lambda p: getattr(p, "ACTIVITY_TAB_TITLE", "")):
         raw = p.get_summary_rows()
         if not raw:

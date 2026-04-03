@@ -1,9 +1,10 @@
 """
 core/components/holdings/plugin.py — At-risk holdings tracker.
 
-Self-contained: subscribes directly to journal events, no dependency on
-activity plugins. Holdings have a different lifetime to session plugins —
-they accumulate until explicitly cashed out or lost on death.
+Tracks vouchers, cartography, and exobiology that would be lost on death.
+Rebuilds from all journals on every startup — the journal scan is fast
+(~1-2 seconds on spinning rust, sub-second on NVMe) and always produces
+a correct balance without relying on cached state that can drift.
 
 Tracking:
   Bounty vouchers   — earned: Bounty; redeemed: RedeemVoucher(bounty)
@@ -12,16 +13,25 @@ Tracking:
   Cartography data  — per-system dict; matched by SystemName on sell
   Exobiology data   — per-sample list; matched by Species key on sell
 
-Vouchers are redeemed faction-by-faction — subtract the face value redeemed.
-Cartography is sold per-system — pop sold systems from the dict exactly.
-Exobiology is sold per-sample — pop matched samples from the list.
-All buckets zeroed on Died.
+Deduplication
+─────────────
+Vouchers: keyed by (timestamp, event, amount) composite — not timestamp alone.
+Two Bounty events at the same second (common in multi-faction CZ kills) have
+different reward amounts and must both count.
 
-PowerPlay bonuses affect the actual payout vs our estimate but cannot be
-predicted in advance; the display notes that cartography values are estimates.
+Cartography and exobiology: keyed by (system, body_id) and event timestamp
+respectively, as before.
+
+Broker percentage
+─────────────────
+RedeemVoucher.Amount is what the player received after broker cut.
+We subtract Amount directly — not the inflated face value.  The full
+voucher balance is consumed regardless of broker percentage; Amount
+is the best available proxy for what was cleared from the in-game ledger.
 """
 
 from core.plugin_loader import BasePlugin
+import threading
 
 
 # ── Exobiology species value table ────────────────────────────────────────────
@@ -31,7 +41,6 @@ _SPECIES_VALUE: dict[str, int] = {
     "$Codex_Ent_Aleoids_05_Name;": 12934900,
     "$Codex_Ent_Aleoids_04_Name;": 3385200,
     "$Codex_Ent_Aleoids_03_Name;": 3385200,
-    "$Codex_Ent_Sphere_Name;": 1629700,
     "$Codex_Ent_Vents_Name;": 1628800,
     "$Codex_Ent_TubeABCD_01_Name;": 1514500,
     "$Codex_Ent_TubeABCD_02_Name;": 1514500,
@@ -41,19 +50,19 @@ _SPECIES_VALUE: dict[str, int] = {
     "$Codex_Ent_TubeABCD_06_Name;": 1514500,
     "$Codex_Ent_TubeABCD_07_Name;": 1514500,
     "$Codex_Ent_Cone_Name;": 1471900,
-    "$Codex_Ent_Bacterium_01_Name;": 1000200,
-    "$Codex_Ent_Bacterium_07_Name;": 1658500,
-    "$Codex_Ent_Bacterium_12_Name;": 1000200,
-    "$Codex_Ent_Bacterium_02_Name;": 1152500,
-    "$Codex_Ent_Bacterium_03_Name;": 1689800,
-    "$Codex_Ent_Bacterium_06_Name;": 8418000,
-    "$Codex_Ent_Bacterium_04_Name;": 5289900,
-    "$Codex_Ent_Bacterium_08_Name;": 4638900,
-    "$Codex_Ent_Bacterium_05_Name;": 4934500,
-    "$Codex_Ent_Bacterium_11_Name;": 1949000,
-    "$Codex_Ent_Bacterium_10_Name;": 3897000,
-    "$Codex_Ent_Bacterium_09_Name;": 1000200,
-    "$Codex_Ent_Bacterium_13_Name;": 7774700,
+    "$Codex_Ent_Bacterial_01_Name;": 1000200,
+    "$Codex_Ent_Bacterial_07_Name;": 1658500,
+    "$Codex_Ent_Bacterial_12_Name;": 1000200,
+    "$Codex_Ent_Bacterial_02_Name;": 1152500,
+    "$Codex_Ent_Bacterial_03_Name;": 1689800,
+    "$Codex_Ent_Bacterial_06_Name;": 8418000,
+    "$Codex_Ent_Bacterial_04_Name;": 5289900,
+    "$Codex_Ent_Bacterial_08_Name;": 4638900,
+    "$Codex_Ent_Bacterial_05_Name;": 4934500,
+    "$Codex_Ent_Bacterial_11_Name;": 1949000,
+    "$Codex_Ent_Bacterial_10_Name;": 3897000,
+    "$Codex_Ent_Bacterial_09_Name;": 1000200,
+    "$Codex_Ent_Bacterial_13_Name;": 7774700,
     "$Codex_Ent_Cactoid_01_Name;": 3667600,
     "$Codex_Ent_Cactoid_05_Name;": 2483600,
     "$Codex_Ent_Cactoid_04_Name;": 2483600,
@@ -214,6 +223,19 @@ def _scan_value(planet_class: str, mass_em: float, terraform_state: str,
     return value
 
 
+def _voucher_key(ev: dict) -> tuple:
+    """Composite dedup key: (timestamp, event, amount).
+
+    Two Bounty events at the same second always have different reward amounts.
+    Using the composite prevents same-second kills from being collapsed.
+    """
+    return (
+        ev.get("timestamp", ""),
+        ev.get("event", ""),
+        ev.get("TotalReward") or ev.get("Reward") or ev.get("Amount") or 0,
+    )
+
+
 # ── Plugin ────────────────────────────────────────────────────────────────────
 
 class HoldingsPlugin(BasePlugin):
@@ -223,7 +245,7 @@ class HoldingsPlugin(BasePlugin):
         "Tracks unredeemed vouchers, bonds, and unsold data "
         "that would be lost on ship destruction."
     )
-    PLUGIN_VERSION = "1.2.0"
+    PLUGIN_VERSION = "2.0.0"
 
     SUBSCRIBED_EVENTS = [
         "Bounty",
@@ -241,85 +263,53 @@ class HoldingsPlugin(BasePlugin):
 
     def on_load(self, core) -> None:
         super().on_load(core)
-        # Per-system cartography: {system_name: estimated_value}
-        self._carto: dict[str, int] = {}
-        # Per-sample exobiology: list of {species: key, value: int, ts: str}
-        self._exobio: list[dict] = []
-        # Pending DSS: body_id → scan info
-        self._pending: dict = {}
-        # Dedup sets — prevent double-counting on journal preload replay
-        self._seen_bodies:  set[tuple] = set()   # (system, body_id)
-        self._seen_exobio:  set[str]   = set()   # event timestamp strings
-        # Current system name (from FSDJump/Location via state)
-        self._restore()
+        self._carto:   dict[str, int] = {}
+        self._exobio:  list[dict]     = []
+        self._pending: dict           = {}
 
-    def _restore(self) -> None:
-        data  = self.storage.read_json() or {}
-        state = self.core.state
+        # Composite dedup key sets
+        self._seen_vouchers: set[tuple] = set()   # (ts, event, amount)
+        self._seen_bodies:   set[tuple] = set()   # (system, body_id)
+        self._seen_exobio:   set[str]   = set()   # ScanOrganic timestamps
 
-        # Vouchers — simple ints
-        state.holdings_bounties = data.get("bounties", 0)
-        state.holdings_bonds    = data.get("bonds",    0)
-        state.holdings_trade    = data.get("trade",    0)
+        # Always rebuild from journals in a background thread so startup is
+        # non-blocking.  Live events are queued normally during the scan;
+        # the dedup sets prevent double-counting when preload replays them.
+        self._bootstrap_done = threading.Event()
+        t = threading.Thread(target=self._bootstrap_all, daemon=True,
+                             name="holdings-bootstrap")
+        t.start()
 
-        # Cartography — per-system dict
-        self._carto = data.get("cartography", {})
-        state.holdings_cartography = sum(self._carto.values())
+    def _bootstrap_all(self) -> None:
+        """Full journal scan: rebuild vouchers, cartography, and exobiology.
 
-        # Exobiology — per-sample list
-        self._exobio = data.get("exobiology", [])
-        state.holdings_exobiology = sum(s["value"] for s in self._exobio)
-
-        # Rebuild dedup sets from persisted data so preload cannot re-add
-        # entries that survived from a previous session.
-        self._seen_bodies = {tuple(b) for b in data.get("seen_bodies", [])}
-        self._seen_exobio = set(data.get("seen_exobio", []))
-
-        # First run (no prior holdings.json) — reconstruct voucher balances
-        # from journal history so existing unredeemed vouchers are visible.
-        if not data:
-            self._bootstrap_vouchers()
-
-
-    def _bootstrap_vouchers(self) -> None:
-        """Reconstruct unredeemed voucher balances from journal history.
-
-        Called only on first run (no holdings.json).  Scans all journals from
-        the most recent Died event forward, summing Bounty / FactionKillBond /
-        TradeVoucher events and subtracting RedeemVoucher redemptions.
+        Runs in a background thread on every startup.  Produces the canonical
+        balance from the complete journal record.  Live events arriving during
+        the scan are handled by on_event with dedup — they will be skipped
+        when the scanner reaches the same timestamp/amount.
         """
         import json as _j
-        from pathlib import Path as _Path
+        from pathlib import Path as _P
 
         jdir = getattr(self.core, "journal_dir", None)
         if not jdir:
+            self._bootstrap_done.set()
             return
 
-        journals = sorted(_Path(jdir).glob("Journal*.log"))  # oldest first
+        journals = sorted(_P(jdir).glob("Journal*.log"))
         if not journals:
+            self._bootstrap_done.set()
             return
-
-        # Find the most recent Died timestamp — only count vouchers earned after
-        last_death_ts = None
-        for jpath in reversed(journals):
-            try:
-                lines = jpath.read_text(encoding="utf-8").splitlines()
-            except OSError:
-                continue
-            for line in reversed(lines):
-                try:
-                    ev = _j.loads(line)
-                except ValueError:
-                    continue
-                if ev.get("event") == "Died":
-                    last_death_ts = ev.get("timestamp", "")
-                    break
-            if last_death_ts is not None:
-                break
 
         bounties = 0
         bonds    = 0
         trade    = 0
+        carto:  dict[str, int]  = {}
+        exobio: list[dict]      = []
+        pending: dict           = {}
+        seen_v: set[tuple]      = set()   # voucher composite keys
+        seen_b: set[tuple]      = set()   # (system, body_id)
+        seen_x: set[str]        = set()   # exobio timestamps
 
         for jpath in journals:
             try:
@@ -331,51 +321,165 @@ class HoldingsPlugin(BasePlugin):
                     ev = _j.loads(line)
                 except ValueError:
                     continue
-                ts   = ev.get("timestamp", "")
+
                 name = ev.get("event", "")
 
-                # Skip events before the last death
-                if last_death_ts and ts <= last_death_ts:
-                    continue
-
-                if name == "Bounty":
-                    bounties += ev.get("TotalReward", 0) or ev.get("Reward", 0)
-                elif name == "FactionKillBond":
-                    bonds    += ev.get("Reward", 0)
-                elif name == "TradeVoucher":
-                    trade    += ev.get("Reward", 0)
-                elif name == "RedeemVoucher":
-                    vtype  = ev.get("Type", "")
-                    amount = ev.get("Amount", 0)
-                    pct    = ev.get("BrokerPercentage", 0.0)
-                    face   = round(amount / (1.0 - pct / 100.0)) if pct else amount
-                    if vtype == "bounty":
-                        bounties = max(0, bounties - face)
-                    elif vtype == "CombatBond":
-                        bonds    = max(0, bonds    - face)
-                    elif vtype == "trade":
-                        trade    = max(0, trade    - face)
-                elif name == "Died":
+                if name == "Died":
                     bounties = bonds = trade = 0
+                    carto.clear()
+                    exobio.clear()
+                    pending.clear()
+                    seen_v.clear()
+                    seen_b.clear()
+                    seen_x.clear()
 
+                elif name == "Bounty":
+                    key = _voucher_key(ev)
+                    if key not in seen_v:
+                        seen_v.add(key)
+                        bounties += ev.get("TotalReward", 0) or ev.get("Reward", 0)
+
+                elif name == "FactionKillBond":
+                    key = _voucher_key(ev)
+                    if key not in seen_v:
+                        seen_v.add(key)
+                        bonds += ev.get("Reward", 0)
+
+                elif name == "TradeVoucher":
+                    key = _voucher_key(ev)
+                    if key not in seen_v:
+                        seen_v.add(key)
+                        trade += ev.get("Reward", 0)
+
+                elif name == "RedeemVoucher":
+                    key = _voucher_key(ev)
+                    if key not in seen_v:
+                        seen_v.add(key)
+                        vtype  = ev.get("Type", "")
+                        amount = ev.get("Amount", 0)
+                        if vtype == "bounty":
+                            bounties = max(0, bounties - amount)
+                        elif vtype == "CombatBond":
+                            bonds    = max(0, bonds    - amount)
+                        elif vtype == "trade":
+                            trade    = max(0, trade    - amount)
+
+                elif name == "Scan":
+                    scan_type = ev.get("ScanType", "")
+                    if scan_type not in ("AutoScan", "Detailed", ""):
+                        continue
+                    system       = ev.get("StarSystem", "")
+                    planet_class = ev.get("PlanetClass", "")
+                    star_type    = ev.get("StarType", "")
+                    body_id      = ev.get("BodyID")
+                    if not system or (not planet_class and not star_type):
+                        continue
+                    body_key = (system, body_id)
+                    if body_id is not None and body_key in seen_b:
+                        continue
+                    if planet_class:
+                        mass_em = ev.get("MassEM", 1.0) or 1.0
+                        val = _scan_value(
+                            planet_class, mass_em,
+                            ev.get("TerraformState", ""),
+                            ev.get("WasDiscovered", True),
+                            ev.get("WasMapped", True),
+                            dss_mapped=False, efficient=False,
+                        )
+                        carto[system] = carto.get(system, 0) + val
+                        if body_id is not None:
+                            seen_b.add(body_key)
+                            pending[body_id] = {
+                                "system":          system,
+                                "planet_class":    planet_class,
+                                "mass_em":         mass_em,
+                                "terraform_state": ev.get("TerraformState", ""),
+                                "was_discovered":  ev.get("WasDiscovered", True),
+                                "was_mapped":      ev.get("WasMapped", True),
+                                "scan_value":      val,
+                            }
+                    elif star_type:
+                        solar_mass = ev.get("StellarMass", 1.0) or 1.0
+                        star_val   = _star_value(star_type, solar_mass)
+                        if not ev.get("WasDiscovered", True):
+                            star_val = round(star_val * _FIRST_DISC_SCAN)
+                        carto[system] = carto.get(system, 0) + star_val
+                        if body_id is not None:
+                            seen_b.add(body_key)
+
+                elif name == "SAAScanComplete":
+                    body_id = ev.get("BodyID")
+                    p       = pending.get(body_id)
+                    if p:
+                        target    = ev.get("EfficiencyTarget", 99)
+                        used      = ev.get("ProbesUsed", 99)
+                        full_val  = _scan_value(
+                            p["planet_class"], p["mass_em"], p["terraform_state"],
+                            p["was_discovered"], p["was_mapped"],
+                            dss_mapped=True, efficient=(used <= target),
+                        )
+                        delta = full_val - p["scan_value"]
+                        carto[p["system"]] = carto.get(p["system"], 0) + delta
+                        del pending[body_id]
+
+                elif name in ("SellExplorationData", "MultiSellExplorationData"):
+                    if name == "SellExplorationData":
+                        systems = [ev.get("System", "")]
+                    else:
+                        systems = [e.get("SystemName", "")
+                                   for e in ev.get("Discovered", [])]
+                    for sys in systems:
+                        if sys and sys in carto:
+                            del carto[sys]
+                    sold = set(systems)
+                    pending = {k: v for k, v in pending.items()
+                               if v.get("system") not in sold}
+                    seen_b = {b for b in seen_b if b[0] not in sold}
+
+                elif name == "ScanOrganic":
+                    if ev.get("ScanType") != "Analyse":
+                        continue
+                    ts = ev.get("timestamp", "")
+                    if ts and ts in seen_x:
+                        continue
+                    species_key    = ev.get("Species", "")
+                    was_logged     = bool(ev.get("WasLogged", True))
+                    footfall_bonus = (ev.get("WasFootfalled") is False)
+                    val = _exobio_value(species_key, was_logged, footfall_bonus)
+                    exobio.append({"species": species_key, "value": val, "ts": ts})
+                    if ts:
+                        seen_x.add(ts)
+
+                elif name == "SellOrganicData":
+                    for item in ev.get("BioData", []):
+                        species = item.get("Species", "")
+                        for i, held in enumerate(exobio):
+                            if held.get("species") == species:
+                                ts = held.get("ts", "")
+                                if ts:
+                                    seen_x.discard(ts)
+                                exobio.pop(i)
+                                break
+
+        # Publish results to state
         state = self.core.state
-        state.holdings_bounties = bounties
-        state.holdings_bonds    = bonds
-        state.holdings_trade    = trade
-        self._persist()
+        state.holdings_bounties    = bounties
+        state.holdings_bonds       = bonds
+        state.holdings_trade       = trade
+        state.holdings_cartography = sum(carto.values())
+        state.holdings_exobiology  = sum(s["value"] for s in exobio)
+
+        self._carto          = carto
+        self._exobio         = exobio
+        self._pending        = pending
+        self._seen_vouchers  = seen_v
+        self._seen_bodies    = seen_b
+        self._seen_exobio    = seen_x
+
+        self._bootstrap_done.set()
         self._notify()
 
-    def _persist(self) -> None:
-        state = self.core.state
-        self.storage.write_json({
-            "bounties":    state.holdings_bounties,
-            "bonds":       state.holdings_bonds,
-            "trade":       state.holdings_trade,
-            "cartography": self._carto,
-            "exobiology":  self._exobio,
-            "seen_bodies": list(self._seen_bodies),
-            "seen_exobio": list(self._seen_exobio),
-        })
+    # ── State helpers ─────────────────────────────────────────────────────────
 
     def _update_carto_state(self) -> None:
         self.core.state.holdings_cartography = sum(self._carto.values())
@@ -389,46 +493,64 @@ class HoldingsPlugin(BasePlugin):
             gq.put(("holdings_update", None))
 
     def _current_system(self) -> str:
-        return getattr(self.core.state, "current_system", "") or ""
+        return getattr(self.core.state, "pilot_system", "") or ""
+
+    # ── Live event handling ───────────────────────────────────────────────────
 
     def on_event(self, event: dict, state) -> None:
-        ev = event.get("event")
+        # Don't process live events until bootstrap has published its results —
+        # the dedup sets aren't ready yet.  Preload events arrive synchronously
+        # before any live events, and bootstrap runs in a background thread
+        # started before preload, so by the time preload completes the scan
+        # is almost certainly done.  The wait() call is a safety net.
+        if not self._bootstrap_done.is_set():
+            self._bootstrap_done.wait(timeout=30)
+
+        ev  = event.get("event")
+        key = _voucher_key(event)
 
         match ev:
 
             # ── Voucher / bond accumulation ───────────────────────────────
 
             case "Bounty":
+                if key in self._seen_vouchers:
+                    return
+                self._seen_vouchers.add(key)
                 reward = event.get("TotalReward", 0) or event.get("Reward", 0)
                 state.holdings_bounties += reward
-                self._persist(); self._notify()
+                self._notify()
 
             case "FactionKillBond":
+                if key in self._seen_vouchers:
+                    return
+                self._seen_vouchers.add(key)
                 state.holdings_bonds += event.get("Reward", 0)
-                self._persist(); self._notify()
+                self._notify()
 
             case "TradeVoucher":
+                if key in self._seen_vouchers:
+                    return
+                self._seen_vouchers.add(key)
                 state.holdings_trade += event.get("Reward", 0)
-                self._persist(); self._notify()
+                self._notify()
 
             case "RedeemVoucher":
-                # Redemptions are per-faction / per-station — subtract the
-                # face value actually cleared. BrokerPercentage means we
-                # received less than face value, but the full amount is gone.
+                if key in self._seen_vouchers:
+                    return
+                self._seen_vouchers.add(key)
                 vtype  = event.get("Type", "")
                 amount = event.get("Amount", 0)
-                pct    = event.get("BrokerPercentage", 0.0)
-                face   = round(amount / (1.0 - pct / 100.0)) if pct else amount
                 match vtype:
                     case "bounty":
-                        state.holdings_bounties = max(0, state.holdings_bounties - face)
+                        state.holdings_bounties = max(0, state.holdings_bounties - amount)
                     case "CombatBond":
-                        state.holdings_bonds = max(0, state.holdings_bonds - face)
+                        state.holdings_bonds = max(0, state.holdings_bonds - amount)
                     case "trade":
-                        state.holdings_trade = max(0, state.holdings_trade - face)
-                self._persist(); self._notify()
+                        state.holdings_trade = max(0, state.holdings_trade - amount)
+                self._notify()
 
-            # ── Cartography accumulation (per-system) ─────────────────────
+            # ── Cartography ───────────────────────────────────────────────
 
             case "Scan":
                 scan_type = event.get("ScanType", "")
@@ -437,7 +559,6 @@ class HoldingsPlugin(BasePlugin):
                 system = event.get("StarSystem", "") or self._current_system()
                 if not system:
                     return
-
                 planet_class    = event.get("PlanetClass", "")
                 star_type       = event.get("StarType", "")
                 was_discovered  = event.get("WasDiscovered", True)
@@ -448,7 +569,7 @@ class HoldingsPlugin(BasePlugin):
                 if planet_class:
                     body_key = (system, body_id)
                     if body_id is not None and body_key in self._seen_bodies:
-                        return   # already counted this body
+                        return
                     mass_em = event.get("MassEM", 1.0) or 1.0
                     val = _scan_value(planet_class, mass_em, terraform_state,
                                       was_discovered, was_mapped,
@@ -465,12 +586,12 @@ class HoldingsPlugin(BasePlugin):
                             "was_mapped":      was_mapped,
                             "scan_value":      val,
                         }
-                    self._update_carto_state(); self._persist(); self._notify()
+                    self._update_carto_state(); self._notify()
 
                 elif star_type:
                     body_key = (system, body_id)
                     if body_id is not None and body_key in self._seen_bodies:
-                        return   # already counted this star
+                        return
                     solar_mass = event.get("StellarMass", 1.0) or 1.0
                     star_val   = _star_value(star_type, solar_mass)
                     if not was_discovered:
@@ -478,7 +599,7 @@ class HoldingsPlugin(BasePlugin):
                     self._carto[system] = self._carto.get(system, 0) + star_val
                     if body_id is not None:
                         self._seen_bodies.add(body_key)
-                    self._update_carto_state(); self._persist(); self._notify()
+                    self._update_carto_state(); self._notify()
 
             case "SAAScanComplete":
                 body_id   = event.get("BodyID")
@@ -486,8 +607,6 @@ class HoldingsPlugin(BasePlugin):
                 used      = event.get("ProbesUsed", 99)
                 efficient = (used <= target)
                 pending   = self._pending.get(body_id)
-                # _pending is consumed on first SAAScanComplete — replay
-                # of the same event finds no pending entry and skips.
                 if pending:
                     system   = pending["system"]
                     full_val = _scan_value(
@@ -498,10 +617,9 @@ class HoldingsPlugin(BasePlugin):
                     )
                     delta = full_val - pending["scan_value"]
                     self._carto[system] = self._carto.get(system, 0) + delta
-                    self._update_carto_state(); self._persist(); self._notify()
+                    self._update_carto_state(); self._notify()
 
             case "SellExplorationData":
-                # Legacy single-sell — system name in "System" field
                 system = event.get("System", "")
                 if system and system in self._carto:
                     del self._carto[system]
@@ -509,42 +627,35 @@ class HoldingsPlugin(BasePlugin):
                         k: v for k, v in self._pending.items()
                         if v.get("system") != system
                     }
-                    # Allow re-scanning the same bodies if player returns
                     self._seen_bodies = {
                         b for b in self._seen_bodies if b[0] != system
                     }
-                    self._update_carto_state(); self._persist(); self._notify()
+                    self._update_carto_state(); self._notify()
 
             case "MultiSellExplorationData":
-                # Exact per-system removal — Discovered lists every sold system
-                changed = False
-                for entry in event.get("Discovered", []):
-                    system = entry.get("SystemName", "")
-                    if system and system in self._carto:
-                        del self._carto[system]
-                        changed = True
+                sold    = {e.get("SystemName", "")
+                           for e in event.get("Discovered", [])}
+                changed = any(s in self._carto for s in sold)
                 if changed:
-                    sold = {e.get("SystemName","") for e in event.get("Discovered",[])}
+                    for s in sold:
+                        self._carto.pop(s, None)
                     self._pending = {
                         k: v for k, v in self._pending.items()
                         if v.get("system") not in sold
                     }
-                    # Allow re-scanning the same bodies if player returns
                     self._seen_bodies = {
                         b for b in self._seen_bodies if b[0] not in sold
                     }
-                    self._update_carto_state(); self._persist(); self._notify()
+                    self._update_carto_state(); self._notify()
 
-            # ── Exobiology accumulation (per-sample) ─────────────────────
+            # ── Exobiology ────────────────────────────────────────────────
 
             case "ScanOrganic":
                 if event.get("ScanType") != "Analyse":
                     return
-                # Deduplicate by timestamp — each analysis has a unique timestamp.
-                # Same species from different planets produces different timestamps.
                 ts = event.get("timestamp", "")
                 if ts and ts in self._seen_exobio:
-                    return   # already counted this analysis event
+                    return
                 species_key    = event.get("Species", "")
                 was_logged     = bool(event.get("WasLogged", True))
                 footfall_bonus = (event.get("WasFootfalled") is False)
@@ -552,14 +663,9 @@ class HoldingsPlugin(BasePlugin):
                 self._exobio.append({"species": species_key, "value": val, "ts": ts})
                 if ts:
                     self._seen_exobio.add(ts)
-                self._update_exobio_state(); self._persist(); self._notify()
+                self._update_exobio_state(); self._notify()
 
             case "SellOrganicData":
-                # BioData lists each sold sample with Species and Value.
-                # Match per-sample: for each sold item, remove the first
-                # held entry with that species key and clear its timestamp
-                # from the seen set so a future re-scan of the same species
-                # is counted correctly.
                 for item in event.get("BioData", []):
                     species = item.get("Species", "")
                     for i, held in enumerate(self._exobio):
@@ -569,7 +675,7 @@ class HoldingsPlugin(BasePlugin):
                                 self._seen_exobio.discard(ts)
                             self._exobio.pop(i)
                             break
-                self._update_exobio_state(); self._persist(); self._notify()
+                self._update_exobio_state(); self._notify()
 
             # ── Ship destruction ──────────────────────────────────────────
 
@@ -584,7 +690,7 @@ class HoldingsPlugin(BasePlugin):
                 self._seen_exobio.clear()
                 self._update_carto_state()
                 self._update_exobio_state()
-                self._persist(); self._notify()
+                self._notify()
 
     def total_at_risk(self) -> int:
         state = self.core.state

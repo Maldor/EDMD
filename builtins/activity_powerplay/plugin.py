@@ -1,11 +1,13 @@
 """
 builtins/activity_powerplay/plugin.py — PowerPlay session tracking.
 
-Tracks merits earned across all PowerPlay activities — not just kills.
-PowerplayMerits fires for bounties, trade, missions, and other PP actions.
+Tracks merits earned across all PowerPlay activities with per-system
+attribution. Merit count and rate at the session level; per-system
+breakdown shows which systems drove the most merit income this session.
 
-Removes merit tracking from session_stats, which previously coupled merits
-to kill events via a pending_merit_events counter (a fragile correlation).
+PowerplayMerits does not carry a system field. We attribute merits to
+state.pilot_system at the moment the event fires, which is the system
+the player was in when the merit was earned (kill, delivery, etc.).
 
 Tab title: PowerPlay
 """
@@ -18,14 +20,14 @@ from core.emit import Terminal, rate_per_hour
 class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
     PLUGIN_NAME         = "activity_powerplay"
     PLUGIN_DISPLAY      = "PowerPlay Activity"
-    PLUGIN_VERSION      = "1.0.0"
-    PLUGIN_DESCRIPTION  = "Tracks PowerPlay merits and rank progress."
+    PLUGIN_VERSION      = "2.0.0"
+    PLUGIN_DESCRIPTION  = "Tracks PowerPlay merits, rank progress, and per-system merit breakdown."
     ACTIVITY_TAB_TITLE  = "PowerPlay"
 
     SUBSCRIBED_EVENTS = [
-        "Powerplay",             # on-login: current power, rank, total merits
-        "PowerplayMerits",       # merits earned (any activity)
-        "PowerplayRank",         # rank change
+        "Powerplay",
+        "PowerplayMerits",
+        "PowerplayRank",
         "PowerplayJoin",
         "PowerplayLeave",
         "PowerplayDefect",
@@ -37,17 +39,19 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
         self._reset_counters()
 
     def _reset_counters(self) -> None:
-        self.merits_earned:    int  = 0   # gained this session
+        self.merits_earned:    int  = 0
         self.rank_start:       int | None = None
         self.rank_current:     int | None = None
         self.power:            str | None = None
-        self.session_start_time = None
+        self.session_start_time           = None
+        # Per-system merit attribution: system_name → merits
+        self.system_merits:    dict[str, int] = {}
 
     def on_session_reset(self) -> None:
-        # Preserve power/rank context across session gap — only reset counters
         self.merits_earned    = 0
         self.rank_start       = self.rank_current
         self.session_start_time = None
+        self.system_merits    = {}
 
     def on_event(self, event: dict, state) -> None:
         ev      = event.get("event")
@@ -61,7 +65,6 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
                 self.rank_current = event.get("Rank")
                 if self.rank_start is None:
                     self.rank_start = self.rank_current
-                # Sync to state for commander block
                 state.pp_power        = self.power
                 state.pp_rank         = self.rank_current
                 state.pp_merits_total = event.get("Merits")
@@ -72,12 +75,13 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
                     if self.session_start_time is None:
                         self.session_start_time = logtime
                     self.merits_earned += gained
-                    # Keep state in sync for commander block
                     total = event.get("TotalMerits")
                     if total is not None:
                         state.pp_merits_total = total
-                    core = self.core
-                    core.emitter.emit(
+                    # Attribute to current system
+                    system = getattr(state, "pilot_system", None) or "Unknown"
+                    self.system_merits[system] = self.system_merits.get(system, 0) + gained
+                    self.core.emitter.emit(
                         msg_term=(
                             f"Merits: +{gained:,}"
                             + (f" ({self.power})" if self.power else "")
@@ -89,8 +93,8 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
                     if gq: gq.put(("stats_update", None))
 
             case "PowerplayRank":
-                self.rank_current    = event.get("Rank")
-                state.pp_rank        = self.rank_current
+                self.rank_current = event.get("Rank")
+                state.pp_rank     = self.rank_current
                 if gq: gq.put(("stats_update", None))
 
             case "PowerplayJoin":
@@ -101,7 +105,7 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
                 state.pp_rank     = 1
 
             case "PowerplayLeave" | "PowerplayDefect":
-                self.power = event.get("Power") if ev == "PowerplayDefect" else None
+                self.power    = event.get("Power") if ev == "PowerplayDefect" else None
                 state.pp_power = self.power
                 state.pp_rank  = None
 
@@ -122,7 +126,7 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
         dur  = self._duration_seconds()
         rows = []
         if self.merits_earned > 0:
-            rate = (f"{rate_per_hour(dur / self.merits_earned, 1)} /hr"
+            rate = (f"{rate_per_hour(dur / self.merits_earned, 1):,.0f} /hr"
                     if dur else "—")
             rows.append({
                 "label": "Merits",
@@ -140,4 +144,15 @@ class ActivityPowerplayPlugin(BasePlugin, ActivityProviderMixin):
             if self.rank_start is not None and self.rank_current != self.rank_start:
                 rank_str += f" (was {self.rank_start})"
             rows.append({"label": "Rank", "value": rank_str, "rate": None})
+        # Per-system breakdown — top systems by merit count
+        if self.system_merits:
+            rows.append({"label": "─── By system ───", "value": "", "rate": None})
+            for system, merits in sorted(
+                self.system_merits.items(), key=lambda x: -x[1]
+            )[:10]:   # cap at 10 rows
+                rows.append({
+                    "label": f"  {system}",
+                    "value": f"{merits:,}",
+                    "rate":  None,
+                })
         return rows

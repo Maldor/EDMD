@@ -79,27 +79,12 @@ from within the application:
 EDMD.exe --upgrade
 ```
 
-This runs `git pull` on the source, re-runs `install.bat`, and relaunches.
+This runs `git pull` on the source and relaunches.
 **Git must be on your PATH for this to work** — this is why the installer
 requires git.
 
 You can also re-run the full installer at any time. It will `git pull` if
 a clone already exists rather than re-cloning from scratch.
-
----
-
-## Upgrade from a previous manual installation
-
-If you were previously running EDMD by cloning the repo yourself:
-
-1. Run the new installer. It installs `EDMD.exe` and sets the `EDMD_SRC_DIR`
-   environment variable to `%LOCALAPPDATA%\EDMD\src\`.
-2. If you want to keep your existing clone, set `EDMD_SRC_DIR` to point to it:
-   ```
-   setx EDMD_SRC_DIR "C:\path\to\your\EDMD"
-   ```
-3. `EDMD.exe` will use your existing clone. Updates via `--upgrade` continue
-   to work as before.
 
 ---
 

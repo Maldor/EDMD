@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260328"
+VERSION = "20260402"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -50,7 +50,99 @@ def _user_data_dir() -> Path:
 
 
 EDMD_DATA_DIR: Path = _user_data_dir()
-STATE_FILE: Path    = EDMD_DATA_DIR / "session_state.json"
+
+# ── Per-commander data directory ──────────────────────────────────────────────
+# All commander-specific data lives under:
+#   EDMD_DATA_DIR / "commanders" / <FID> /
+# where FID is the Frontier account ID (e.g. "F10467336"), stable across
+# commander name changes.
+#
+# set_active_fid() is called as early as possible in edmd.py, before any
+# plugins are loaded.  All per-commander paths are derived from cmdr_data_dir().
+#
+# Files that remain at EDMD_DATA_DIR root (global, not commander-specific):
+#   config.toml, config.toml.bak, fonts/
+
+_LAST_FID_FILE: Path = EDMD_DATA_DIR / "last_fid.json"
+_active_fid: str     = ""
+
+
+def set_active_fid(fid: str) -> None:
+    """Set the active commander FID and persist it for next-startup fast-path."""
+    global _active_fid
+    if not fid:
+        return
+    _active_fid = fid
+    cmdr_data_dir().mkdir(parents=True, exist_ok=True)
+    try:
+        import json as _json
+        tmp = _LAST_FID_FILE.with_suffix(".tmp")
+        tmp.write_text(_json.dumps({"fid": fid}), encoding="utf-8")
+        tmp.replace(_LAST_FID_FILE)
+    except OSError:
+        pass
+
+
+def get_last_fid() -> str:
+    """Return the FID from last_fid.json, or '' if absent."""
+    try:
+        import json as _json
+        return _json.loads(_LAST_FID_FILE.read_text(encoding="utf-8")).get("fid", "")
+    except Exception:
+        return ""
+
+
+def cmdr_data_dir() -> Path:
+    """Return the per-commander data directory, creating it if needed.
+
+    Falls back to EDMD_DATA_DIR / "commanders" / "unknown" until FID is set.
+    All commander-specific persistent data (plugins, layout, catalog, etc.)
+    lives here.
+    """
+    fid = _active_fid or "unknown"
+    p = EDMD_DATA_DIR / "commanders" / fid
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def migrate_legacy_cmdr_files(fid: str) -> None:
+    """One-time migration of flat EDMD_DATA_DIR files into the cmdr subdir.
+
+    If files exist at their legacy locations (directly under EDMD_DATA_DIR or
+    EDMD_DATA_DIR/plugins/) they are moved into the per-commander path.
+    This is called once after FID is first determined, making the transition
+    invisible to the user on their next launch.
+    """
+    import shutil
+    target = EDMD_DATA_DIR / "commanders" / fid
+    target.mkdir(parents=True, exist_ok=True)
+
+    # Top-level files and directories that move into cmdr dir
+    to_migrate_items = [
+        "session_state.json",
+        "layout.json",
+        "plugin_states.json",
+        "plugins",
+        "catalog",
+        "core",
+        "session_state.json",
+        "fleetcarrier_dump.json",
+    ]
+    # Queue files from integration plugins
+    for prefix in ("eddn", "edsm", "edastro", "inara"):
+        to_migrate_items.append(f"{prefix}_queue.jsonl")
+
+    for name in to_migrate_items:
+        src = EDMD_DATA_DIR / name
+        dst = target / name
+        if src.exists() and not dst.exists():
+            try:
+                shutil.move(str(src), str(dst))
+            except OSError:
+                pass
+
+
+STATE_FILE: Path = EDMD_DATA_DIR / "session_state.json"  # updated after set_active_fid
 
 
 # ── Numeric / display constants ───────────────────────────────────────────────
@@ -304,7 +396,10 @@ _SHIP_NAMES: dict[str, str] = {
     "federalcorvette":          "Federal Corvette",
     "federal corvette":         "Federal Corvette",
     # ── Kestrel Mk II (Core Dynamics, 2026) ──────────────────────────────────
-    "smallcombat01_nx":         "Kestrel Mk II",    # confirmed from Shipyard.json
+    "smallcombat01_nx":         "Kestrel Mk II",    # journal/Shipyard internal name
+    "smallnx01":                "Kestrel Mk II",    # CAPI profile "name" field variant
+    "small_nx01":               "Kestrel Mk II",    # defensive variant
+    "smallcombat01nx":          "Kestrel Mk II",    # no-underscore variant
     "kestrel":                  "Kestrel Mk II",    # defensive alias
     "kestrel_mkii":             "Kestrel Mk II",
     "kestrelmkii":              "Kestrel Mk II",
@@ -538,6 +633,7 @@ class MonitorState:
         self.dup_suppressed          = False
         self.in_preload              = True
         self.pilot_name              = None
+        self.pilot_fid               = ""    # Frontier account ID e.g. "F10467336"
         self.pilot_squadron_name     = ""
         self.cargo_target_market     = {}
         self.cargo_target_market_name= ""
@@ -563,6 +659,7 @@ class MonitorState:
         self.last_sc_exit_mono       = None   # monotonic time of last SC exit
         self.last_shutdown_time      = None   # datetime of last Shutdown event
         self.mission_value_map       = {}
+        self.mission_detail_map      = {}  # MissionID → {faction, kill_count, target_faction, target_system, target_type, wing, reward}
         self.stack_value             = 0
         self.has_fighter_bay         = False
         self.mission_target_faction_map = {}
@@ -705,6 +802,7 @@ class MonitorState:
         self.missions_complete          = 0
         self.stack_value                = 0
         self.mission_value_map          = {}
+        self.mission_detail_map         = {}
         self.mission_target_faction_map = {}
 
 
@@ -731,7 +829,8 @@ def save_session_state(journal_path: Path, active_session: SessionData) -> None:
             "inbound_scan_count":  active_session.inbound_scan_count,
             "low_cargo_count":     active_session.low_cargo_count,
         }
-        STATE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        sf = cmdr_data_dir() / "session_state.json"
+        sf.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -747,9 +846,10 @@ def load_session_state(
     """
     global _session_start_iso
     try:
-        if not STATE_FILE.exists():
+        sf = cmdr_data_dir() / "session_state.json"
+        if not sf.exists():
             return
-        payload = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        payload = json.loads(sf.read_text(encoding="utf-8"))
         if payload.get("journal") != str(journal_path):
             return
         active_session.kills               = int(payload.get("kills", 0))
@@ -764,6 +864,6 @@ def load_session_state(
             for t in payload.get("recent_kill_times", []) if t
         ]
         _session_start_iso = payload.get("session_start_time")
-        STATE_FILE.unlink(missing_ok=True)
+        sf.unlink(missing_ok=True)
     except Exception:
         pass
