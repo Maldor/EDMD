@@ -87,13 +87,13 @@ Get-ChildItem (Join-Path $ucrt "bin") -Filter "*.dll" | ForEach-Object {
 Write-Host "      $dll_count DLLs copied."
 
 # ── 3. Install pip-managed packages into MSYS2 Python (before copying) ───────
-# discord-webhook and cryptography are not available via pacman.
-# We install them into the ORIGINAL MSYS2 Python here so they are present in
-# ucrt64\lib\python3.x\site-packages\ when the lib tree is copied in step 4.
-# Installing into the copied runtime Python fails because the copied exe cannot
-# reliably report its own platform tags to pip, causing pip to select the source
-# distribution for cryptography (which requires maturin/Rust to compile).
-# --only-binary :all: prevents any source builds.
+# discord-webhook is not in MSYS2 pacman — install it via pip.
+# cryptography IS in pacman (mingw-w64-ucrt-x86_64-python-cryptography) and
+# is installed there instead: MSYS2's Python uses MinGW wheel tags that are
+# incompatible with PyPI's win_amd64 wheels, so pip cannot install cryptography
+# as a binary and attempting to build it from source requires maturin/Rust.
+# discord-webhook is pure Python (py3-none-any) so pip handles it correctly.
+# --only-binary :all: ensures pip never falls back to a source build.
 # --break-system-packages bypasses MSYS2's PEP 668 externally-managed marker.
 
 Write-Host "[3/8] Installing pip-managed packages into MSYS2 Python..."
