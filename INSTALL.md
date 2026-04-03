@@ -10,7 +10,7 @@ EDMD has two types of dependencies:
 
 **System packages** (install via your package manager — do NOT use pip for these on Linux):
 - `python-psutil` — process and system utilities
-- `python-gobject` + `gtk4` — GTK4 GUI support (Linux and macOS; optional)
+- `python-gobject` + `gtk4` — GTK4 GUI support (Linux; optional)
 
 **pip packages:**
 - `discord-webhook` — Discord notification support
@@ -80,22 +80,6 @@ See **[docs/guides/WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md)** for
 
 ---
 
-## macOS
-
-Elite Dangerous does not run natively on macOS — see [docs/guides/MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) for how to point EDMD at a journal folder from a remote or Wine-based setup.
-
-```bash
-bash install_macos.sh
-```
-
-GTK4 is installed via [Homebrew](https://brew.sh). The GUI is supported on macOS 13 Ventura or newer.
-
-See **[docs/guides/MACOS_SETUP.md](docs/guides/MACOS_SETUP.md)** for full instructions.
-
-> **Developer notice:** EDMD is developed and tested on Linux. macOS support is a best-effort community resource — the developer cannot provide direct troubleshooting for macOS-specific installation issues.
-
----
-
 ## Config file location
 
 `install.sh` creates `config.toml` in the EDMD user data directory automatically.
@@ -105,7 +89,6 @@ If you need to locate or create it manually:
 |----------|------|
 | Linux | `~/.local/share/EDMD/config.toml` |
 | Windows | `%APPDATA%\EDMD\config.toml` |
-| macOS | `~/Library/Application Support/EDMD/config.toml` |
 
 On Linux, `~/.config/EDMD` is a symlink to `~/.local/share/EDMD/` — you can use
 either path. A repo-adjacent `config.toml` is also accepted as a fallback for
@@ -148,7 +131,6 @@ The GUI requires PyGObject with GTK4 bindings. If these are not available EDMD f
 | Platform | GUI support | How to get GTK4 |
 |---|---|---|
 | Linux | ✅ First-class | System package manager — see distro sections above |
-| macOS | ⚠️ Best-effort | Homebrew — see [MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) |
 | Windows | ⚠️ Experimental | Installer — see [WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md) |
 
 GTK4 availability is checked at runtime — if `--gui` is passed but PyGObject cannot be loaded, EDMD prints a clear error and falls back to terminal mode.

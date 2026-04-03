@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260402a"
+VERSION = "20260403"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -26,20 +26,17 @@ DEBUG_MODE  = False
 # ── User data directory ───────────────────────────────────────────────────────
 # Linux:   ~/.local/share/EDMD/
 # Windows: %APPDATA%\EDMD\
-# macOS:   ~/Library/Application Support/EDMD/
 # A symlink ~/.config/EDMD → ~/.local/share/EDMD is created on Linux.
 
 def _user_data_dir() -> Path:
     system = _pl.system()
     if system == "Windows":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    elif system == "Darwin":
-        base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     d = base / "EDMD"
     d.mkdir(parents=True, exist_ok=True)
-    if system not in ("Windows", "Darwin"):
+    if system != "Windows":
         config_link = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "EDMD"
         if not config_link.exists() and not config_link.is_symlink():
             try:
