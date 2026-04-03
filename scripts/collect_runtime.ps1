@@ -183,6 +183,7 @@ if (Test-Path $hicolor_src) {
 # in step 3 and are now present in the copied site-packages from step 4.
 
 Write-Host "[8/8] Creating python._pth file..."
+$runtime_python = Join-Path $OutDir "python.exe"
 $pth_content = @"
 $lib_rel
 $lib_rel\lib-dynload
