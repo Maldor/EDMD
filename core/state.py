@@ -151,7 +151,7 @@ RECENT_KILL_WINDOW   = 10
 SESSION_GAP_MINUTES  = 15    # gap between Shutdown→LoadGame that starts a new session
 LABEL_UNKNOWN        = "[Unknown]"
 PATTERN_JOURNAL      = r"^Journal\.\d{4}-\d{2}-\d{2}T\d{6}\.\d{2}\.log$"
-PATTERN_WEBHOOK      = r"^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-z0-9_-]+$"
+PATTERN_WEBHOOK      = r"^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+$"
 
 PIRATE_NOATTACK_MSGS = [
     "$Pirate_ThreatTooHigh",
