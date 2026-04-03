@@ -361,9 +361,16 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
 
     lines = ["Session Summary", dur_line]
     for title, rows in sections:
-        lines.append(f"  {title}")
-        for label, value, rate in rows:
-            lines.append(fmt_row(label, value, rate))
+        # If a section has exactly one row whose label matches the title,
+        # skip the redundant header and render inline at section indent.
+        # e.g. "Fuel / Fuel: 89% | ~19h" becomes "  Fuel: 89% | ~19h"
+        if len(rows) == 1 and rows[0][0].strip().lower() == title.strip().lower():
+            label, value, rate = rows[0]
+            lines.append(fmt_row(label, value, rate, indent="  "))
+        else:
+            lines.append(f"  {title}")
+            for label, value, rate in rows:
+                lines.append(fmt_row(label, value, rate))
 
     summary_text = "\n".join(lines)
 
