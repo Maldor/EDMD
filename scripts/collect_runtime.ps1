@@ -98,12 +98,14 @@ Write-Host "      $dll_count DLLs copied."
 
 Write-Host "[3/8] Installing pip-managed packages into MSYS2 Python..."
 $ucrt_python_exe = Join-Path $ucrt "bin\python.exe"
+# cryptography is installed via pacman (mingw-w64-ucrt-x86_64-python-cryptography)
+# because MSYS2's Python uses MinGW wheel tags incompatible with PyPI win_amd64 wheels.
+# discord-webhook is pure Python (py3-none-any) so pip handles it correctly.
 & $ucrt_python_exe -m pip install `
     --break-system-packages `
     --only-binary :all: `
     --no-warn-script-location `
-    "discord-webhook>=1.3.0" `
-    "cryptography>=41.0.0"
+    "discord-webhook>=1.3.0"
 if ($LASTEXITCODE -ne 0) {
     throw "pip install into MSYS2 Python failed (exit code $LASTEXITCODE)"
 }

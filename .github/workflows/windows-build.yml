@@ -104,6 +104,7 @@ jobs:
             mingw-w64-ucrt-x86_64-python-gobject
             mingw-w64-ucrt-x86_64-python-psutil
             mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-python-cryptography
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
 
       # ── 6. Collect bundled runtime ────────────────────────────────────────────
