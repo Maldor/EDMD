@@ -420,10 +420,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
             # Legacy string format fallback
             kind, value = "release", payload
 
+        url = "github.com/drworman/EDMD/releases/latest"
         if kind == "release":
-            label = f"\u2b06 v{value} available  (File \u2192 Upgrade)"
+            label = f"\u2b06 v{value} available  —  {url}"
         else:
-            label = f"\u2b06 {value} new commit(s) on main  (File \u2192 Upgrade)"
+            label = f"\u2b06 {value} new commit(s) on main  —  {url}"
 
         self._title_lbl.set_label(
             f"{self._program}  v{self._version}  ·  {label}"
