@@ -62,13 +62,19 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; EDMD.exe launcher (built by PyInstaller — no EDMD source inside)
+; ── EDMD.exe launcher (built by PyInstaller — no EDMD source inside)
 Source: "..\dist\EDMD\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Application icon (converted from PNG by the build workflow)
+; ── Bundled Python + GTK4 runtime (assembled by scripts\collect_runtime.ps1)
+; This directory contains python.exe, all GTK4 DLLs, PyGObject, psutil,
+; discord-webhook, cryptography, GI typelibs, GLib schemas, and Adwaita icons.
+; No MSYS2 installation is required on the user's machine.
+Source: "..\dist\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; ── Application icon (converted from PNG by the build workflow)
 Source: "edmd.ico"; DestDir: "{app}"; Flags: ignoreversion
 
-; Documentation (optional convenience copies)
+; ── Documentation (optional convenience copies)
 Source: "..\README.md";             DestDir: "{app}";      Flags: ignoreversion
 Source: "..\INSTALL.md";            DestDir: "{app}";      Flags: ignoreversion
 Source: "..\docs\*";                DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs

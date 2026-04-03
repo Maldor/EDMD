@@ -177,7 +177,33 @@ jobs:
         shell: cmd
         run: mkdir dist\installer
 
-      # ── 9. Compile Inno Setup installer ───────────────────────────────────────
+      # ── 9. Validate ISS references runtime before invoking Inno Setup ─────────
+      # Catches the silent failure case where an old EDMD.iss (without the
+      # dist\runtime\ source line) was committed, producing a ~7 MB installer.
+      - name: Validate ISS includes runtime
+        shell: python
+        run: |
+          import sys, pathlib
+
+          runtime = pathlib.Path("dist/runtime")
+          if not runtime.exists():
+              print("ERROR: dist/runtime missing — collect_runtime.ps1 did not run.")
+              sys.exit(1)
+          size_mb = sum(f.stat().st_size for f in runtime.rglob("*") if f.is_file()) // 1024 // 1024
+          print(f"Runtime: {size_mb} MB")
+          if size_mb < 50:
+              print(f"ERROR: dist/runtime too small ({size_mb} MB). Collection failed.")
+              sys.exit(1)
+
+          iss = pathlib.Path("installer/EDMD.iss").read_text(encoding="utf-8")
+          if "runtime" not in iss.lower():
+              print("ERROR: installer/EDMD.iss does not reference the runtime.")
+              print("Commit the new EDMD.iss which includes:")
+              print('  Source: "..\\dist\\runtime\\*"; DestDir: "{app}\\runtime"; ...')
+              sys.exit(1)
+          print("ISS references runtime: OK")
+
+      # ── 10. Compile Inno Setup installer ──────────────────────────────────────
       - name: Build Inno Setup installer
         shell: pwsh
         run: |
