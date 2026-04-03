@@ -207,14 +207,11 @@ class MissionsBlock(BlockWidget):
         # Per-faction breakdown
         row = self._append_section_header(grid, "By source faction", row)
 
-        any_session_kills = any(v["session_kills"] > 0 for v in factions.values())
-
         for faction in sorted(factions, key=lambda f: -factions[f]["kill_count"]):
             info   = factions[faction]
             kc     = info["kill_count"]
             rew_f  = info["reward"]
             wing_f = info["wing_reward"]
-            sess_k = info["session_kills"]
 
             delta = stack_height - kc
             if delta == 0:
@@ -227,8 +224,6 @@ class MissionsBlock(BlockWidget):
                 rew_f_str += f" ({wing_f/1_000_000:.1f}M wing)"
 
             val_str  = f"{kc} kills"
-            if any_session_kills:
-                val_str += f"  (+{sess_k} this session)"
 
             row = self._append_grid_row(grid, row,
                                         f"  {faction}", val_str,
