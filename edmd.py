@@ -45,6 +45,8 @@ parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
 parser.add_argument("-g", "--gui", action="store_true", default=None,
                     help="Launch GTK4 GUI (Linux only; requires PyGObject)")
+parser.add_argument("--log-file", metavar="PATH",
+                    help="Tee all terminal output to PATH (safe with --gui; avoids pipe buffer deadlock)")
 parser.add_argument("--upgrade",         action="store_true", default=False,
                     help="Pull latest release and restart")
 parser.add_argument("--upgrade-nightly", action="store_true", default=False,
@@ -195,6 +197,52 @@ if config_path is None:
 config_dict = load_config_file(config_path)
 notify_test = bool(args.test)  if args.test  is not None else False
 trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
+
+# ── Log file (--log-file) ─────────────────────────────────────────────────────
+# Opens a log file and tees ALL stdout output to it alongside the terminal.
+# This is intentionally separate from shell redirection (> file) to avoid
+# the pipe-buffer deadlock that occurs when running with --gui and --trace:
+# shell pipes are bounded buffers; a blocked print() in the monitor thread
+# stalls the journal loop, starving the GTK main loop of events.
+# Opening the file directly bypasses the pipe entirely.
+
+_log_fh = None
+
+if args.log_file:
+    import io as _io
+    _log_path = Path(args.log_file).expanduser().resolve()
+    try:
+        _log_fh = open(_log_path, "w", encoding="utf-8", buffering=1)
+
+        class _TeeWriter(_io.TextIOBase):
+            """Write to both the original stdout and a log file simultaneously."""
+            def __init__(self, primary, secondary):
+                self._primary   = primary
+                self._secondary = secondary
+            def write(self, text):
+                self._primary.write(text)
+                self._primary.flush()
+                try:
+                    self._secondary.write(text)
+                    self._secondary.flush()
+                except Exception:
+                    pass
+                return len(text)
+            def flush(self):
+                self._primary.flush()
+                try:
+                    self._secondary.flush()
+                except Exception:
+                    pass
+            @property
+            def encoding(self):
+                return getattr(self._primary, "encoding", "utf-8")
+
+        sys.stdout = _TeeWriter(sys.stdout, _log_fh)
+        print(f"[EDMD] Logging to: {_log_path}")
+    except OSError as _e:
+        print(f"[EDMD] Warning: could not open log file {_log_path!r}: {_e}")
+        _log_fh = None
 
 # Preliminary manager — profile may be updated after commander name is known
 mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile)
@@ -404,20 +452,6 @@ def run_monitor() -> None:
 
 if __name__ == "__main__":
     if gui_mode:
-        # ── Software renderer option ────────────────────────────────────────
-        # GTK4 defaults to the GL renderer which submits framebuffers to the
-        # Wayland/X compositor. On some Linux setups, continuous GL recompositing
-        # from EDMD causes compositor starvation — other apps freeze or require
-        # a fullscreen toggle to repaint.
-        #
-        # SoftwareRenderer = true in [GUI] sets GSK_RENDERER=cairo, switching
-        # GTK4 to CPU-side rendering. For a status-display app with no animations
-        # this has no perceptible visual cost and entirely eliminates GL compositor
-        # contention. The env var must be set before any GTK4 import occurs.
-        if mgr.gui_cfg.get("SoftwareRenderer", False):
-            import os as _os
-            _os.environ.setdefault("GSK_RENDERER", "cairo")
-
         try:
             from gui.app import EdmdApp
         except ImportError as e:
@@ -472,9 +506,21 @@ if __name__ == "__main__":
                                 if not all(p in line for p in _DROP):
                                     _orig_out.write(line)
                                     _orig_out.flush()
+                                    if _log_fh is not None:
+                                        try:
+                                            _log_fh.write(line.decode("utf-8", errors="replace"))
+                                            _log_fh.flush()
+                                        except Exception:
+                                            pass
                     if buf and not all(p in buf for p in _DROP):
                         _orig_out.write(buf)
                         _orig_out.flush()
+                        if _log_fh is not None:
+                            try:
+                                _log_fh.write(buf.decode("utf-8", errors="replace"))
+                                _log_fh.flush()
+                            except Exception:
+                                pass
 
                 _th.Thread(target=_pump, daemon=True,
                            name="stderr-filter").start()
@@ -486,3 +532,9 @@ if __name__ == "__main__":
 
     else:
         run_monitor()
+
+    if _log_fh is not None:
+        try:
+            _log_fh.close()
+        except Exception:
+            pass
