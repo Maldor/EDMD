@@ -90,8 +90,13 @@ def _build_registry(core) -> list[tuple[str, type, str]]:
 class EdmdWindow(Gtk.ApplicationWindow):
 
     POLL_MS   = 100
-    TICK_MS   = 1000
-    REFLOW_MS = 500    # how often to check for WM-driven window resize
+    TICK_MS   = 5000   # Heartbeat: safety net for blocks with no event-driven refresh.
+                       # Most blocks update via _poll_queue on data events; this fires
+                       # at most once every 5 seconds to catch anything that slipped through.
+    REFLOW_MS = 500    # Canvas size fallback poll — needed for tiling WMs and cases
+                       # where notify::width fires before the scroll widget has realised.
+                       # _apply_canvas_size has an equality guard so this is free when
+                       # the window is stable (no widget thrash, just two size reads).
 
     def __init__(self, app, core, program: str, version: str):
         super().__init__(application=app, title=f"{program} v{version}")
@@ -109,6 +114,10 @@ class EdmdWindow(Gtk.ApplicationWindow):
         self._is_fullscreen = False
         self._last_canvas_w = 0
         self._last_canvas_h = 0
+
+        # Dirty-tracking: only refresh blocks that have received a data change.
+        # The tick is a heartbeat safety net — not the primary refresh driver.
+        self._dirty: set[str] = set()
 
         self._build_ui()
         self._build_and_place_blocks()
@@ -219,10 +228,19 @@ class EdmdWindow(Gtk.ApplicationWindow):
 
     def _on_canvas_size_changed(self, canvas, _param) -> None:
         """notify::width or notify::height — fires when the viewport changes."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
+        # Read dimensions only if the signal suggests a real change.
+        # _apply_canvas_size has its own equality guard, but get_width()/
+        # get_height() can force a layout pass even in the no-op case.
+        w = self._scroll.get_width()
+        h = self._scroll.get_height()
+        if w != self._last_canvas_w or h != self._last_canvas_h:
+            self._apply_canvas_size(w, h)
 
     def _reflow_tick(self) -> bool:
-        """Fallback poll every REFLOW_MS — catches tiling WM resizes."""
+        """Fallback poll every REFLOW_MS — catches tiling WM resizes and the common
+        startup case where notify::width fires before the scroll widget has realised
+        (get_width() returns 0, and the later real-size signal never re-fires).
+        _apply_canvas_size has an equality guard so this is a no-op when stable."""
         self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
         return True
 
@@ -308,10 +326,22 @@ class EdmdWindow(Gtk.ApplicationWindow):
             block.refresh()
 
     def _refresh_block(self, name: str) -> None:
+        """Refresh a block immediately. Only used by _tick heartbeat."""
         entry = self._blocks.get(name)
         if entry:
             block, _ = entry
             block.refresh()
+
+    def _mark_dirty(self, name: str) -> None:
+        """Mark a block as needing refresh. Flushed at end of each poll cycle."""
+        if name in self._blocks:
+            self._dirty.add(name)
+
+    def _flush_dirty(self) -> None:
+        """Refresh all dirty blocks once, then clear. Called once per poll cycle."""
+        for name in self._dirty:
+            self._refresh_block(name)
+        self._dirty.clear()
 
     # ── Fullscreen ────────────────────────────────────────────────────────────
 
@@ -359,55 +389,61 @@ class EdmdWindow(Gtk.ApplicationWindow):
     # ── Queue polling ─────────────────────────────────────────────────────────
 
     def _poll_queue(self) -> bool:
+        # Drain the entire queue first, marking blocks dirty as we go.
+        # This coalesces bursts of updates (e.g. Status.json firing
+        # vessel_update + slf_update + plugin_refresh in one 500ms window)
+        # so each affected block repaints at most once per 100ms poll cycle.
         try:
             while True:
                 msg_type, payload = self._core.gui_queue.get_nowait()
 
                 if msg_type in ("cmdr_update", "vessel_update"):
-                    self._refresh_block("commander")
+                    self._mark_dirty("commander")
                 elif msg_type in ("crew_update", "slf_update"):
-                    self._refresh_block("crew_slf")
+                    self._mark_dirty("crew_slf")
                 elif msg_type == "mission_update":
-                    self._refresh_block("missions")
+                    self._mark_dirty("missions")
                 elif msg_type == "stats_update":
-                    self._refresh_block("session_stats")
+                    self._mark_dirty("session_stats")
                 elif msg_type == "holdings_update":
-                    self._refresh_block("assets")
+                    self._mark_dirty("assets")
                 elif msg_type == "alerts_update":
-                    self._refresh_block("alerts")
+                    self._mark_dirty("alerts")
                 elif msg_type == "career_update":
-                    self._refresh_block("career")
+                    self._mark_dirty("career")
                 elif msg_type == "capi_updated":
-                    # A CAPI endpoint refreshed — refresh all blocks that
-                    # might display CAPI-sourced data
                     for _n in ("assets", "commander", "cargo", "crew_slf"):
-                        self._refresh_block(_n)
+                        self._mark_dirty(_n)
                 elif msg_type == "all_update":
-                    self._refresh_all()
+                    for _n in self._blocks:
+                        self._mark_dirty(_n)
                 elif msg_type == "update_notice":
                     self._on_update_notice(payload)
                 elif msg_type == "plugin_refresh":
-                    # payload = plugin name; allows plugins to trigger their
-                    # own block refresh via core.gui_queue.put(("plugin_refresh", name))
-                    self._refresh_block(payload)
+                    self._mark_dirty(payload)
 
         except Exception:
             pass
 
+        # Flush: each dirty block renders exactly once this cycle.
+        self._flush_dirty()
         return True
 
     def _tick(self) -> bool:
-        # Give activity_combat plugin a chance to check no-kill timeout each second
+        # Heartbeat: give activity_combat a chance to check no-kill timeout.
         combat = getattr(self._core, "_plugins", {}).get("activity_combat")
         if combat and hasattr(combat, "tick"):
             try:
                 combat.tick(self._core.state)
             except Exception:
                 pass
-        # Refresh all blocks on the tick — builtins and plugin blocks alike.
-        # _refresh_block is a no-op for unknown names, so this is always safe.
+        # Mark all registered blocks dirty. The flush at the end of the next
+        # _poll_queue call renders each once. Blocks already dirty from
+        # a data event are not double-rendered — set.add() is idempotent.
+        # At TICK_MS=5000 this fires at most once every 5 seconds, acting as
+        # a safety net for blocks that have no event-driven refresh path.
         for name, _, _ in self._registry:
-            self._refresh_block(name)
+            self._mark_dirty(name)
         return True
 
     # ── Update notice ─────────────────────────────────────────────────────────

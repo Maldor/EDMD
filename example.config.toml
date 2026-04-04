@@ -132,6 +132,10 @@ Enabled    = false             # set true, or use --gui flag at launch
 Theme      = "default"         # palette filename in themes/ without .css extension
 FontFamily = "JetBrains Mono"  # any installed monospace font; leave blank for system default
 FontSize   = 14                # base font size in px (10–24); all em-relative sizes scale with it
+SoftwareRenderer = false       # set true if EDMD causes other apps to freeze or flicker
+                               # on Linux (compositor starvation). Switches GTK4 from the
+                               # default GL renderer to Cairo (CPU-side). No visual cost
+                               # for a status-display app. Ignored on Windows.
                             # built-in: "default", "default-dark",
                             #           "default-light", "default-blue",
                             #           "default-green", "default-purple",

@@ -47,10 +47,11 @@ CFG_DEFAULTS_EXTRA = {
 }
 
 CFG_DEFAULTS_GUI = {
-    "Enabled":    False,
-    "Theme":      "default",
-    "FontSize":   14,
-    "FontFamily": "JetBrains Mono",
+    "Enabled":          False,
+    "Theme":            "default",
+    "FontSize":         14,
+    "FontFamily":       "JetBrains Mono",
+    "SoftwareRenderer": False,   # set True if EDMD causes compositor starvation on Linux
 }
 
 CFG_DEFAULTS_DISCORD = {

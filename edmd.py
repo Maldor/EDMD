@@ -404,6 +404,20 @@ def run_monitor() -> None:
 
 if __name__ == "__main__":
     if gui_mode:
+        # ── Software renderer option ────────────────────────────────────────
+        # GTK4 defaults to the GL renderer which submits framebuffers to the
+        # Wayland/X compositor. On some Linux setups, continuous GL recompositing
+        # from EDMD causes compositor starvation — other apps freeze or require
+        # a fullscreen toggle to repaint.
+        #
+        # SoftwareRenderer = true in [GUI] sets GSK_RENDERER=cairo, switching
+        # GTK4 to CPU-side rendering. For a status-display app with no animations
+        # this has no perceptible visual cost and entirely eliminates GL compositor
+        # contention. The env var must be set before any GTK4 import occurs.
+        if mgr.gui_cfg.get("SoftwareRenderer", False):
+            import os as _os
+            _os.environ.setdefault("GSK_RENDERER", "cairo")
+
         try:
             from gui.app import EdmdApp
         except ImportError as e:
