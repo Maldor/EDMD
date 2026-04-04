@@ -362,11 +362,14 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
     lines = ["Session Summary", dur_line]
     for title, rows in sections:
         # If a section has exactly one row whose label matches the title,
-        # skip the redundant header and render inline at section indent.
-        # e.g. "Fuel / Fuel: 89% | ~19h" becomes "  Fuel: 89% | ~19h"
+        # collapse to a single line at section-header indent.
+        # The label field is widened by 2 to keep the value column aligned
+        # with normal data rows (which use 4-space indent vs our 2-space).
         if len(rows) == 1 and rows[0][0].strip().lower() == title.strip().lower():
             label, value, rate = rows[0]
-            lines.append(fmt_row(label, value, rate, indent="  "))
+            lc   = f"{label}:"
+            left = f"  {lc:<{max_label + 3}}  {value:>{max_value}}"
+            lines.append(f"{left}  |  {rate}" if rate else left)
         else:
             lines.append(f"  {title}")
             for label, value, rate in rows:

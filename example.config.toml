@@ -32,11 +32,18 @@ WarnKillRate = 20
 # [HOT] Minutes since last kill before sending a no-kill warning (Default: 20)
 WarnNoKills = 20
 
+# [HOT] Minutes since session start before the initial no-kill warning (Default: 5)
+# This shorter threshold applies when no kills have occurred yet in the session.
+WarnNoKillsInitial = 5
+
 # [HOT] Minutes between repeated inactivity / kill-rate alerts (Default: 15)
 WarnCooldown = 15
 
 # [HOT] Mission stack size that triggers the "stack full" announcement (Default: 20)
 FullStackSize = 20
+
+# [HOT] Maximum number of characters to show in pilot/ship names (Default: 30)
+TruncateNames = 30
 
 # [HOT] Show faction name on each kill (Default: false)
 BountyFaction = false
@@ -70,7 +77,7 @@ UserID = 0
 ForumChannel = false
 
 # [RESTART] Append a timestamp to Discord messages (Default: true)
-Timestamp = false
+Timestamp = true
 
 # [RESTART] Use EDMD's default webhook name and avatar (Default: true)
 # Set false to use the name/avatar configured in Discord's webhook settings.
@@ -99,7 +106,7 @@ HullEvent        = 3   # Ship hull damage
 Died             = 3   # Ship destroyed
 CargoLost        = 3   # Cargo stolen
 LowCargoValue    = 2   # NPC declined to attack due to low cargo value
-PoliceScan       = 0   # Security vessel scanned your ship
+PoliceScan       = 2   # Security vessel scanned your ship
 PoliceAttack     = 3   # Security vessel is attacking you
 FuelStatus       = 1   # Routine fuel level report
 FuelWarning      = 2   # Fuel below warning threshold
@@ -109,7 +116,11 @@ AllMissionsReady = 3   # All active massacre missions ready to turn in
 MeritEvent       = 0   # Individual merit gain from a kill (powerplay only)
 InactiveAlert    = 3   # No kills for the configured time period
 RateAlert        = 3   # Kill rate below the configured threshold
-InboundScan      = 0   # Incoming cargo scan from a pirate
+InboundScan      = 1   # Incoming cargo scan from a pirate
+PeriodicKills    = 2   # Kill count in the quarter-hour summary
+PeriodicFaction  = 0   # Faction kill breakdown in the quarter-hour summary
+PeriodicCredits  = 2   # Credits earned in the quarter-hour summary
+PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay only)
 
 
 # ── GUI ──────────────────────────────────────────────────────────────────────
@@ -193,6 +204,10 @@ MeritEvent       = 1
 InactiveAlert    = 1
 RateAlert        = 1
 InboundScan      = 1
+PeriodicKills    = 1
+PeriodicFaction  = 0
+PeriodicCredits  = 1
+PeriodicMerits   = 1
 
 
 # ==============================================================================
@@ -230,3 +245,13 @@ Enabled       = false
 Enabled             = false
 UploadCarrierEvents = false   # set true to include CarrierStatus / CarrierJumpRequest
                               # note: this shares your carrier's location with EDAstro
+
+# ── Inara ────────────────────────────────────────────────────────────────────
+# Uploads commander stats, market visits, and fleet data to inara.cz.
+# Requires an Inara account.  Generate your API key at:
+#   https://inara.cz/elite/settings-api/
+
+[Inara]
+Enabled       = false
+# CommanderName = "YourCmdrName"   # in-game name only — do not include "CMDR"
+# ApiKey        = ""               # from Inara Settings → API Key

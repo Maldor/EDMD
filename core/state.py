@@ -18,7 +18,7 @@ from pathlib import Path
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
 AUTHOR  = "CMDR CALURSUS"
-VERSION = "20260403"
+VERSION = "20260404"
 GITHUB_REPO = "drworman/EDMD"
 DEBUG_MODE  = False
 
@@ -26,17 +26,20 @@ DEBUG_MODE  = False
 # ── User data directory ───────────────────────────────────────────────────────
 # Linux:   ~/.local/share/EDMD/
 # Windows: %APPDATA%\EDMD\
+# macOS:   ~/Library/Application Support/EDMD/
 # A symlink ~/.config/EDMD → ~/.local/share/EDMD is created on Linux.
 
 def _user_data_dir() -> Path:
     system = _pl.system()
     if system == "Windows":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif system == "Darwin":
+        base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     d = base / "EDMD"
     d.mkdir(parents=True, exist_ok=True)
-    if system != "Windows":
+    if system not in ("Windows", "Darwin"):
         config_link = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "EDMD"
         if not config_link.exists() and not config_link.is_symlink():
             try:
@@ -102,42 +105,6 @@ def cmdr_data_dir() -> Path:
     return p
 
 
-def migrate_legacy_cmdr_files(fid: str) -> None:
-    """One-time migration of flat EDMD_DATA_DIR files into the cmdr subdir.
-
-    If files exist at their legacy locations (directly under EDMD_DATA_DIR or
-    EDMD_DATA_DIR/plugins/) they are moved into the per-commander path.
-    This is called once after FID is first determined, making the transition
-    invisible to the user on their next launch.
-    """
-    import shutil
-    target = EDMD_DATA_DIR / "commanders" / fid
-    target.mkdir(parents=True, exist_ok=True)
-
-    # Top-level files and directories that move into cmdr dir
-    to_migrate_items = [
-        "session_state.json",
-        "layout.json",
-        "plugin_states.json",
-        "plugins",
-        "catalog",
-        "core",
-        "session_state.json",
-        "fleetcarrier_dump.json",
-    ]
-    # Queue files from integration plugins
-    for prefix in ("eddn", "edsm", "edastro", "inara"):
-        to_migrate_items.append(f"{prefix}_queue.jsonl")
-
-    for name in to_migrate_items:
-        src = EDMD_DATA_DIR / name
-        dst = target / name
-        if src.exists() and not dst.exists():
-            try:
-                shutil.move(str(src), str(dst))
-            except OSError:
-                pass
-
 
 STATE_FILE: Path = EDMD_DATA_DIR / "session_state.json"  # updated after set_active_fid
 
@@ -151,7 +118,7 @@ RECENT_KILL_WINDOW   = 10
 SESSION_GAP_MINUTES  = 15    # gap between Shutdown→LoadGame that starts a new session
 LABEL_UNKNOWN        = "[Unknown]"
 PATTERN_JOURNAL      = r"^Journal\.\d{4}-\d{2}-\d{2}T\d{6}\.\d{2}\.log$"
-PATTERN_WEBHOOK      = r"^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+$"
+PATTERN_WEBHOOK      = r"^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-z0-9_-]+$"
 
 PIRATE_NOATTACK_MSGS = [
     "$Pirate_ThreatTooHigh",
@@ -644,6 +611,7 @@ class MonitorState:
         self.pilot_mode              = None
         self.pilot_location          = None   # compat alias; prefer pilot_system/pilot_body
         self.pilot_system            = None
+        self.pilot_star_pos: list | None = None   # [x, y, z] galactic coords, updated on FSDJump/Location
         self.pilot_body              = None
         self.last_rate_check         = None
         self.last_periodic_summary   = None
@@ -766,7 +734,14 @@ class MonitorState:
     def sessionstart(self, active_session: SessionData, reset: bool = False):
         if not self.session_start_time or reset:
             self.session_start_time = self.event_time
-            active_session.reset()
+            # Only fully reset session counters when forced (manual reset / warzone
+            # drop) or when the session is genuinely new (no kills have occurred).
+            # A non-forced sessionstart after an FSDJump must not wipe last_kill_mono
+            # — doing so causes the idle alert to fire against a stale fallback timer
+            # (last_periodic_summary) rather than the actual last kill time.
+            if reset or not active_session.last_kill_mono:
+                active_session.reset()
+            # Always clear alert cooldowns so per-zone alerts work correctly.
             self.alerted_no_kills      = None
             self.alerted_kill_rate     = None
             self.last_rate_check       = time.monotonic()

@@ -144,6 +144,7 @@ class CargoBlock(BlockWidget):
         self._search_entry.set_placeholder_text("Target market…")
         self._search_entry.set_width_chars(16)
         self._search_entry.set_hexpand(False)
+        self._search_entry.set_valign(Gtk.Align.CENTER)
         self._search_entry.add_css_class("data-entry")
         self._search_entry.connect("activate",  self._on_search_activate)
         self._search_entry.connect("changed",   self._on_search_changed)
@@ -209,26 +210,17 @@ class CargoBlock(BlockWidget):
         if len(text) >= 3:
             self._search_popover.popdown()
             self._fetch_target(text)
-            entry.set_icon_from_icon_name(
-                Gtk.EntryIconPosition.SECONDARY, "process-working-symbolic"
-            )
 
     def _on_accept_clicked(self, btn: Gtk.Button) -> None:
         text = self._search_entry.get_text().strip()
         if len(text) >= 3:
             self._search_popover.popdown()
             self._fetch_target(text)
-            self._search_entry.set_icon_from_icon_name(
-                Gtk.EntryIconPosition.SECONDARY, "process-working-symbolic"
-            )
 
     def _on_clear_clicked(self, btn: Gtk.Button) -> None:
         self._updating_entry = True
         self._search_entry.set_text("")
         self._updating_entry = False
-        self._search_entry.set_icon_from_icon_name(
-            Gtk.EntryIconPosition.SECONDARY, None
-        )
         self._accept_btn.set_sensitive(False)
         self._clear_btn.set_sensitive(False)
         self._search_popover.popdown()
@@ -242,23 +234,15 @@ class CargoBlock(BlockWidget):
     def _do_search_bg(self, query: str) -> bool:
         self._search_timer = None
         # Show spinner while searching
-        self._search_entry.set_icon_from_icon_name(
-            Gtk.EntryIconPosition.PRIMARY, "process-working-symbolic"
-        )
         def _run():
             try:
                 p = self._get_spansh()
                 if not p:
-                    GLib.idle_add(self._search_entry.set_icon_from_icon_name,
-                                  Gtk.EntryIconPosition.PRIMARY, None)
                     return
                 results = p.search(query)
-                GLib.idle_add(self._search_entry.set_icon_from_icon_name,
-                              Gtk.EntryIconPosition.PRIMARY, None)
                 GLib.idle_add(self._show_results, results)
             except Exception as exc:
-                GLib.idle_add(self._search_entry.set_icon_from_icon_name,
-                              Gtk.EntryIconPosition.PRIMARY, None)
+                pass
         threading.Thread(target=_run, daemon=True, name="spansh-search").start()
         return False
 
@@ -293,13 +277,10 @@ class CargoBlock(BlockWidget):
         self._search_popover.popdown()
         name = result["name"]
         self._updating_entry = True
-        self._search_entry.set_text(name)
+        self._search_entry.set_text("")
         self._updating_entry = False
-        self._accept_btn.set_sensitive(True)
+        self._accept_btn.set_sensitive(False)
         self._clear_btn.set_sensitive(True)
-        self._search_entry.set_icon_from_icon_name(
-            Gtk.EntryIconPosition.SECONDARY, "process-working-symbolic"
-        )
         try:
             p = self._get_spansh()
             if p:
@@ -370,17 +351,8 @@ class CargoBlock(BlockWidget):
         self._sell_col_lbl.set_label("Sell")
         self._tgt_col_lbl.set_label("Avg")
         # Sync search entry text when target is known
-        if has_target and self._has_spansh and hasattr(self, "_search_entry") \
-                and not self._search_entry.has_focus():
-            tgt_stn = tgt_info.get("station_name", "")
-            if tgt_stn and self._search_entry.get_text() != tgt_stn:
-                self._updating_entry = True
-                self._search_entry.set_text(tgt_stn)
-                self._updating_entry = False
-                self._clear_btn.set_sensitive(True)
-                self._search_entry.set_icon_from_icon_name(
-                    Gtk.EntryIconPosition.SECONDARY, "emblem-ok-symbolic"
-                )
+        if has_target and self._has_spansh and hasattr(self, "_search_entry"):
+            self._clear_btn.set_sensitive(True)
 
         # Rebuild data rows
         self._clear_data_rows()

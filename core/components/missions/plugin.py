@@ -67,6 +67,11 @@ class MissionsPlugin(BasePlugin):
         redirected = data.get("redirected_missions", [])
         self._redirected: set[int] = {int(m) for m in redirected}
 
+        # Safety net: prune any redirected IDs that are not in the persisted
+        # active_missions list. This handles the edge case where storage was
+        # written with stale redirected IDs (e.g. from a previous session where
+        # MissionCompleted events were skipped during preload).
+        self._redirected &= set(state.active_missions)
         state.missions_complete = len(self._redirected)
         state.stack_value       = sum(
             v.get("reward", 0)
@@ -302,8 +307,13 @@ class MissionsPlugin(BasePlugin):
 
             case "MissionAbandoned" | "MissionCompleted" | "MissionFailed" if (
                 state.missions
-                and not state.in_preload
             ):
+                # Preload guard removed intentionally: completions, abandonments, and
+                # failures must be processed during preload so that _redirected is
+                # drained of turned-in missions. Without this, stale redirect IDs
+                # persisted from a previous session survive into the live tail and
+                # inflate missions_complete. Notifications are still suppressed during
+                # preload via the inner guard below.
                 mid = int(event.get("MissionID", 0))
                 if mid not in state.active_missions:
                     return
@@ -316,14 +326,15 @@ class MissionsPlugin(BasePlugin):
                 state.active_missions = [m for m in state.active_missions if m != mid]
                 state.missions_complete = len(self._redirected)
                 self._persist()
-                event_label = ev[7:].lower()
-                core.emitter.emit(
-                    msg_term=(f"Massacre mission {event_label} "
-                              f"(active: {len(state.active_missions)})"),
-                    emoji="📋", sigil="*  MISS",
-                    timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
-                )
-                if gq: gq.put(("mission_update", None))
+                if not state.in_preload:
+                    event_label = ev[7:].lower()
+                    core.emitter.emit(
+                        msg_term=(f"Massacre mission {event_label} "
+                                  f"(active: {len(state.active_missions)})"),
+                        emoji="📋", sigil="*  MISS",
+                        timestamp=event.get("_logtime"), loglevel=notify["MissionUpdate"],
+                    )
+                    if gq: gq.put(("mission_update", None))
 
     def get_summary_line(self) -> str | None:
         state = self.core.state

@@ -1279,6 +1279,28 @@ link:hover {
     opacity: 0.3;
 }
 
+/* Commander block footer button — same compact style as cargo buttons but
+   suppresses mat-tab-btn's border-bottom so the footer height stays flush */
+.cmdr-footer-btn {
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent none;
+    box-shadow: none;
+    min-height: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.cmdr-footer-btn:hover {
+    background: var(--accent-hover) none;
+    border-color: var(--fg-dim);
+}
+
+.cmdr-footer-btn:disabled {
+    opacity: 0.3;
+}
+
 /* ── Plugins dialog ──────────────────────────────────────────────────────── */
 .plugin-description {
     font-size: 0.78em;

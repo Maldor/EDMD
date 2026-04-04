@@ -650,6 +650,9 @@ def handle_event(
                 # when dur < 60s and nothing to report.  Fuel is now included
                 # unconditionally so summaries fire during any active session.
                 emit_summary(emitter, state, _providers, _sess_plugin)
+                # Update so the idle-alert fallback timer never drifts
+                # further than 15 minutes from the last actual summary.
+                state.last_periodic_summary = time.monotonic()
         # Docked/Undocked: notify DataProvider for CAPI dock-gating
         if ev_name in ("Docked", "Location") and data_provider is not None:
             data_provider.notify_docked(True)

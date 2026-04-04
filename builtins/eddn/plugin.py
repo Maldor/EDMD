@@ -414,7 +414,13 @@ class EDDNPlugin(BasePlugin):
 
         # ── Flush any pending FSSSignalDiscovered before non-FSS events ───────
         if ev != "FSSSignalDiscovered" and self._fss_signals:
-            self._flush_fss_signals(flush_event=event)
+            if state.in_preload:
+                # Preload events are historical — silently discard accumulated
+                # signals rather than attempting a flush that will likely
+                # mismatch the current system and produce a spurious warning.
+                self._fss_signals = []
+            else:
+                self._flush_fss_signals(flush_event=event)
 
         # ── Location tracking ─────────────────────────────────────────────────
         # Track docked status and carrier identity
