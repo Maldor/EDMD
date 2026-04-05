@@ -132,63 +132,65 @@ class CommanderBlock(BlockWidget):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_margin_top(4)
 
-        def _row(key_text):
-            r = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            r.add_css_class("data-row")
+        # Single shared grid so all key labels size to the same column width
+        # and all value labels align perfectly regardless of label length.
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(2)
+        box.append(grid)
+
+        gr = 0   # current grid row index
+
+        def _kv(key_text):
+            """Attach a key+value row to the shared grid; return the value label."""
+            nonlocal gr
             k = self.make_label(key_text, css_class="data-key")
-            k.set_hexpand(False)
-            r.append(k)
+            k.set_xalign(0.0)
+            grid.attach(k, 0, gr, 1, 1)
             v = self.make_label("—", css_class="data-value")
-            v.set_hexpand(True)
             v.set_xalign(1.0)
-            r.append(v)
-            box.append(r)
-            return r, v
+            v.set_hexpand(True)
+            grid.attach(v, 1, gr, 1, 1)
+            gr += 1
+            return v
 
-        # Shields
-        row_sh = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row_sh.add_css_class("data-row")
-        row_sh.append(self.make_label("Shields", css_class="data-key"))
-        self._cmdr_shields = self.make_label("—", css_class="data-value")
-        self._cmdr_shields.set_hexpand(True)
-        self._cmdr_shields.set_xalign(1.0)
-        row_sh.append(self._cmdr_shields)
-        box.append(row_sh)
+        def _sep():
+            """Full-width separator spanning both grid columns."""
+            nonlocal gr
+            s = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            s.add_css_class("vitals-sep")
+            grid.attach(s, 0, gr, 2, 1)
+            gr += 1
 
-        # Hull
-        row_hull = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row_hull.add_css_class("data-row")
-        row_hull.append(self.make_label("Hull", css_class="data-key"))
-        self._cmdr_hull = self.make_label("—", css_class="data-value")
-        self._cmdr_hull.set_hexpand(True)
-        self._cmdr_hull.set_xalign(1.0)
-        row_hull.append(self._cmdr_hull)
-        box.append(row_hull)
+        def _bar_row(bar_widget):
+            """Full-width progress bar row spanning both grid columns."""
+            nonlocal gr
+            wrap = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            wrap.add_css_class("pp-rank-bar-row")
+            bar_widget.set_hexpand(True)
+            wrap.append(bar_widget)
+            grid.attach(wrap, 0, gr, 2, 1)
+            gr += 1
 
-        _, self._cmdr_fuel = _row("Fuel")
+        self._cmdr_shields = _kv("Shields")
+        self._cmdr_hull    = _kv("Hull")
+        self._cmdr_fuel    = _kv("Fuel")
 
-        vitals_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        vitals_sep.add_css_class("vitals-sep")
-        box.append(vitals_sep)
+        _sep()
 
-        _, self._cmdr_mode     = _row("Mode")
-        _, self._cmdr_home     = _row("Home System")
-        _, self._cmdr_system   = _row("Current System")
-        _, self._cmdr_location = _row("Location")
-        _, self._cmdr_pp       = _row("Power")
-        _, self._cmdr_pprank   = _row("PP Rank")
+        self._cmdr_mode     = _kv("Mode")
+        self._cmdr_home     = _kv("Home System")
+        self._cmdr_system   = _kv("Current System")
+        self._cmdr_location = _kv("Location")
+        self._cmdr_pp       = _kv("Power")
+        self._cmdr_pprank   = _kv("PP Rank")
 
-        # PP progress bar
         self._pp_rank_bar = Gtk.ProgressBar()
         self._pp_rank_bar.set_fraction(0.0)
         self._pp_rank_bar.add_css_class("pp-rank-bar")
         self._pp_rank_bar.set_show_text(False)
         self._pp_rank_bar.set_size_request(40, 4)
-        bar_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        bar_box.add_css_class("pp-rank-bar-row")
-        bar_box.append(self._pp_rank_bar)
-        self._pp_rank_bar.set_hexpand(True)
-        box.append(bar_box)
+        _bar_row(self._pp_rank_bar)
 
         return box
 
@@ -392,22 +394,31 @@ class CommanderBlock(BlockWidget):
         self._no_ranks_lbl.set_margin_top(8)
         box.append(self._no_ranks_lbl)
 
-        # dict: capi_key -> (row_box, value_label, progress_bar, bar_wrapper)
+        # Shared grid: all rank key labels share column 0 so values align.
+        # Each rank occupies two grid rows: text row + progress-bar row.
+        rank_grid = Gtk.Grid()
+        rank_grid.set_column_spacing(8)
+        rank_grid.set_row_spacing(2)
+        rank_grid.set_margin_top(2)
+        box.append(rank_grid)
+
+        # dict: capi_key -> (key_label, value_label, progress_bar, bar_wrapper)
         self._rank_rows: dict = {}
+        _gr = 0
 
         from core.state import CAPI_RANK_SKILLS
         for capi_key, display_label, _table in CAPI_RANK_SKILLS:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            row.add_css_class("data-row")
             k = self.make_label(display_label, css_class="data-key")
-            k.set_hexpand(False)
-            row.append(k)
+            k.set_xalign(0.0)
+            k.set_visible(False)
+            rank_grid.attach(k, 0, _gr, 1, 1)
+
             v = self.make_label("—", css_class="data-value")
-            v.set_hexpand(True)
             v.set_xalign(1.0)
-            row.append(v)
-            row.set_visible(False)
-            box.append(row)
+            v.set_hexpand(True)
+            v.set_visible(False)
+            rank_grid.attach(v, 1, _gr, 1, 1)
+            _gr += 1
 
             bar = Gtk.ProgressBar()
             bar.set_fraction(0.0)
@@ -419,9 +430,10 @@ class CommanderBlock(BlockWidget):
             bar_wrap.add_css_class("pp-rank-bar-row")
             bar_wrap.append(bar)
             bar_wrap.set_visible(False)
-            box.append(bar_wrap)
+            rank_grid.attach(bar_wrap, 0, _gr, 2, 1)
+            _gr += 1
 
-            self._rank_rows[capi_key] = (row, v, bar, bar_wrap)
+            self._rank_rows[capi_key] = (k, v, bar, bar_wrap)
 
         # Engineer ranks section (dynamic rows built in refresh)
         eng_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -937,17 +949,19 @@ class CommanderBlock(BlockWidget):
         if has_ranks:
             from core.state import CAPI_RANK_SKILLS
             for capi_key, _display, table in CAPI_RANK_SKILLS:
-                row, v_lbl, bar, bar_wrap = self._rank_rows[capi_key]
+                k_lbl, v_lbl, bar, bar_wrap = self._rank_rows[capi_key]
                 idx = capi_ranks.get(capi_key)
                 if idx is None:
-                    row.set_visible(False)
+                    k_lbl.set_visible(False)
+                    v_lbl.set_visible(False)
                     bar_wrap.set_visible(False)
                     continue
                 rank_name = table[idx] if 0 <= idx < len(table) else str(idx)
                 prog      = (capi_progress or {}).get(capi_key)
                 pct_str   = f" +{prog}%" if prog is not None else ""
                 v_lbl.set_label(f"{rank_name}{pct_str}")
-                row.set_visible(True)
+                k_lbl.set_visible(True)
+                v_lbl.set_visible(True)
                 if prog is not None:
                     bar.set_fraction(min(prog / 100.0, 1.0))
                     bar_wrap.set_visible(True)
@@ -1065,7 +1079,7 @@ class CommanderBlock(BlockWidget):
             self._pp_rank_bar.set_fraction(0.0)
             self._pp_rank_bar.set_visible(False)
         if hasattr(self, "_rank_rows"):
-            for _row, _lbl, bar, bar_wrap in self._rank_rows.values():
+            for _k_lbl, _lbl, bar, bar_wrap in self._rank_rows.values():
                 bar.set_fraction(0.0)
                 bar_wrap.set_visible(False)
         if hasattr(self, "_eng_rows"):

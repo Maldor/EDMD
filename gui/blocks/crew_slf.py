@@ -52,33 +52,41 @@ class CrewSlfBlock(BlockWidget):
         body = self._build_section(parent, title_widget=hdr_outer)
         scroll_body = self._make_scroll_body(body)
 
-        # ── SLF vitals strip — most urgent information ─────────────────────────
-        row_slf = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row_slf.add_css_class("data-row")
-        key_slf = self.make_label("SLF", css_class="data-key")
-        key_slf.set_hexpand(False)
-        row_slf.append(key_slf)
-        self._crew_slf_status = self.make_label("—", css_class="data-value")
-        self._crew_slf_status.set_hexpand(True)
-        self._crew_slf_status.set_xalign(1.0)
-        row_slf.append(self._crew_slf_status)
-        scroll_body.append(row_slf)
-        self._crew_slf_row = row_slf
+        # ── Single shared grid so all labels align ───────────────────────────
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(2)
+        grid.set_margin_top(2)
+        scroll_body.append(grid)
 
-        # ── Separator — vitals above, crew context below ──────────────────────
-        vitals_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        vitals_sep.add_css_class("vitals-sep")
-        scroll_body.append(vitals_sep)
+        _gr = 0
 
-        # ── Ambient rows — crew context ───────────────────────────────────────
-        for lbl_text, attr in [
-            ("Hired",  "_crew_hired_lbl"),
-            ("Active", "_crew_active_lbl"),
-            ("Paid",   "_crew_paid_lbl"),
-        ]:
-            row, val = self.make_row(lbl_text)
-            setattr(self, attr, val)
-            scroll_body.append(row)
+        def _kv(key_text):
+            nonlocal _gr
+            k = self.make_label(key_text, css_class="data-key")
+            k.set_xalign(0.0)
+            grid.attach(k, 0, _gr, 1, 1)
+            v = self.make_label("—", css_class="data-value")
+            v.set_xalign(1.0)
+            v.set_hexpand(True)
+            grid.attach(v, 1, _gr, 1, 1)
+            _gr += 1
+            return k, v
+
+        # ── SLF vitals ───────────────────────────────────────────────────────
+        self._crew_slf_key, self._crew_slf_status = _kv("SLF")
+        self._crew_slf_row = self._crew_slf_key   # keep ref for visibility toggle
+
+        # ── Separator ────────────────────────────────────────────────────────
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.add_css_class("vitals-sep")
+        grid.attach(sep, 0, _gr, 2, 1)
+        _gr += 1
+
+        # ── Context rows ─────────────────────────────────────────────────────
+        _, self._crew_hired_lbl  = _kv("Hired")
+        _, self._crew_active_lbl = _kv("Active")
+        _, self._crew_paid_lbl   = _kv("Paid")
 
         # Hidden by default until crew is active
         self.set_visible(False)
@@ -144,7 +152,8 @@ class CrewSlfBlock(BlockWidget):
 
         # ── SLF status (hidden when no bay fitted) ────────────────────────────
         has_bay = s.has_fighter_bay
-        self._crew_slf_row.set_visible(has_bay)
+        self._crew_slf_key.set_visible(has_bay)
+        self._crew_slf_status.set_visible(has_bay)
         if not has_bay:
             return
 

@@ -611,7 +611,7 @@ class AssetsBlock(BlockWidget):
     # ── Carrier tab helpers ────────────────────────────────────────────────────
 
     def _carrier_section(self, body: "Gtk.Box", title: str) -> None:
-        """Append a thin section header label to body."""
+        """Append a section header + separator and start a new aligned grid."""
         lbl = Gtk.Label(label=title)
         lbl.add_css_class("data-key")
         lbl.set_xalign(0.0)
@@ -620,18 +620,34 @@ class AssetsBlock(BlockWidget):
         body.append(lbl)
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         body.append(sep)
+        # Create a fresh grid so key labels within each section share a column.
+        self._carrier_current_grid = Gtk.Grid()
+        self._carrier_current_grid.set_column_spacing(8)
+        self._carrier_current_grid.set_row_spacing(2)
+        self._carrier_current_grid.set_margin_top(2)
+        self._carrier_current_grid_row = 0
+        body.append(self._carrier_current_grid)
 
     def _carrier_row(self, body: "Gtk.Box", key: str, label: str) -> None:
-        """Append a key/value row and register the value label under key."""
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row.add_css_class("data-row")
+        """Attach a key/value row to the current section grid."""
+        if not hasattr(self, "_carrier_current_grid"):
+            # Identity section (before first _carrier_section call) —
+            # initialise the first grid using body as the container.
+            self._carrier_current_grid = Gtk.Grid()
+            self._carrier_current_grid.set_column_spacing(8)
+            self._carrier_current_grid.set_row_spacing(2)
+            self._carrier_current_grid.set_margin_top(2)
+            self._carrier_current_grid_row = 0
+            body.append(self._carrier_current_grid)
+        gr = self._carrier_current_grid_row
         k_lbl = self.make_label(label, css_class="data-key")
+        k_lbl.set_xalign(0.0)
+        self._carrier_current_grid.attach(k_lbl, 0, gr, 1, 1)
         v_lbl = self.make_label("—", css_class="data-value")
-        v_lbl.set_hexpand(True)
         v_lbl.set_xalign(1.0)
-        row.append(k_lbl)
-        row.append(v_lbl)
-        body.append(row)
+        v_lbl.set_hexpand(True)
+        self._carrier_current_grid.attach(v_lbl, 1, gr, 1, 1)
+        self._carrier_current_grid_row += 1
         self._carrier_rows[key] = v_lbl
 
 
@@ -678,6 +694,8 @@ class AssetsBlock(BlockWidget):
         self._carrier_scroll = scroll
 
         self._carrier_rows: dict[str, Gtk.Label] = {}
+        if hasattr(self, "_carrier_current_grid"):
+            del self._carrier_current_grid
         body = self._carrier_detail_box
 
         # ── Identity ─────────────────────────────────────────────────────────

@@ -125,6 +125,15 @@ class ColonisationBlock(BlockWidget):
         # Sort by most-needed first
         remaining_items.sort(key=lambda x: -(x[1]["required"] - x[1]["provided"]))
 
+        # Single grid per site — all item names share col 0 and all
+        # quantity values align in col 1 regardless of name length.
+        res_grid = Gtk.Grid()
+        res_grid.set_column_spacing(8)
+        res_grid.set_row_spacing(2)
+        res_grid.set_margin_top(2)
+        self._sites_box.append(res_grid)
+        _gr = 0
+
         for key, info in remaining_items:
             display   = info.get("name") or key
             required  = info["required"]
@@ -136,18 +145,16 @@ class ColonisationBlock(BlockWidget):
                 in_cargo = cargo.get(key, {}).get("count", 0) if isinstance(cargo.get(key), dict) \
                            else cargo.get(key, 0)
 
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            row.add_css_class("data-row")
-
-            name_lbl = self.make_label(f"  {display}", css_class="data-key")
-            name_lbl.set_hexpand(True)
-            row.append(name_lbl)
-
             # Needed vs provided
             need_str = f"{needed:,} needed"
             if in_cargo > 0:
                 can_deliver = min(in_cargo, needed)
                 need_str   += f"  ({can_deliver:,} in hold)"
+
+            name_lbl = self.make_label(f"  {display}", css_class="data-key")
+            name_lbl.set_xalign(0.0)
+            name_lbl.set_hexpand(True)
+            res_grid.attach(name_lbl, 0, _gr, 1, 1)
 
             val_lbl = self.make_label(need_str, css_class="data-value")
             val_lbl.set_xalign(1.0)
@@ -155,9 +162,8 @@ class ColonisationBlock(BlockWidget):
                 val_lbl.add_css_class("status-ready")
             elif in_cargo > 0:
                 val_lbl.add_css_class("status-active")
-            row.append(val_lbl)
-
-            self._sites_box.append(row)
+            res_grid.attach(val_lbl, 1, _gr, 1, 1)
+            _gr += 1
 
         # Summary: total remaining tonnes
         total_remaining = sum(
