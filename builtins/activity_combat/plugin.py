@@ -71,6 +71,17 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
         self._last_kill_mono = 0.0
         self._inactivity_alerted = False
 
+    def on_summary(self) -> None:
+        """Refresh the fallback idle-alert reference on every quarter-hour summary.
+
+        When _last_kill_mono is 0 (no live kill observed yet — e.g. EDMD restarted
+        into an ongoing session that was preloaded), the idle checker falls back to
+        _last_summary_mono.  Without this update, _last_summary_mono measures time
+        since EDMD startup, causing spurious alerts 60 minutes after launch even
+        when kills are actively occurring in the preload-accumulated counter.
+        """
+        self._last_summary_mono = time.monotonic()
+
     def on_event(self, event: dict, state) -> None:
         core     = self.core
         gq       = core.gui_queue
@@ -175,76 +186,6 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
             case "Shutdown" | "Music" if ev == "Music" and event.get("MusicTrack") == "MainMenu":
                 pass  # no-kill timer pauses naturally — monotonic won't advance
 
-    def _emit_summary(self, state) -> None:
-        """Emit a 15-minute session summary to terminal and Discord.
-
-        Uses the same data sources as the GUI so output is consistent.
-        Duration comes from session_stats._session_start_time (the GUI
-        clock). Rates are derived from that duration. Merits come from
-        activity_powerplay. No legacy emit_summary() call.
-        """
-        if self.kills == 0:
-            return
-
-        core = self.core
-
-        # Duration — from session_stats plugin (same source as GUI block)
-        ss = core._plugins.get("session_stats")
-        duration = ss.session_duration_seconds() if ss else 0.0
-
-        # Rates
-        credit_total = self.bounty_total + self.bond_total
-        merits       = 0
-        try:
-            pp = core._plugins.get("activity_powerplay")
-            if pp: merits = pp.merits_earned
-        except Exception:
-            pass
-
-        kph = rate_per_hour(duration / self.kills        if self.kills        else 0, 1)
-        bph = rate_per_hour(duration / credit_total      if credit_total      else 0, 2)
-        mph = rate_per_hour(duration / merits            if merits            else 0, 1)
-
-        dur_str = fmt_duration(int(duration))
-
-        avg_interval = ""
-        if self.kills > 1 and self.kill_interval_total > 0:
-            avg_secs     = self.kill_interval_total / (self.kills - 1)
-            avg_interval = f" | avg {fmt_duration(int(avg_secs))}/kill"
-
-        sep = " | "
-        summary_text = (
-            f"Session Summary:\n"
-            f"- Duration: {dur_str}\n"
-            f"- Kills:    {self.kills:,}{sep}{kph:,} /hr{avg_interval}\n"
-            f"- Bounties: {fmt_credits(credit_total)}{sep}{fmt_credits(bph)} /hr\n"
-        )
-
-        # Mission stack from state (unchanged — still authoritative there)
-        if state.stack_value > 0:
-            done      = state.missions_complete
-            total     = len(state.active_missions)
-            remaining = total - done
-            complete_str = (
-                "all complete — turn in!"
-                if remaining == 0
-                else f"{done}/{total} complete, {remaining} remaining"
-            )
-            summary_text += f"- Missions: {fmt_credits(state.stack_value)} stack ({complete_str})\n"
-
-        if merits > 0:
-            summary_text += f"- Merits:   {merits:,}{sep}{int(mph):,} /hr"
-        else:
-            summary_text = summary_text.rstrip("\n")
-
-        core.emitter.emit(
-            msg_term=summary_text,
-            msg_discord=f"```{summary_text}```",
-            emoji="📊",
-            sigil="~  SUMM",
-            timestamp=state.event_time,
-            loglevel=2,
-        )
 
     def tick(self, state) -> None:
         """Called every second. Handles:

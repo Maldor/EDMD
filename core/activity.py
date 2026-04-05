@@ -53,3 +53,12 @@ class ActivityProviderMixin:
     def on_session_reset(self) -> None:
         """Called when a new gaming session begins. Reset all counters."""
         pass
+
+    def on_summary(self) -> None:
+        """Called each time a quarter-hour summary fires.
+
+        Activity plugins that use a monotonic summary timestamp as a fallback
+        reference for idle-alert timing should override this to refresh that
+        timestamp.  The default is a no-op — only activity_combat needs it.
+        """
+        pass
