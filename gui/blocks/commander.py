@@ -172,9 +172,9 @@ class CommanderBlock(BlockWidget):
         box.append(vitals_sep)
 
         _, self._cmdr_mode     = _row("Mode")
-        _, self._cmdr_system   = _row("System")
-        _, self._cmdr_home     = _row("Home")
-        _, self._cmdr_location = _row("Body")
+        _, self._cmdr_home     = _row("Home System")
+        _, self._cmdr_system   = _row("Current System")
+        _, self._cmdr_location = _row("Location")
         _, self._cmdr_pp       = _row("Power")
         _, self._cmdr_pprank   = _row("PP Rank")
 
@@ -599,7 +599,7 @@ class CommanderBlock(BlockWidget):
         # ── Info tab: Mode ────────────────────────────────────────────────────
         self._cmdr_mode.set_label(s.pilot_mode or "—")
 
-        # ── Info tab: System ──────────────────────────────────────────────────
+        # ── Info tab: Current System ──────────────────────────────────────────────────
         if s.pilot_system:
             self._cmdr_system.set_label(s.pilot_system)
             self._cmdr_system.get_parent().set_visible(True)
@@ -607,7 +607,7 @@ class CommanderBlock(BlockWidget):
             self._cmdr_system.set_label("—")
             self._cmdr_system.get_parent().set_visible(False)
 
-        # ── Info tab: Home ────────────────────────────────────────────────────
+        # ── Info tab: Home System ────────────────────────────────────────────────────
         cmdr_plugin = self.core._plugins.get("commander") if self.core else None
         if cmdr_plugin:
             home = cmdr_plugin.get_home_location()
@@ -633,7 +633,7 @@ class CommanderBlock(BlockWidget):
         else:
             self._cmdr_home.get_parent().set_visible(False)
 
-        # ── Info tab: Body ────────────────────────────────────────────────────
+        # ── Info tab: Location ────────────────────────────────────────────────────
         if s.pilot_body:
             body_str = s.pilot_body
             if s.pilot_system and body_str.startswith(s.pilot_system):
