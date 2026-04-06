@@ -49,16 +49,16 @@ MIN_H    = 1
 
 # Default block layout — three columns at col 0 (w=11), col 11 (w=11), col 22 (w=10).
 DEFAULT_LAYOUT = {
-    "career":       {"col": 0,  "row": 0,   "width": 11, "height": 57},
-    "session_stats":{"col": 0,  "row": 56,  "width": 11, "height": 45},
-    "colonisation": {"col": 0,  "row": 100, "width": 11, "height": 39},
-    "commander":    {"col": 11, "row": 0,   "width": 11, "height": 29},
-    "alerts":       {"col": 11, "row": 40,  "width": 11, "height": 27},
-    "missions":     {"col": 11, "row": 66,  "width": 11, "height": 34},
-    "cargo":        {"col": 11, "row": 99,  "width": 11, "height": 40},
-    "crew_slf":     {"col": 22, "row": 0,   "width": 10, "height": 32},
-    "assets":       {"col": 22, "row": 31,  "width": 10, "height": 70},
-    "engineering":  {"col": 22, "row": 100, "width": 10, "height": 39},
+    "career":       {"col": 0,  "row": 0,   "width": 11, "height": 41},
+    "session_stats":{"col": 0,  "row": 40,  "width": 11, "height": 38},
+    "colonisation": {"col": 0,  "row": 77,  "width": 11, "height": 24},
+    "commander":    {"col": 11, "row": 0,   "width": 11, "height": 31},
+    "alerts":       {"col": 11, "row": 31,  "width": 11, "height": 17},
+    "missions":     {"col": 11, "row": 47,  "width": 11, "height": 26},
+    "cargo":        {"col": 11, "row": 72,  "width": 11, "height": 29},
+    "crew_slf":     {"col": 22, "row": 0,   "width": 10, "height": 19},
+    "assets":       {"col": 22, "row": 18,  "width": 10, "height": 41},
+    "engineering":  {"col": 22, "row": 58,  "width": 10, "height": 43},
 }
 
 
@@ -206,13 +206,14 @@ class BlockGrid:
 
     def row_height(self) -> float:
         """Height of one row unit in pixels.
-        Equals ROW_PX normally; scales down proportionally if the canvas is
-        shorter than the natural layout extent so blocks always fit."""
-        natural_rows = self._natural_row_extent()
-        natural_h    = natural_rows * ROW_PX
-        if natural_h <= 0 or self._canvas_height >= natural_h:
-            return float(ROW_PX)
-        return max(ROW_PX / 2, self._canvas_height / natural_rows)
+
+        Always returns ROW_PX — layout is fixed during normal runtime.
+        Vertical overflow is handled by the dashboard ScrolledWindow, not by
+        scaling blocks down.  Proportional scaling caused GTK4 to invalidate
+        the entire scene graph on every window-height change, draining the
+        compositor.
+        """
+        return float(ROW_PX)
 
     def _natural_row_extent(self) -> int:
         """Total rows spanned by the current layout (max row + height)."""

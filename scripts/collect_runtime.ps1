@@ -88,11 +88,12 @@ Write-Host "      $dll_count DLLs copied."
 
 # ── 3. Install pip-managed packages into MSYS2 Python (before copying) ───────
 # discord-webhook is not in MSYS2 pacman — install it via pip.
+# textual is also not in MSYS2 pacman — install via pip (pure Python).
 # cryptography IS in pacman (mingw-w64-ucrt-x86_64-python-cryptography) and
 # is installed there instead: MSYS2's Python uses MinGW wheel tags that are
 # incompatible with PyPI's win_amd64 wheels, so pip cannot install cryptography
 # as a binary and attempting to build it from source requires maturin/Rust.
-# discord-webhook is pure Python (py3-none-any) so pip handles it correctly.
+# discord-webhook and textual are pure Python (py3-none-any) so pip handles them.
 # --only-binary :all: ensures pip never falls back to a source build.
 # --break-system-packages bypasses MSYS2's PEP 668 externally-managed marker.
 
@@ -100,12 +101,13 @@ Write-Host "[3/8] Installing pip-managed packages into MSYS2 Python..."
 $ucrt_python_exe = Join-Path $ucrt "bin\python.exe"
 # cryptography is installed via pacman (mingw-w64-ucrt-x86_64-python-cryptography)
 # because MSYS2's Python uses MinGW wheel tags incompatible with PyPI win_amd64 wheels.
-# discord-webhook is pure Python (py3-none-any) so pip handles it correctly.
+# discord-webhook and textual are pure Python (py3-none-any) so pip handles them correctly.
 & $ucrt_python_exe -m pip install `
     --break-system-packages `
     --only-binary :all: `
     --no-warn-script-location `
-    "discord-webhook>=1.3.0"
+    "discord-webhook>=1.3.0" `
+    "textual>=0.47.0"
 if ($LASTEXITCODE -ne 0) {
     throw "pip install into MSYS2 Python failed (exit code $LASTEXITCODE)"
 }
@@ -223,6 +225,7 @@ check('gi (PyGObject)',      'import gi')
 check('psutil',              'import psutil')
 check('discord_webhook',     'import discord_webhook')
 check('cryptography',        'import cryptography')
+check('textual',             'import textual')
 
 if failures:
     print(f'\nFAILED: {failures}')

@@ -15,6 +15,7 @@ Requires Python 3.11+ (tomllib stdlib).
 """
 
 import tomllib
+from core.config import config_to_toml
 from pathlib import Path
 
 try:
@@ -311,7 +312,7 @@ class PreferencesWindow(Gtk.Window):
 
     def _build_appearance_tab(self, nb: Gtk.Notebook) -> None:
         box = self._tab(nb, "Appearance")
-        current_theme = self._cfg.gui_cfg.get("Theme", "default")
+        current_theme = self._cfg.ui_cfg.get("Theme", "default")
 
         box.append(self._section_label("Theme"))
 
@@ -353,7 +354,7 @@ class PreferencesWindow(Gtk.Window):
         box.append(font_note)
 
         # Font family — monospace only
-        current_family = self._cfg.gui_cfg.get("FontFamily", "JetBrains Mono")
+        current_family = self._cfg.ui_cfg.get("FontFamily", "JetBrains Mono")
         from gui.helpers import list_monospace_fonts
         mono_fonts = list_monospace_fonts()
         # Always include JetBrains Mono as the first option even if not yet
@@ -375,7 +376,7 @@ class PreferencesWindow(Gtk.Window):
         box.append(self._row("Font Family", family_combo, restart_required=True))
 
         # Font size
-        current_font_size = self._cfg.gui_cfg.get("FontSize", 14)
+        current_font_size = self._cfg.ui_cfg.get("FontSize", 14)
         font_spin = Gtk.SpinButton.new_with_range(10, 24, 1)
         font_spin.set_value(current_font_size)
         font_spin.connect("value-changed",
@@ -391,7 +392,7 @@ class PreferencesWindow(Gtk.Window):
         "Settings": {"JournalFolder"},
         "Discord":  {"WebhookURL", "UserID", "Identity",
                      "ForumChannel", "ThreadCmdrNames", "Timestamp"},
-        "GUI":      {"Theme", "FontSize"},
+        "UI":       {"Theme", "FontSize"},
         "EDDN":     {"Enabled", "UploaderID", "TestMode"},
         "EDSM":     {"Enabled", "CommanderName", "ApiKey"},
         "EDAstro":  {"Enabled", "UploadCarrierEvents"},
@@ -418,7 +419,7 @@ class PreferencesWindow(Gtk.Window):
         self._record("Discord", key, value)
 
     def _track_gui(self, key: str, value) -> None:
-        self._record("GUI", key, value)
+        self._record("UI", key, value)
 
     def _track_eddn(self, key: str, value) -> None:
         self._record("EDDN", key, value)
@@ -769,7 +770,7 @@ class PreferencesWindow(Gtk.Window):
                 target[k] = v
 
         try:
-            new_toml = _dict_to_toml(config)
+            new_toml = config_to_toml(config)
             config_path.write_text(new_toml, encoding="utf-8")
         except Exception as e:
             self._show_error(f"Could not write config.toml:\n{e}")
@@ -820,65 +821,3 @@ def import_python_executable() -> str:
 
 
 # ── TOML writer ──────────────────────────────────────────────────────────────
-
-def _dict_to_toml(d: dict) -> str:
-    """
-    Serialise a config dict back to TOML, correctly handling the two-level
-    nesting that EDMD profiles require.
-
-    Structure supported:
-      top-level scalars        → bare key = value
-      top-level dicts          → [Section] with scalar keys
-        sub-dicts inside those → [Section.SubSection] with scalar keys,
-                                  emitted as a separate table header
-
-    This preserves EDP1 / REMOTE profile sections where some keys are flat
-    (QuitOnLowFuel = true) and others are nested (Settings.JournalFolder = "...").
-    Without this, tomllib round-trips were corrupting profiles by serialising
-    nested dicts as Python repr strings.
-    """
-
-    def _scalar(v) -> str:
-        """Format a scalar value as a TOML literal."""
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        if isinstance(v, int):
-            return str(v)
-        if isinstance(v, float):
-            return str(v)
-        escaped = str(v).replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-
-    lines: list[str] = []
-
-    # ── Pass 1: top-level scalars ─────────────────────────────────────────────
-    for k, v in d.items():
-        if not isinstance(v, dict):
-            lines.append(f"{k} = {_scalar(v)}")
-
-    # ── Pass 2: top-level sections ────────────────────────────────────────────
-    for section_key, section_val in d.items():
-        if not isinstance(section_val, dict):
-            continue
-
-        lines.append(f"")
-        lines.append(f"[{section_key}]")
-
-        # Scalars in this section first
-        for k, v in section_val.items():
-            if not isinstance(v, dict):
-                lines.append(f"{k} = {_scalar(v)}")
-
-        # Sub-tables inside this section as [Section.SubSection]
-        for sub_key, sub_val in section_val.items():
-            if not isinstance(sub_val, dict):
-                continue
-            lines.append(f"")
-            lines.append(f"[{section_key}.{sub_key}]")
-            for k, v in sub_val.items():
-                if isinstance(v, dict):
-                    # Three levels deep — not used in EDMD config, skip safely
-                    continue
-                lines.append(f"{k} = {_scalar(v)}")
-
-    return "\n".join(lines) + "\n"

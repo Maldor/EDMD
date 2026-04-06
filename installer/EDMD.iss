@@ -80,10 +80,12 @@ Source: "..\INSTALL.md";            DestDir: "{app}";      Flags: ignoreversion
 Source: "..\docs\*";                DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName} (GUI)";       Filename: "{app}\{#AppExeName}"; Parameters: "-g";        IconFilename: "{app}\edmd.ico"; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
+Name: "{group}\{#AppName} (GUI)";       Filename: "{app}\{#AppExeName}"; Parameters: "--mode gtk4";    IconFilename: "{app}\edmd.ico"; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI (requires MSYS2)"
+Name: "{group}\{#AppName} (TUI)";       Filename: "{app}\{#AppExeName}"; Parameters: "--mode textual"; IconFilename: "{app}\edmd.ico"; Comment: "Elite Dangerous Monitor Daemon — Textual Terminal UI"
 Name: "{group}\{#AppName} (terminal)";  Filename: "{app}\{#AppExeName}"; Parameters: "--no-gui"; IconFilename: "{app}\edmd.ico"; Comment: "Elite Dangerous Monitor Daemon — terminal mode"
 Name: "{group}\Uninstall {#AppName}";   Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName} (GUI)"; Filename: "{app}\{#AppExeName}"; Parameters: "-g";        IconFilename: "{app}\edmd.ico"; Tasks: desktopicon; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI"
+Name: "{autodesktop}\{#AppName} (GUI)"; Filename: "{app}\{#AppExeName}"; Parameters: "--mode gtk4";    IconFilename: "{app}\edmd.ico"; Tasks: desktopicon; Comment: "Elite Dangerous Monitor Daemon — GTK4 GUI (requires MSYS2)"
+Name: "{autodesktop}\{#AppName} (TUI)"; Filename: "{app}\{#AppExeName}"; Parameters: "--mode textual"; IconFilename: "{app}\edmd.ico"; Tasks: desktopicon; Comment: "Elite Dangerous Monitor Daemon — Textual Terminal UI"
 
 [Run]
 ; Step 1: Clone or update EDMD source using Windows-native git.
@@ -278,7 +280,7 @@ begin
   begin
     if MsgBox(
       'MSYS2 was not found on this computer.' + #13#10 + #13#10 +
-      'EDMD requires MSYS2 (UCRT64) with GTK4 for its graphical interface.' + #13#10 + #13#10 +
+      'EDMD can run as a Textual TUI (no MSYS2 needed) or as a GTK4 GUI (requires MSYS2).' + #13#10 + #13#10 +
       'The installer will now download and install MSYS2 (~100 MB).' + #13#10 +
       'This is a one-time step. MSYS2 is a standard development environment ' +
       'for GTK4 on Windows.' + #13#10 + #13#10 +
@@ -483,8 +485,8 @@ begin
     Script.Add('log "Installing pip packages..."');
     Script.Add('export PATH="${MSYS2_ROOT}/ucrt64/bin:${PATH}"');
     Script.Add('python -m pip install --upgrade pip 2>/dev/null || true');
-    Script.Add('python -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0"');
-    Script.Add('if python -c "import discord_webhook" 2>/dev/null; then');
+    Script.Add('python -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0" "textual>=0.47.0"');
+    Script.Add('if python -c "import discord_webhook, textual" 2>/dev/null; then');
     Script.Add('    log "pip packages installed."');
     Script.Add('else');
     Script.Add('    log "WARNING: pip packages may not have installed correctly."');

@@ -539,11 +539,12 @@ class AssetsPlugin(BasePlugin):
                 bal = cmdr.get("credits")
                 if bal is not None:
                     state.assets_balance = float(bal)
-                sq = profile_data.get("squadron") or {}
+                _cmdr_sq = (profile_data.get("commander") or {}).get("squadron") or {}
+                sq = profile_data.get("squadron") or _cmdr_sq
                 if sq:
                     state.pilot_squadron_name = sq.get("name", "")
-                    state.pilot_squadron_tag  = sq.get("tag", "")
-                    state.pilot_squadron_rank = sq.get("rank", "")
+                    state.pilot_squadron_tag  = sq.get("tag") or sq.get("shortName", "")
+                    state.pilot_squadron_rank = sq.get("rank", "") or sq.get("rankName", "")
                 else:
                     state.pilot_squadron_name = ""
                     state.pilot_squadron_tag  = ""

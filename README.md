@@ -7,7 +7,7 @@
 
 **Real-time session monitoring dashboard for Elite Dangerous**
 
-*Session tracking · Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Fleet assets · CAPI · Discord · GTK4 GUI*
+*Session tracking · Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Fleet assets · CAPI · Discord · GTK4 GUI · Textual TUI*
 
 ---
 
@@ -16,6 +16,7 @@ by **CMDR CALURSUS**
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-informational?style=flat-square)]()
 [![GTK4](https://img.shields.io/badge/GUI-GTK4-4A86CF?style=flat-square&logo=gnome&logoColor=white)]()
+[![TUI](https://img.shields.io/badge/TUI-Textual-1D8348?style=flat-square&logo=python&logoColor=white)](https://github.com/Textualize/textual)
 [![Discord](https://img.shields.io/badge/Discord-Webhook%20Support-5865F2?style=flat-square&logo=discord&logoColor=white)]()
 [![License](https://img.shields.io/badge/License-MIT-brightgreen?style=flat-square)]()
 
@@ -25,7 +26,7 @@ by **CMDR CALURSUS**
 
 ## Overview
 
-EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails your journal and presents a live GTK4 window alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay — whether you're actively playing or running an AFK grind.
+EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails your journal and presents a live dashboard — either a GTK4 window or a Textual terminal UI — alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay — whether you're actively playing or running an AFK grind.
 
 Alerts fire when things go wrong: shields down, hull taking damage, fuel running low, fighter destroyed. Session statistics accumulate across all activity types in a tabbed panel that shows only what's relevant to your current session.
 
@@ -41,6 +42,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🎯 **Mission Stack** | Active massacre mission tracking — stack value, completion status, and full bootstrap on start |
 | 📊 **Session Statistics** | Tabbed activity dashboard — Combat, Trade, Mining, Exploration, Missions, Exobiology, PowerPlay — showing totals and /hr rates for each |
 | 🖥️ **GTK4 GUI** | Live graphical interface with commander, crew, SLF, mission, and session panels |
+| 🖵 **Textual TUI** | Full terminal dashboard — same layout and data as the GTK4 GUI, no GTK4 required. Runs on any machine with Python and a modern terminal. Includes preferences, reports, and theme switching via `ctrl+o` |
 | 🛡️ **Combat Alerts** | Shield drops, hull damage, fighter loss, ship destruction |
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |
 | 🚨 **Security & Cargo Events** | Cargo scans, police scans, security attacks, low-value cargo notices |
@@ -60,6 +62,11 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 <div align="center">
 <img src="images/gui-screenshot.png" alt="EDMD GTK4 GUI" width="900"/>
 <br><em>GTK4 GUI — default theme, live session in progress</em>
+</div>
+
+<div align="center">
+<img src="images/tui-screenshot.png" alt="EDMD Textual TUI" width="900"/>
+<br><em>Textual TUI — same layout, no GTK4 required</em>
 </div>
 
 ---
@@ -108,12 +115,13 @@ bash install.sh          # Linux / macOS
 # Windows: %APPDATA%\EDMD\config.toml
 nano ~/.local/share/EDMD/config.toml
 
-./edmd.py              # terminal mode
-./edmd.py --gui        # GTK4 GUI (Linux)
-./edmd.py -p MyProfile # named config profile
+./edmd.py                    # terminal output only
+./edmd.py --gui               # GTK4 GUI (Linux)
+./edmd.py --mode textual      # Textual TUI (cross-platform, no GTK4)
+./edmd.py -p MyProfile        # named config profile
 ```
 
-**Windows:** Download `EDMD-Setup-{version}.exe` from [Releases](https://github.com/drworman/EDMD/releases/latest) — the installer handles everything. Run `EDMD.exe --upgrade` to update.
+**Windows:** Download `EDMD-Setup-{version}.exe` from [Releases](https://github.com/drworman/EDMD/releases/latest) — the installer handles everything. Download a new release to update.
 
 ---
 

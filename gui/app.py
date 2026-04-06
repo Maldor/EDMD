@@ -4,9 +4,11 @@ gui/app.py — GTK4 dashboard window for Elite Dangerous Monitor Daemon.
 Canvas sizing: connects to notify::width and notify::height on the canvas so
 we always know the true available pixel dimensions after each layout pass.
 
-Reflow: if the canvas shrinks below what the saved layout needs, blocks are
-scaled down proportionally. When the canvas grows back to full size, blocks
-return to their saved grid positions.
+Reflow: layout is treated as immutable during normal runtime — blocks are only
+repositioned on startup or when the user explicitly resets the layout.  A
+debounced resize handler coalesces burst signals into a single reflow call.
+The _reflow_tick fallback timer fires only until the canvas settles, then
+disarms itself permanently to avoid recurring GTK scene-graph invalidation.
 """
 
 import signal
@@ -93,10 +95,9 @@ class EdmdWindow(Gtk.ApplicationWindow):
     TICK_MS   = 5000   # Heartbeat: safety net for blocks with no event-driven refresh.
                        # Most blocks update via _poll_queue on data events; this fires
                        # at most once every 5 seconds to catch anything that slipped through.
-    REFLOW_MS = 500    # Canvas size fallback poll — needed for tiling WMs and cases
+    REFLOW_MS = 500    # Canvas size fallback poll — fires only until the canvas settles
+                       # after startup, then disarms.  Handles tiling WMs and the case
                        # where notify::width fires before the scroll widget has realised.
-                       # _apply_canvas_size has an equality guard so this is free when
-                       # the window is stable (no widget thrash, just two size reads).
 
     def __init__(self, app, core, program: str, version: str):
         super().__init__(application=app, title=f"{program} v{version}")
@@ -112,8 +113,10 @@ class EdmdWindow(Gtk.ApplicationWindow):
         self._grid          = BlockGrid(canvas_width=1280, canvas_height=760)
         self._blocks: dict  = {}
         self._is_fullscreen = False
-        self._last_canvas_w = 0
-        self._last_canvas_h = 0
+        self._last_canvas_w  = 0
+        self._last_canvas_h  = 0
+        self._reflow_armed   = True   # True until canvas settles; _reflow_tick disarms itself.
+        self._reflow_pending = False  # True while a debounced reflow is queued.
 
         # Dirty-tracking: only refresh blocks that have received a data change.
         # The tick is a heartbeat safety net — not the primary refresh driver.
@@ -237,12 +240,22 @@ class EdmdWindow(Gtk.ApplicationWindow):
             self._apply_canvas_size(w, h)
 
     def _reflow_tick(self) -> bool:
-        """Fallback poll every REFLOW_MS — catches tiling WM resizes and the common
-        startup case where notify::width fires before the scroll widget has realised
-        (get_width() returns 0, and the later real-size signal never re-fires).
-        _apply_canvas_size has an equality guard so this is a no-op when stable."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
-        return True
+        """Startup fallback — fires every REFLOW_MS until the canvas has a real size,
+        then disarms permanently.  Handles tiling WMs and the startup race where
+        notify::width fires before the scroll widget has realised (get_width()
+        returns 0 and the later real-size signal never re-fires).
+        Once _last_canvas_w > 0 the notify signals take over; this never fires again.
+        """
+        if not self._reflow_armed:
+            return False  # disarmed — stop the repeating timer
+        w = self._scroll.get_width()
+        h = self._scroll.get_height()
+        if w > 0 and h > 0:
+            self._apply_canvas_size(w, h)
+            if self._last_canvas_w > 0:
+                self._reflow_armed = False   # canvas has settled — disarm
+                return False
+        return True  # still waiting for a valid size
 
     def _poll_canvas_size(self) -> bool:
         """One-shot after realize settle."""
@@ -250,18 +263,29 @@ class EdmdWindow(Gtk.ApplicationWindow):
         return False
 
     def _apply_canvas_size(self, w: int, h: int) -> None:
-        """Apply both dimensions — only reflows if something actually changed."""
+        """Apply both dimensions — only reflows if something actually changed.
+
+        Debounced: rapid resize signals (e.g. from dragging a window edge) are
+        coalesced into a single reflow 150ms after the last event, preventing
+        GTK from invalidating the scene graph on every intermediate pixel.
+        """
         if w < 100 or h < 50:
             return
-        w_changed = (w != self._last_canvas_w)
-        h_changed = (h != self._last_canvas_h)
-        if not w_changed and not h_changed:
+        if w == self._last_canvas_w and h == self._last_canvas_h:
             return
         self._last_canvas_w = w
         self._last_canvas_h = h
         self._grid.update_canvas_width(w)
         self._grid.update_canvas_height(h)
+        if not self._reflow_pending:
+            self._reflow_pending = True
+            GLib.timeout_add(150, self._do_reflow)
+
+    def _do_reflow(self) -> bool:
+        """Deferred reflow — called once 150ms after the last resize event."""
+        self._reflow_pending = False
         self._replace_all_blocks()
+        return False  # one-shot
 
     # ── Block construction & placement ────────────────────────────────────────
 
@@ -477,9 +501,9 @@ class EdmdApp(Gtk.Application):
         self._core    = core
         self._program = program
         self._version = version
-        self._theme       = core.cfg.gui_cfg.get("Theme",      "default")
-        self._font_size   = core.cfg.gui_cfg.get("FontSize",   14)
-        self._font_family = core.cfg.gui_cfg.get("FontFamily", "JetBrains Mono")
+        self._theme       = core.cfg.ui_cfg.get("Theme",      "default")
+        self._font_size   = core.cfg.ui_cfg.get("FontSize",   14)
+        self._font_family = core.cfg.ui_cfg.get("FontFamily", "JetBrains Mono")
 
     def do_activate(self) -> None:
         # Switch GTK theme to "Default" (minimal, no Adwaita CSD graphics)

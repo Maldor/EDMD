@@ -104,7 +104,7 @@ echo.
 
 echo  [3/3] Installing discord-webhook and cryptography...
 echo.
-"%PYTHON%" -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0"
+"%PYTHON%" -m pip install "discord-webhook>=1.3.0" "cryptography>=41.0.0" "textual>=0.47.0"
 if %ERRORLEVEL% neq 0 (
     echo.
     echo  ERROR: pip install failed (exit code %ERRORLEVEL%).

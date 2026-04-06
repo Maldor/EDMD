@@ -7,6 +7,7 @@ Does not import from emit, journal, or gui.
 """
 
 import sys
+import re
 import tomllib
 from pathlib import Path
 
@@ -22,6 +23,172 @@ class _T:
     END  = "\x1b[0m"
 
 _WARNING = f"{_T.WARN}Warning:{_T.END}"
+
+
+import re
+
+# ── Canonical TOML format ─────────────────────────────────────────────────────
+
+# Top-level config sections that are written as flat [Section] tables.
+# Anything not in this set is treated as a profile and written under a single
+# [ProfileName] header with dotted sub-keys (Settings.Key = ..., UI.Mode = ...).
+# A [ProfileName.SubSection] sub-table header is NEVER written — that is the
+# old format that this migration is designed to eliminate.
+STANDARD_SECTIONS: frozenset[str] = frozenset({
+    "Settings", "Discord", "LogLevels", "UI",
+    "EDDN", "EDSM", "EDAstro", "Inara", "CAPI",
+})
+
+# Matches any TOML section header that indicates old-format content:
+#   [GUI]               — old interface section name
+#   [ProfileName.Sub]   — old profile sub-table style
+_NEEDS_MIGRATION = re.compile(r'^\[(?:GUI|\w+\.\w+)\]', re.MULTILINE)
+
+
+def _scalar(v) -> str:
+    """Format a Python value as a TOML literal."""
+    if isinstance(v, bool):  return "true" if v else "false"
+    if isinstance(v, int):   return str(v)
+    if isinstance(v, float): return str(v)
+    escaped = str(v).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def config_to_toml(d: dict) -> str:
+    """Serialise a config dict to canonical TOML.
+
+    Rules:
+      • Standard sections (Settings, Discord, UI, LogLevels, EDDN, EDSM,
+        EDAstro, Inara, CAPI) are written as flat [Section] tables.
+      • Profile sections (EDP1, REMOTE, anything else) are written as a
+        single [ProfileName] table whose sub-section keys use dotted notation:
+            [EDP1]
+            Settings.JournalFolder = "..."
+            UI.Mode = "gtk4"
+        The old [EDP1.Settings] / [EDP1.UI] sub-table style is NEVER produced.
+
+    This is the single authoritative writer for config.toml.  Both
+    gui/preferences.py and tui/preferences.py import and use this function.
+    """
+    lines: list[str] = []
+
+    # ── Top-level bare scalars (rare) ─────────────────────────────────────────
+    for k, v in d.items():
+        if not isinstance(v, dict):
+            lines.append(f"{k} = {_scalar(v)}")
+
+    # ── Standard flat sections ────────────────────────────────────────────────
+    for section, val in d.items():
+        if not isinstance(val, dict) or section not in STANDARD_SECTIONS:
+            continue
+        lines += ["", f"[{section}]"]
+        for k, v in val.items():
+            if not isinstance(v, dict):
+                lines.append(f"{k} = {_scalar(v)}")
+
+    # ── Profile sections — single header, dotted sub-keys ─────────────────────
+    for section, val in d.items():
+        if not isinstance(val, dict) or section in STANDARD_SECTIONS:
+            continue
+        lines += ["", f"[{section}]"]
+        # Root-level scalars within the profile (QuitOnLowFuel, _adv_session_mgmt …)
+        for k, v in val.items():
+            if not isinstance(v, dict):
+                lines.append(f"{k} = {_scalar(v)}")
+        # Sub-section keys written as dotted pairs (never as [Profile.Sub] headers)
+        for sub, sub_val in val.items():
+            if not isinstance(sub_val, dict):
+                continue
+            for k, v in sub_val.items():
+                if not isinstance(v, dict):
+                    lines.append(f"{sub}.{k} = {_scalar(v)}")
+
+    return "\n".join(lines) + "\n"
+
+
+# ── Startup migration ─────────────────────────────────────────────────────────
+
+def _apply_gui_to_ui(gui_dict: dict) -> dict:
+    """Convert a [GUI] / profile GUI sub-dict to [UI] representation.
+
+        Enabled = true   →  Mode = "gtk4"
+        Enabled = false  →  Mode = "terminal"
+        (absent)         →  Mode unchanged / not added
+        All other keys   →  kept as-is (Theme, FontFamily, FontSize, …)
+    """
+    src = dict(gui_dict)
+    enabled = src.pop("Enabled", None)
+    result: dict = {}
+    if enabled is True:
+        result["Mode"] = "gtk4"
+    elif enabled is False:
+        result["Mode"] = "terminal"
+    result.update(src)
+    return result
+
+
+def migrate_config_if_needed(config_path: Path) -> bool:
+    """Detect old config formats and silently rewrite to canonical format.
+
+    Handles all of:
+      • [GUI] global section  →  [UI]  (Enabled= → Mode=)
+      • [ProfileName.GUI] sub-table  →  ProfileName.UI.*  (dotted key)
+      • ProfileName.GUI.Enabled = true in a profile block  →  UI.Mode = "gtk4"
+      • [ProfileName.Section] sub-table headers  →  [ProfileName] + dotted keys
+
+    Detection uses a raw-text regex so clean canonical files are never touched.
+    Returns True if the file was rewritten, False if no migration was needed.
+
+    MUST be called before load_config_file() in edmd.py.
+    """
+    try:
+        raw = config_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+    if not _NEEDS_MIGRATION.search(raw):
+        return False   # already canonical — nothing to do
+
+    # File needs migration: parse it, transform, rewrite
+    try:
+        with open(config_path, "rb") as _f:
+            d = tomllib.load(_f)
+    except Exception:
+        return False   # parse errors handled by load_config_file later
+
+    changed = False
+
+    # 1. Global [GUI] → [UI]
+    if "GUI" in d:
+        existing_ui = dict(d.get("UI") or {})
+        migrated = _apply_gui_to_ui(d.pop("GUI"))
+        # Migrated values fill gaps; they never overwrite an explicit [UI] key
+        for k, v in migrated.items():
+            existing_ui.setdefault(k, v)
+        d["UI"] = existing_ui
+        changed = True
+
+    # 2. Profile-level GUI sub-dicts
+    for key, val in d.items():
+        if not isinstance(val, dict) or key in STANDARD_SECTIONS:
+            continue
+        if "GUI" in val:
+            existing_ui = dict(val.get("UI") or {})
+            migrated = _apply_gui_to_ui(val.pop("GUI"))
+            for k, v in migrated.items():
+                existing_ui.setdefault(k, v)
+            val["UI"] = existing_ui
+            changed = True
+
+    # 3. Rewrite in canonical format (fixes [ProfileName.Section] sub-tables
+    #    even if no GUI key was present — the regex already confirmed this file
+    #    has at least one [X.Y] header that needs collapsing)
+    try:
+        config_path.write_text(config_to_toml(d), encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"{_WARNING} Config migration failed — file unchanged: {e}")
+        return False
 
 
 # ── Config defaults ───────────────────────────────────────────────────────────
@@ -46,12 +213,12 @@ CFG_DEFAULTS_EXTRA = {
     "FullStackSize":      20,
 }
 
-CFG_DEFAULTS_GUI = {
-    "Enabled":          False,
+CFG_DEFAULTS_UI = {
+    "Mode":             "terminal",  # terminal | textual | gtk4
     "Theme":            "default",
     "FontSize":         14,
     "FontFamily":       "JetBrains Mono",
-    "SoftwareRenderer": False,   # set True if EDMD causes compositor starvation on Linux
+    "SoftwareRenderer": False,       # set True if EDMD causes compositor starvation on Linux
 }
 
 CFG_DEFAULTS_DISCORD = {
@@ -256,7 +423,7 @@ class ConfigManager:
         self.app_settings  = {}
         self.discord_cfg   = {}
         self.notify_levels = {}
-        self.gui_cfg       = {}
+        self.ui_cfg        = {}
         self.capi_cfg      = {}
         self._resolve_all(warn=True)
 
@@ -267,7 +434,7 @@ class ConfigManager:
         )
         self.discord_cfg   = self.load_setting("Discord",   CFG_DEFAULTS_DISCORD,  warn)
         self.notify_levels = self.load_setting("LogLevels", CFG_DEFAULTS_NOTIFY,   warn)
-        self.gui_cfg       = self.load_setting("GUI",       CFG_DEFAULTS_GUI,      False)
+        self.ui_cfg        = self.load_setting("UI",        CFG_DEFAULTS_UI,       False)
         self.eddn_cfg      = self.load_setting("EDDN",      CFG_DEFAULTS_EDDN,     False)
         self.edsm_cfg      = self.load_setting("EDSM",      CFG_DEFAULTS_EDSM,     False)
         self.edastro_cfg   = self.load_setting("EDAstro",   CFG_DEFAULTS_EDASTRO,  False)

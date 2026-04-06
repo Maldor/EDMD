@@ -265,7 +265,7 @@ class EdmdMenuBar:
 
     def _show_about_dialog(self) -> None:
         from gui.helpers import avatar_path_for_theme
-        theme = self._win._core.cfg.gui_cfg.get("Theme", "default")
+        theme = self._win._core.cfg.ui_cfg.get("Theme", "default")
 
         dlg = Gtk.Window(title="About EDMD")
         dlg.set_transient_for(self._win)

@@ -127,21 +127,20 @@ PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay on
 # Launch the GTK4 graphical interface alongside terminal output.
 # Requires PyGObject: pacman -S python-gobject gtk4
 #
-[GUI]
-Enabled    = false             # set true, or use --gui flag at launch
+[UI]
+Mode       = "terminal"        # terminal (default) | textual | gtk4
+                               # CLI: --mode terminal|textual|gtk4  or  --gui (alias for gtk4)
 Theme      = "default"         # palette filename in themes/ without .css extension
+                               # built-in: "default", "default-dark",
+                               #           "default-light", "default-blue",
+                               #           "default-green", "default-purple",
+                               #           "default-red", "default-yellow"
+                               # custom:   "custom/mytheme"
+                               #           (copy themes/custom/my-theme.css to start)
 FontFamily = "JetBrains Mono"  # any installed monospace font; leave blank for system default
 FontSize   = 14                # base font size in px (10–24); all em-relative sizes scale with it
-SoftwareRenderer = false       # set true if EDMD causes other apps to freeze or flicker
-                               # on Linux (compositor starvation). Switches GTK4 from the
-                               # default GL renderer to Cairo (CPU-side). No visual cost
-                               # for a status-display app. Ignored on Windows.
-                            # built-in: "default", "default-dark",
-                            #           "default-light", "default-blue",
-                            #           "default-green", "default-purple",
-                            #           "default-red", "default-yellow"
-                            # custom:   "custom/mytheme"
-                            #           (copy themes/custom/my-theme.css to start)
+SoftwareRenderer = false       # set true if EDMD causes compositor starvation on Linux
+                               # Switches GTK4 renderer to Cairo (CPU-side). Ignored on Windows.
 
 
 # ==============================================================================
@@ -182,8 +181,8 @@ Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webho
 
 [REMOTE]
 Settings.JournalFolder = "/home/username/mnt/ed-journals"
-GUI.Enabled            = true
-GUI.Theme              = "default"
+UI.Mode                = "gtk4"
+UI.Theme               = "default"
 Discord.WebhookURL     = ""
 Discord.UserID         = 0
 Discord.Identity       = false

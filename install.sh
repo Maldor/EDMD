@@ -136,7 +136,7 @@ section "Installing pip packages"
 # We check if they are already importable first so we never error
 # on "already satisfied" — which some pip versions treat as success
 # but external-package guards can still block.
-for PKG in "discord-webhook>=1.3.0:discord_webhook" "cryptography>=41.0.0:cryptography"; do
+for PKG in "discord-webhook>=1.3.0:discord_webhook" "cryptography>=41.0.0:cryptography" "textual>=0.47.0:textual"; do
     PKG_SPEC="${PKG%%:*}"   # e.g. "discord-webhook>=1.3.0"
     PKG_IMPORT="${PKG##*:}" # e.g. "discord_webhook"
     PKG_NAME="${PKG_SPEC%%[>=]*}"

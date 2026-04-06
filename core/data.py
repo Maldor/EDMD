@@ -420,13 +420,20 @@ class CAPISource:
         return bool(self._tokens.get("access_token"))
 
     def commander_name(self) -> str | None:
-        return self._tokens.get("cmdr")
+        # Prefer the in-game pilot name from the journal over the Frontier
+        # OAuth account firstname (which is the account holder's real name).
+        pilot = getattr(getattr(self._dp, "_state", None), "pilot_name", None)
+        return pilot or self._tokens.get("cmdr")
 
     def auth_status(self) -> dict:
         t = self._tokens
+        # pilot_name from the game journal is the actual in-game CMDR name.
+        # The stored "cmdr" token field is the Frontier account firstname —
+        # not the same thing.  Prefer pilot_name when available.
+        pilot = getattr(getattr(self._dp, "_state", None), "pilot_name", None)
         return {
             "connected":   bool(t.get("access_token")),
-            "cmdr":        t.get("cmdr"),
+            "cmdr":        pilot or t.get("cmdr"),
             "expiry":      t.get("expiry"),
             "fresh":       time.time() < t.get("expiry", 0) - TOKEN_REFRESH_MARGIN_S,
             "auth_result": self._auth_result,
@@ -783,10 +790,10 @@ class CAPISource:
         if isinstance(raw_permits, list):
             state.capi_permits = raw_permits
 
-        sq = data.get("squadron") or {}
+        sq = data.get("squadron") or cmdr.get("squadron") or {}
         state.pilot_squadron_name = sq.get("name", "")
-        state.pilot_squadron_tag  = sq.get("tag",  "")
-        state.pilot_squadron_rank = sq.get("rank", "")
+        state.pilot_squadron_tag  = sq.get("tag") or sq.get("shortName", "")
+        state.pilot_squadron_rank = sq.get("rank", "") or sq.get("rankName", "")
 
         if ship:
             ship_type   = ship.get("name",          "")
