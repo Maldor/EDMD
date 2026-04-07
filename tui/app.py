@@ -55,6 +55,8 @@ _MSG_DISPATCH: dict[str, list[str]] = {
     "materials_update":   ["block-eng"],
     "alert_update":       ["block-alerts"],
     "pp_update":          ["block-career", "block-commander"],
+    "cmdr_update":        ["block-commander"],
+    "capi_updated":       ["block-commander", "block-crew", "block-assets", "block-cargo"],
 }
 
 _PLUGIN_TO_BLOCK: dict[str, str] = {

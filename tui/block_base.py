@@ -87,10 +87,16 @@ class KVRow(Widget):
         except Exception:
             pass
 
+    def set_key(self, text: str) -> None:
+        try:
+            self.query_one(".key", Label).update(text)
+        except Exception:
+            pass
+
 
 class SepRow(Static):
     """Thin separator line."""
-    DEFAULT_CSS = "SepRow { height: 1; padding: 0 1; }"
+    DEFAULT_CSS = "SepRow { height: 0; padding: 0; }"
 
     def __init__(self, **kw) -> None:
         super().__init__("─" * 40, classes="sep", **kw)
@@ -98,10 +104,39 @@ class SepRow(Static):
 
 class SecHdr(Static):
     """Bold section header label."""
-    DEFAULT_CSS = "SecHdr { height: 1; padding: 0 1; margin-top: 1; }"
+    DEFAULT_CSS = "SecHdr { height: 1; padding: 0 1; margin-top: 0; }"
 
     def __init__(self, title: str, **kw) -> None:
         super().__init__(title.upper(), classes="section-hdr", **kw)
+
+
+class HdrRow(Widget):
+    """Section header fused with its primary value on one row.
+
+    The key is rendered in accent colour (bold) on the left.
+    The value is right-aligned on the right — identical to KVRow but with
+    an accent-styled key.  Eliminates the blank row that SecHdr + KVRow
+    would otherwise consume.
+    """
+
+    DEFAULT_CSS = "HdrRow { height: 1; layout: horizontal; padding: 0 1; }"
+
+    def __init__(self, key: str, value: str = "", **kw) -> None:
+        super().__init__(**kw)
+        self._key_text = key.upper()
+        self._val_text = value
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._key_text, classes="hdr-key")
+        yield Label(self._val_text, id=f"hdrval-{self.id}", classes="val")
+
+    def set_value(self, text: str, classes: str = "val") -> None:
+        try:
+            lbl = self.query_one(f"#hdrval-{self.id}", Label)
+            lbl.update(text)
+            lbl.set_classes(classes)
+        except Exception:
+            pass
 
 
 # ── TuiBlock base ─────────────────────────────────────────────────────────────

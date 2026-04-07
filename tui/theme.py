@@ -94,10 +94,9 @@ TuiBlock > TabbedContent  { height: 1fr; }
     color: $accent;
     text-style: bold;
     padding: 0 1;
-    margin-top: 1;
+    margin-top: 0;
 }
-/* Commander block headers sit flush — no gap above or between them */
-#cmdr-hdr1, #cmdr-hdr2 { margin-top: 0; }
+/* Commander headers are block-title / block-hdr2 — margin handled by class */
 
 .sep {
     color: $border;
@@ -224,6 +223,71 @@ ReportsScreen { align: center middle; }
 .reports-sidebar-btn.-active  { background: $title-bg; color: $accent; text-style: bold; }
 
 #reports-scroll { height: 1fr; }
+
+/* Section header fused with primary value (HdrRow) */
+.hdr-key {
+    color: $accent;
+    text-style: bold;
+    width: 1fr;
+}
+
+/* Block footer strip — use Static labels, not Buttons */
+.footer-lbl {
+    height: 1;
+    padding: 0 1;
+    color: $dim;
+    background: $title-bg;
+}
+.footer-lbl:hover { color: $accent; }
+
+#cargo-footer, #cmdr-footer {
+    height: 1;
+    background: $title-bg;
+}
+
+/* ── Search modal ──────────────────────────────────────────────────────────── */
+SearchModal { align: center middle; }
+
+#search-outer {
+    width: 70%;
+    height: 70%;
+    background: $block-bg;
+    border: solid $accent;
+    padding: 1 2;
+}
+
+#search-title  { width: 100%; }
+#search-hint   { width: 100%; margin-bottom: 1; }
+#search-input  { width: 100%; margin-bottom: 0; }
+#search-status { width: 100%; height: 1; }
+#search-results { height: 1fr; margin-top: 1; }
+
+.search-result-btn {
+    width: 100%;
+    height: 1;
+    border: none;
+    background: $block-bg;
+    color: $fg;
+    padding: 0 1;
+    text-align: left;
+}
+.search-result-btn:hover { background: $title-bg; color: $accent; }
+
+/* Commander: hdr1 has title-bg but NO bottom border — hdr2 supplies that */
+#cmdr-hdr1 { border-bottom: none; }
+
+/* Crew name row: Horizontal with two Labels acting as block title */
+#crew-name-row {
+    height: 1;
+    background: $title-bg;
+    padding: 0 1;
+    layout: horizontal;
+}
+#crew-name-lbl { color: $accent; text-style: bold; width: 1fr; }
+#crew-type-lbl { color: $accent; text-align: right; }
+
+/* Crew rank line: block-title class supplies background + border-bottom */
+#crew-rank-lbl { padding: 0 1; height: 1; }
 
 Footer { color: $dim; background: $bg; }
 Header { color: $accent; background: $bg; text-style: bold; }

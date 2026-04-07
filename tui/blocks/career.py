@@ -3,7 +3,7 @@ from __future__ import annotations
 from textual.app        import ComposeResult
 from textual.widgets    import Label, TabbedContent, TabPane
 from textual.containers import VerticalScroll
-from tui.block_base     import TuiBlock, KVRow, SepRow, _fmt, _fmt_credits
+from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt, _fmt_credits
 
 
 class CareerBlock(TuiBlock):
@@ -11,10 +11,10 @@ class CareerBlock(TuiBlock):
 
     def _compose_body(self) -> ComposeResult:
         with TabbedContent(id="career-tabs"):
-
             with TabPane("Summary", id="career-pane-summary"):
-                with VerticalScroll():
-                    yield Label("[dim]Scanning journals…[/dim]", id="career-summary")
+                with VerticalScroll(id="career-summary-scroll"):
+                    yield Label("[dim]Scanning journals…[/dim]",
+                                id="career-summary-placeholder", classes="dim")
 
             with TabPane("Combat", id="career-pane-combat"):
                 with VerticalScroll():
@@ -23,20 +23,20 @@ class CareerBlock(TuiBlock):
                     yield KVRow("Combat bonds", id="cc-bonds")
                     yield KVRow("Deaths",       id="cc-deaths")
 
-            with TabPane("Exploration", id="career-pane-expl"):
+            with TabPane("Explore", id="career-pane-expl"):
                 with VerticalScroll():
-                    yield KVRow("Systems visited",  id="ce-systems")
-                    yield KVRow("Total jumps",      id="ce-jumps")
-                    yield KVRow("Max distance",     id="ce-dist")
-                    yield KVRow("Planets DSS",      id="ce-dss")
-                    yield KVRow("Cartography",      id="ce-carto")
+                    yield KVRow("Systems visited", id="ce-systems")
+                    yield KVRow("Total jumps",     id="ce-jumps")
+                    yield KVRow("Max distance",    id="ce-dist")
+                    yield KVRow("Planets DSS",     id="ce-dss")
+                    yield KVRow("Cartography",     id="ce-carto")
 
-            with TabPane("Exobiology", id="career-pane-exo"):
+            with TabPane("Exobio", id="career-pane-exo"):
                 with VerticalScroll():
                     yield KVRow("Samples", id="cex-samples")
                     yield KVRow("Sold",    id="cex-sold")
 
-            with TabPane("Mining", id="career-pane-mining"):
+            with TabPane("Mine", id="career-pane-mining"):
                 with VerticalScroll():
                     yield KVRow("Quantity mined", id="cm-qty")
                     yield KVRow("Profit",         id="cm-profit")
@@ -46,16 +46,13 @@ class CareerBlock(TuiBlock):
                     yield KVRow("Profit",  id="ct-profit")
                     yield KVRow("Markets", id="ct-markets")
 
-            with TabPane("PowerPlay", id="career-pane-pp"):
-                with VerticalScroll():
+            with TabPane("PPlay", id="career-pane-pp"):
+                with VerticalScroll(id="career-pp-scroll"):
                     yield KVRow("Merits total", id="cp-merits")
-                    yield Label("",             id="cp-by-system")
 
     def refresh_data(self) -> None:
         hist = self.core._plugins.get("journal_history")
-
         if hist is None or not hist.scan_done.is_set():
-            self._lbl("career-summary", "[dim]Scanning journals…[/dim]")
             return
 
         r     = hist.results
@@ -69,62 +66,70 @@ class CareerBlock(TuiBlock):
 
         from core.emit import fmt_duration
 
-        # ── Summary (dynamic sections — kept as single Label) ──────────────────
-        time_s  = expl.get("Time_Played", 0)
-        summary = []
-        if time_s:
-            summary.append(f"[dim]Time played[/dim]  {fmt_duration(int(time_s))}")
+        # ── Summary tab: SecHdr + individual KVRows, no blank gaps ───────────
+        try:
+            scroll = self.query_one("#career-summary-scroll", VerticalScroll)
+            scroll.remove_children()
+            rows: list = []
 
-        kills = cmb.get("Bounties_Claimed", 0)
-        bp    = cmb.get("Bounty_Hunting_Profit", 0)
-        if kills or bp:
-            summary += ["", "[bold]COMBAT[/bold]",
-                        f"  [dim]Kills[/dim]    {_fmt(kills)}  "
-                        f"[dim]|[/dim]  {_fmt_credits(bp)}"]
+            time_s = expl.get("Time_Played", 0)
+            if time_s:
+                rows.append(KVRow("Time played", fmt_duration(int(time_s))))
 
-        sys_vis = expl.get("Systems_Visited", 0)
-        ep      = expl.get("Exploration_Profits", 0)
-        if sys_vis or ep:
-            summary += ["", "[bold]EXPLORATION[/bold]",
-                        f"  [dim]Systems[/dim]  {_fmt(sys_vis)}  "
-                        f"[dim]|[/dim]  {_fmt_credits(ep)}"]
+            kills = cmb.get("Bounties_Claimed", 0)
+            bp    = cmb.get("Bounty_Hunting_Profit", 0)
+            if kills or bp:
+                rows.append(SecHdr("Combat"))
+                rows.append(KVRow("Kills",    _fmt(kills)))
+                rows.append(KVRow("Bounties", _fmt_credits(bp)))
 
-        samples = exo.get("Organic_Data", 0)
-        exo_p   = exo.get("Organic_Data_Profits", 0)
-        if samples or exo_p:
-            summary += ["", "[bold]EXOBIOLOGY[/bold]",
-                        f"  [dim]Samples[/dim]  {_fmt(samples)}  "
-                        f"[dim]|[/dim]  {_fmt_credits(exo_p)}"]
+            sys_vis = expl.get("Systems_Visited", 0)
+            ep      = expl.get("Exploration_Profits", 0)
+            if sys_vis or ep:
+                rows.append(SecHdr("Exploration"))
+                rows.append(KVRow("Systems",      _fmt(sys_vis)))
+                rows.append(KVRow("Cartography",  _fmt_credits(ep)))
 
-        mined  = mine.get("Quantity_Mined", 0)
-        mine_p = mine.get("Mining_Profits", 0)
-        if mined or mine_p:
-            summary += ["", "[bold]MINING[/bold]",
-                        f"  [dim]Mined[/dim]    {_fmt(mined)} t  "
-                        f"[dim]|[/dim]  {_fmt_credits(mine_p)}"]
+            samples = exo.get("Organic_Data", 0)
+            exo_p   = exo.get("Organic_Data_Profits", 0)
+            if samples or exo_p:
+                rows.append(SecHdr("Exobiology"))
+                rows.append(KVRow("Samples", _fmt(samples)))
+                rows.append(KVRow("Sold",    _fmt_credits(exo_p)))
 
-        trd_p = trd.get("Market_Profits", 0)
-        if trd_p:
-            summary += ["", "[bold]TRADE[/bold]",
-                        f"  [dim]Profit[/dim]   {_fmt_credits(trd_p)}"]
+            mined  = mine.get("Quantity_Mined", 0)
+            mine_p = mine.get("Mining_Profits", 0)
+            if mined or mine_p:
+                rows.append(SecHdr("Mining"))
+                rows.append(KVRow("Mined",  f"{_fmt(mined)} t" if mined else "—"))
+                rows.append(KVRow("Profit", _fmt_credits(mine_p)))
 
-        live_merits = getattr(self.core.state, "pp_merits_total", None)
-        pp_total    = live_merits if live_merits else pp.get("total_merits", 0)
-        power       = getattr(self.core.state, "pp_power", None)
-        if pp_total and power:
-            summary += ["", "[bold]POWERPLAY[/bold]",
-                        f"  [dim]Merits[/dim]   {_fmt(pp_total)}"]
+            trd_p = trd.get("Market_Profits", 0)
+            if trd_p:
+                rows.append(SecHdr("Trade"))
+                rows.append(KVRow("Profit",  _fmt_credits(trd_p)))
+                rows.append(KVRow("Markets", _fmt(trd.get("Markets_Traded_With", 0))))
 
-        self._lbl("career-summary",
-                  "\n".join(summary) or "[dim]No career data[/dim]")
+            live_merits = getattr(self.core.state, "pp_merits_total", None)
+            pp_total    = live_merits if live_merits else pp.get("total_merits", 0)
+            power       = getattr(self.core.state, "pp_power", None)
+            if pp_total and power:
+                rows.append(SecHdr("PowerPlay"))
+                rows.append(KVRow("Merits", _fmt(pp_total)))
 
-        # ── Combat ────────────────────────────────────────────────────────────
+            if not rows:
+                rows.append(Label("[dim]No career data[/dim]", classes="dim"))
+            scroll.mount(*rows)
+        except Exception:
+            pass
+
+        # ── Combat tab ────────────────────────────────────────────────────────
         self._kv("cc-kills",    _fmt(cmb.get("Bounties_Claimed")))
         self._kv("cc-bounties", _fmt_credits(cmb.get("Bounty_Hunting_Profit")))
         self._kv("cc-bonds",    _fmt_credits(cmb.get("Combat_Bond_Profits")))
         self._kv("cc-deaths",   _fmt(cmb.get("Deaths")))
 
-        # ── Exploration ───────────────────────────────────────────────────────
+        # ── Exploration tab ───────────────────────────────────────────────────
         self._kv("ce-systems", _fmt(expl.get("Systems_Visited")))
         self._kv("ce-jumps",   _fmt(expl.get("Total_Hyperdrive_Jumps")))
         dist = expl.get("Greatest_Distance_From_Start", 0)
@@ -132,38 +137,37 @@ class CareerBlock(TuiBlock):
         self._kv("ce-dss",     _fmt(expl.get("Planets_Scanned_To_Level_3")))
         self._kv("ce-carto",   _fmt_credits(expl.get("Exploration_Profits")))
 
-        # ── Exobiology ────────────────────────────────────────────────────────
+        # ── Exobiology tab ────────────────────────────────────────────────────
         self._kv("cex-samples", _fmt(exo.get("Organic_Data")))
         self._kv("cex-sold",    _fmt_credits(exo.get("Organic_Data_Profits")))
 
-        # ── Mining ────────────────────────────────────────────────────────────
+        # ── Mining tab ────────────────────────────────────────────────────────
         mined_qty = mine.get("Quantity_Mined", 0)
         self._kv("cm-qty",    f"{_fmt(mined_qty)} t" if mined_qty else "—")
         self._kv("cm-profit", _fmt_credits(mine.get("Mining_Profits")))
 
-        # ── Trade ─────────────────────────────────────────────────────────────
+        # ── Trade tab ─────────────────────────────────────────────────────────
         self._kv("ct-profit",  _fmt_credits(trd.get("Market_Profits")))
         self._kv("ct-markets", _fmt(trd.get("Markets_Traded_With")))
 
-        # ── PowerPlay ─────────────────────────────────────────────────────────
+        # ── PowerPlay tab ─────────────────────────────────────────────────────
+        live_merits = getattr(self.core.state, "pp_merits_total", None)
+        pp_total    = live_merits if live_merits else pp.get("total_merits", 0)
         self._kv("cp-merits", _fmt(pp_total) if pp_total else "—")
         by_sys = pp.get("by_system", {})
         if by_sys:
-            lines = ["", "[bold]BY SYSTEM[/bold]"]
-            for sys_name, merits in sorted(by_sys.items(), key=lambda x: -x[1]):
-                lines.append(f"  [dim]{sys_name}[/dim]  {_fmt(merits)}")
-            self._lbl("cp-by-system", "\n".join(lines))
-        else:
-            self._lbl("cp-by-system", "")
+            try:
+                scroll = self.query_one("#career-pp-scroll", VerticalScroll)
+                for w in list(scroll.query(KVRow)):
+                    if str(w.id) != "cp-merits":
+                        w.remove()
+                for sys_name, merits in sorted(by_sys.items(), key=lambda x: -x[1]):
+                    scroll.mount(KVRow(sys_name, _fmt(merits)))
+            except Exception:
+                pass
 
     def _kv(self, wid: str, text: str, classes: str = "val") -> None:
         try:
             self.query_one(f"#{wid}", KVRow).set_value(text, classes)
-        except Exception:
-            pass
-
-    def _lbl(self, wid: str, text: str) -> None:
-        try:
-            self.query_one(f"#{wid}", Label).update(text)
         except Exception:
             pass

@@ -549,6 +549,10 @@ class AssetsPlugin(BasePlugin):
                     state.pilot_squadron_name = ""
                     state.pilot_squadron_tag  = ""
                     state.pilot_squadron_rank = ""
+                gq = self.core.gui_queue if self.core else None
+                if gq:
+                    try: gq.put_nowait(("plugin_refresh", "commander"))
+                    except Exception: pass
 
                 # NOTE: CAPI launchBays reports wrong fighter type — not used.
         except Exception:

@@ -3,20 +3,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from textual.app       import ComposeResult
 from textual.widgets   import Label
-from textual.containers import VerticalScroll
-from tui.block_base    import TuiBlock, KVRow, SepRow, _health_cls, _fmt_credits
+from textual.containers import VerticalScroll, Horizontal
+from tui.block_base    import TuiBlock, KVRow, _health_cls, _fmt_credits
 from gui.helpers       import hull_css, fmt_crew_active, PP_RANK_NAMES
 
 
 class CrewSlfBlock(TuiBlock):
     BLOCK_TITLE = "CREW / SLF"
 
-    def _compose_body(self) -> ComposeResult:
-        yield Label("", id="crew-hdr1", classes="section-hdr")
-        yield Label("", id="crew-hdr2", classes="dim")
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="crew-name-row"):
+            yield Label("", id="crew-name-lbl")
+            yield Label("", id="crew-type-lbl")
+        yield Label("", id="crew-rank-lbl", classes="block-title")
         with VerticalScroll():
             yield KVRow("SLF",    id="kv-slf")
-            yield SepRow()
             yield KVRow("Hired",  id="kv-hired")
             yield KVRow("Active", id="kv-active")
             yield KVRow("Paid",   id="kv-paid")
@@ -24,14 +25,18 @@ class CrewSlfBlock(TuiBlock):
     def refresh_data(self) -> None:
         s        = self.state
         has_crew = bool(s.crew_name) and s.crew_active
-        # Always keep the block visible — hiding it collapses the allocated 18%
-        # in the fixed TUI layout, leaving a blank gap.  Show a placeholder instead.
+
         if not has_crew:
-            self._lbl("crew-hdr1", "No NPC crew")
-            self._lbl("crew-hdr2", "")
+            self._lbl("crew-name-lbl", "No NPC crew")
+            self._lbl("crew-type-lbl", "")
+            self._lbl("crew-rank-lbl", "")
+            self._kv("kv-slf",    "—")
+            self._kv("kv-hired",  "—")
+            self._kv("kv-active", "—")
+            self._kv("kv-paid",   "—")
             return
 
-        # ── Header ────────────────────────────────────────────────────────────
+        # ── Header: CREW: <name> (left)  <SLF type> (right) ─────────────────
         slf_full = s.slf_type or ""
         if "(" in slf_full and slf_full.endswith(")"):
             paren       = slf_full.index("(")
@@ -41,17 +46,18 @@ class CrewSlfBlock(TuiBlock):
             slf_base    = slf_full
             slf_variant = ""
 
-        hdr = f"CREW: {s.crew_name or 'NPC'}"
+        crew_label = f"CREW: {s.crew_name or 'NPC'}"
         if s.cmdr_in_slf:
-            hdr += f"  [IN {s.pilot_ship or 'FIGHTER'}]"
-        self._lbl("crew-hdr1", f"{hdr}  {slf_base}" if slf_base else hdr)
+            crew_label += "  [IN FIGHTER]"
+        self._lbl("crew-name-lbl", crew_label)
+        self._lbl("crew-type-lbl", slf_base)
 
         rank_str = ""
         if s.crew_rank is not None and 0 <= s.crew_rank < len(PP_RANK_NAMES):
             rank_str = f"Combat Rank: {PP_RANK_NAMES[s.crew_rank]}"
             if slf_variant:
                 rank_str += f"  ({slf_variant})"
-        self._lbl("crew-hdr2", rank_str)
+        self._lbl("crew-rank-lbl", rank_str)
 
         # ── SLF status ────────────────────────────────────────────────────────
         has_bay = s.has_fighter_bay

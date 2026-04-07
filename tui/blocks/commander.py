@@ -1,9 +1,9 @@
 """tui/blocks/commander.py — Commander / ship / location / vitals block."""
 from __future__ import annotations
 from textual.app     import ComposeResult
-from textual.widgets import Label, TabbedContent, TabPane
+from textual.widgets import Label, TabbedContent, TabPane, Static
 from textual.widget  import Widget
-from textual.containers import VerticalScroll
+from textual.containers import VerticalScroll, Horizontal
 from tui.block_base  import TuiBlock, KVRow, SepRow, SecHdr, _health_cls, _fmt_credits
 from gui.helpers     import fmt_shield, pp_rank_progress, hull_css
 from core.state      import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD, CAPI_RANK_SKILLS
@@ -12,9 +12,9 @@ from core.state      import FUEL_CRIT_THRESHOLD, FUEL_WARN_THRESHOLD, CAPI_RANK_
 class CommanderBlock(TuiBlock):
     BLOCK_TITLE = "COMMANDER"
 
-    def _compose_body(self) -> ComposeResult:
-        yield Label("", id="cmdr-hdr1", classes="section-hdr")
-        yield Label("", id="cmdr-hdr2", classes="section-hdr")
+    def compose(self) -> ComposeResult:
+        yield Label("", id="cmdr-hdr1", classes="block-title")
+        yield Label("", id="cmdr-hdr2", classes="block-title")
         with TabbedContent(id="cmdr-tabs"):
             with TabPane("Info", id="tab-info"):
                 with VerticalScroll():
@@ -32,6 +32,9 @@ class CommanderBlock(TuiBlock):
             with TabPane("Ranks", id="tab-ranks"):
                 with VerticalScroll(id="ranks-scroll"):
                     yield Label("Awaiting CAPI data…", id="ranks-placeholder", classes="dim")
+        with Horizontal(id="cmdr-footer"):
+            yield Static(">> Set Home", id="cmdr-home-btn", classes="footer-lbl")
+            yield Label("", id="cmdr-home-lbl", classes="dim")
 
     def refresh_data(self) -> None:
         s = self.state
@@ -48,16 +51,16 @@ class CommanderBlock(TuiBlock):
 
         if name:
             if vessel_mode == "on_foot":
-                # CMDR NAME - SUITNAME (SUIT TYPE)
+                # CMDR TESS TEACLE - XBIO (ARTEMIS SUIT)
                 suit_str   = suit_name.upper() if suit_name else "ON FOOT"
                 detail_str = suit_loadout.upper() if suit_loadout else ""
                 hdr1 = (f"CMDR {name} - {detail_str} ({suit_str})"
                         if detail_str else f"CMDR {name} - {suit_str}")
             elif vessel_mode == "srv":
-                # CMDR NAME - SRV  (no extra detail)
+                # CMDR TESS TEACLE - SRV  (no extra detail)
                 hdr1 = f"CMDR {name} - {srv_type.upper() or 'SRV'}"
             else:
-                # CMDR NAME - SHIP NAME - SHIP IDENT (SHIP TYPE)
+                # CMDR TESS TEACLE - CORAX - MXB-10 (MANDALAY)
                 ship_type = (s.pilot_ship or "").upper()
                 parts     = [p.upper() for p in [s.ship_name, s.ship_ident] if p]
                 detail    = " - ".join(parts)
@@ -72,11 +75,11 @@ class CommanderBlock(TuiBlock):
             hdr1 = "COMMANDER"
 
         # Line 2: squadron identity
-        sq_rank = getattr(s, "pilot_squadron_rank", "")
-        sq_name = getattr(s, "pilot_squadron_name", "")
-        sq_tag  = getattr(s, "pilot_squadron_tag",  "")
+        sq_rank = (getattr(s, "pilot_squadron_rank", "") or "").strip()
+        sq_name = (getattr(s, "pilot_squadron_name", "") or "").strip()
+        sq_tag  = (getattr(s, "pilot_squadron_tag",  "") or "").strip()
         if sq_name:
-            tag_part = f"[{sq_tag.upper()}]" if sq_tag else ""
+            tag_part  = f" [{sq_tag.upper()}]" if sq_tag else ""
             rank_part = f"{sq_rank.upper()} - " if sq_rank else ""
             hdr2 = f"{rank_part}{sq_name.upper()}{tag_part}"
         else:
@@ -155,6 +158,12 @@ class CommanderBlock(TuiBlock):
                 if dist is not None:
                     display += f"  |  {dist:,.0f} ly"
                 self._kv("kv-home", display)
+                try:
+                    self.query_one("#cmdr-home-lbl", Label).update(
+                        f"[dim]→ {home['name']}[/dim]"
+                    )
+                except Exception:
+                    pass
             else:
                 self._kv("kv-home", "unknown")
         else:
@@ -204,6 +213,45 @@ class CommanderBlock(TuiBlock):
                 ph.display = True
         except Exception:
             pass
+
+    # ── Footer: home search ───────────────────────────────────────────────────
+
+    def on_click(self, event) -> None:
+        if str(getattr(event.widget, "id", "")) != "cmdr-home-btn":
+            return
+        event.stop()
+        cmdr_plugin = self.core._plugins.get("commander")
+        spansh      = self.core._plugins.get("spansh")
+        if not spansh:
+            return
+
+        def _on_select(result: dict | None) -> None:
+            if not result or not cmdr_plugin:
+                return
+            cmdr_plugin.set_home_location(
+                result.get("name", ""),
+                result.get("system", ""),
+                result.get("star_pos"),
+            )
+            name = result.get("name", "")
+            try:
+                self.query_one("#cmdr-home-lbl", Label).update(
+                    f"[dim]→ {name}[/dim]" if name else ""
+                )
+            except Exception:
+                pass
+
+        from tui.search_modal import SearchModal
+        self.app.push_screen(SearchModal(
+            title        = "Set Home Location",
+            placeholder  = "System or station name…",
+            search_fn    = spansh.search_home,
+            result_label = lambda r: (
+                f"{'🚉' if r.get('is_station') else '⭐'} {r['name']}"
+                + (f"  [dim]{r.get('system', '')}[/dim]" if r.get("is_station") else "")
+            ),
+            callback     = _on_select,
+        ))
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

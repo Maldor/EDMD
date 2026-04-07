@@ -3,7 +3,32 @@ from __future__ import annotations
 from textual.app        import ComposeResult
 from textual.widgets    import Label, TabbedContent, TabPane
 from textual.containers import VerticalScroll
-from tui.block_base     import TuiBlock, KVRow, SecHdr, SepRow
+from tui.block_base     import TuiBlock, KVRow, SecHdr
+
+_ALL_TABS = [
+    ("Summary",  "ss-tab-summary"),
+    ("Combat",   "ss-tab-combat"),
+    ("Exobio",   "ss-tab-exobiology"),
+    ("Explore",  "ss-tab-exploration"),
+    ("Income",   "ss-tab-income"),
+    ("Mine",     "ss-tab-mining"),
+    ("Mission",  "ss-tab-missions"),
+    ("Odyssey",  "ss-tab-odyssey"),
+    ("PPlay",    "ss-tab-powerplay"),
+    ("Trade",    "ss-tab-trade"),
+]
+
+_PROVIDER_TO_PANE: dict[str, str] = {
+    "Combat":      "ss-tab-combat",
+    "Exobiology":  "ss-tab-exobiology",
+    "Exploration": "ss-tab-exploration",
+    "Income":      "ss-tab-income",
+    "Mining":      "ss-tab-mining",
+    "Missions":    "ss-tab-missions",
+    "Odyssey":     "ss-tab-odyssey",
+    "PowerPlay":   "ss-tab-powerplay",
+    "Trade":       "ss-tab-trade",
+}
 
 
 class SessionStatsBlock(TuiBlock):
@@ -11,8 +36,9 @@ class SessionStatsBlock(TuiBlock):
 
     def _compose_body(self) -> ComposeResult:
         with TabbedContent(id="ss-tabs"):
-            with TabPane("Summary", id="ss-tab-summary"):
-                yield VerticalScroll(id="ss-summary-scroll")
+            for title, pane_id in _ALL_TABS:
+                with TabPane(title, id=pane_id):
+                    yield VerticalScroll(id=f"{pane_id}-scroll")
 
     def refresh_data(self) -> None:
         core      = self.core
@@ -20,66 +46,55 @@ class SessionStatsBlock(TuiBlock):
         plugin    = core._plugins.get("session_stats")
         dur_s     = plugin.session_duration_seconds() if plugin else 0.0
 
-        try:
-            scroll = self.query_one("#ss-summary-scroll", VerticalScroll)
-        except Exception:
-            return
-        scroll.remove_children()
-
-        rows: list = []
+        # ── Summary: SecHdr per active provider + all its rows ────────────────
+        summary: list = []
         if dur_s > 0:
-            rows.append(KVRow("Duration", self.fmt_duration(dur_s)))
-
+            summary.append(KVRow("Duration", self.fmt_duration(dur_s)))
         for p in providers:
             if not hasattr(p, "get_summary_rows") or not p.has_activity():
                 continue
             title = getattr(p, "ACTIVITY_TAB_TITLE", "")
+            rows  = self._build_kv_rows(p.get_summary_rows())
+            if not rows:
+                continue
             if title:
-                rows.append(SecHdr(title))
-            for row in p.get_summary_rows():
-                lbl  = row.get("label", "")
-                val  = row.get("value", "—")
-                rate = row.get("rate")
-                if lbl.startswith("─"):
-                    rows.append(SepRow())
-                elif rate:
-                    rows.append(KVRow(lbl, f"{val}  [dim]{rate}[/dim]"))
-                else:
-                    rows.append(KVRow(lbl, val))
+                summary.append(SecHdr(title))
+            summary.extend(rows)
+        if not summary:
+            summary.append(Label("[dim]No session data[/dim]", classes="dim"))
+        self._repopulate("ss-tab-summary", summary)
 
-        if not rows:
-            rows.append(Label("[dim]No session data[/dim]", classes="dim"))
-        scroll.mount(*rows)
-
-        self._rebuild_activity_tabs(providers)
-
-    def _rebuild_activity_tabs(self, providers) -> None:
-        tabs = self.query_one("#ss-tabs", TabbedContent)
-        for pane in list(tabs.query(TabPane)):
-            if str(pane.id) != "ss-tab-summary":
-                pane.remove()
-
+        # ── Per-provider detail tabs ──────────────────────────────────────────
+        active: set[str] = set()
         for p in providers:
             if not hasattr(p, "get_tab_rows") or not p.has_activity():
                 continue
-            tab_rows = p.get_tab_rows()
-            if not tab_rows:
+            title   = getattr(p, "ACTIVITY_TAB_TITLE", "")
+            pane_id = _PROVIDER_TO_PANE.get(title)
+            if not pane_id:
                 continue
-            title    = getattr(p, "ACTIVITY_TAB_TITLE", "Activity")
-            pane_id  = f"ss-tab-{title.lower().replace(' ', '_')}"
-            kv_rows: list = []
-            for row in tab_rows:
-                lbl  = row.get("label", "")
-                val  = row.get("value", "—")
-                rate = row.get("rate")
-                if lbl.startswith("─"):
-                    kv_rows.append(SepRow())
-                elif rate:
-                    kv_rows.append(KVRow(lbl, f"{val}  [dim]{rate}[/dim]"))
-                else:
-                    kv_rows.append(KVRow(lbl, val))
+            active.add(title)
+            self._repopulate(pane_id, self._build_kv_rows(p.get_tab_rows()))
 
-            # Pass content to TabPane constructor so ContentSwitcher sees a
-            # fully-populated pane the moment add_pane registers it.
-            tab_pane = TabPane(title, VerticalScroll(*kv_rows), id=pane_id)
-            tabs.add_pane(tab_pane)
+        for title, pane_id in _PROVIDER_TO_PANE.items():
+            if title not in active:
+                self._repopulate(pane_id, [])
+
+    def _repopulate(self, pane_id: str, rows: list) -> None:
+        try:
+            scroll = self.query_one(f"#{pane_id}-scroll", VerticalScroll)
+        except Exception:
+            return
+        scroll.remove_children()
+        scroll.mount(*(rows or [Label("[dim]—[/dim]", classes="dim")]))
+
+    def _build_kv_rows(self, raw_rows: list) -> list:
+        out: list = []
+        for row in raw_rows:
+            lbl  = row.get("label", "")
+            val  = row.get("value", "—")
+            rate = row.get("rate")
+            if lbl.startswith("─"):
+                continue
+            out.append(KVRow(lbl, f"{val}  [dim]{rate}[/dim]" if rate else val))
+        return out
