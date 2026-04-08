@@ -74,12 +74,12 @@ class CommanderBlock(TuiBlock):
         else:
             hdr1 = "COMMANDER"
 
-        # Line 2: squadron identity
-        sq_rank = (getattr(s, "pilot_squadron_rank", "") or "").strip()
-        sq_name = (getattr(s, "pilot_squadron_name", "") or "").strip()
-        sq_tag  = (getattr(s, "pilot_squadron_tag",  "") or "").strip()
+        # Line 2: squadron identity — reads same state fields as GTK4 commander block
+        sq_rank = getattr(s, "pilot_squadron_rank", "")
+        sq_name = getattr(s, "pilot_squadron_name", "")
+        sq_tag  = getattr(s, "pilot_squadron_tag",  "")
         if sq_name:
-            tag_part  = f" [{sq_tag.upper()}]" if sq_tag else ""
+            tag_part  = r" \[" + sq_tag.upper() + "]" if sq_tag else ""
             rank_part = f"{sq_rank.upper()} - " if sq_rank else ""
             hdr2 = f"{rank_part}{sq_name.upper()}{tag_part}"
         else:

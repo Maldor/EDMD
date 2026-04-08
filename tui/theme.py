@@ -240,6 +240,14 @@ ReportsScreen { align: center middle; }
 }
 .footer-lbl:hover { color: $accent; }
 
+/* Cargo header: title left, price-source label right — both get block-title bg */
+#cargo-hdr-row {
+    height: 1;
+    layout: horizontal;
+}
+#cargo-title     { width: 1fr; }
+#cargo-price-src { width: auto; text-align: right; }
+
 #cargo-footer, #cmdr-footer {
     height: 1;
     background: $title-bg;

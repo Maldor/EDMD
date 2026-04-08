@@ -3,7 +3,16 @@ from __future__ import annotations
 from textual.app        import ComposeResult
 from textual.widgets    import Label
 from textual.containers import VerticalScroll
-from tui.block_base     import TuiBlock, KVRow, SecHdr, _fmt_credits
+from tui.block_base     import TuiBlock, KVRow, SecHdr
+
+
+def _fmt_rew(v: int) -> str:
+    """Compact reward: 103.3M / 1.2B — no 'cr' suffix, consistent width."""
+    if not v:                          return "—"
+    if v >= 1_000_000_000:             return f"{v/1_000_000_000:.1f}B"
+    if v >= 1_000_000:                 return f"{v/1_000_000:.1f}M"
+    if v >= 1_000:                     return f"{v/1_000:.0f}k"
+    return str(v)
 
 
 def _strip_target_type(raw: str) -> str:
@@ -59,32 +68,34 @@ class MissionsBlock(TuiBlock):
 
         heights      = sorted((v["kill_count"] for v in factions.values()), reverse=True)
         stack_height = heights[0] if heights else 0
-        second_h     = heights[1] if len(heights) > 1 else stack_height
         n_missions   = len(getattr(s, "active_missions", []))
         done         = getattr(s, "missions_complete", 0)
         full_stack   = self.core.app_settings.get("FullStackSize", 20)
 
+        # Column widths (monospace): count = 5, credit = 8
+        # Result:  "  118  |   103.3M"  — | always at same position
+        def _val(count_str: str, reward: int | None = None) -> str:
+            c = f"{count_str:>5}"
+            if reward is not None:
+                return f"{c}  [dim]|  {_fmt_rew(reward):>8}[/dim]"
+            # Pad to same visible width (18) so count column aligns with credit rows
+            return f"{c}[dim]             [/dim]"
+
         rows: list = []
-        rows.append(KVRow("Active", f"{n_missions}/{full_stack}  [dim]{_fmt_credits(total_reward)}[/dim]"))
+        active_str = f"{n_missions}/{full_stack}"
+        rows.append(KVRow("Active", _val(active_str, total_reward)))
         if done > 0:
-            rows.append(KVRow("Redirected", f"{done}/{n_missions}"))
+            rows.append(KVRow("Redirected", _val(f"{done}/{n_missions}")))
         rows.append(SecHdr("By Source Faction"))
 
         for faction in sorted(factions, key=lambda f: -factions[f]["kill_count"]):
             info  = factions[faction]
             kc    = info["kill_count"]
             rew_f = info["reward"]
+            rows.append(KVRow(faction, _val(str(kc), rew_f)))
 
-            delta = stack_height - kc
-            if delta == 0:
-                delta_str = f"Δ{second_h - kc:+d}" if second_h != kc else "★"
-            else:
-                delta_str = f"Δ{-delta:+d}"
-
-            rew_str = f"{rew_f/1_000_000:.1f}M"
-            rows.append(KVRow(faction, f"{kc}  [dim]{rew_str}  {delta_str}[/dim]"))
-
-        rows.append(KVRow("[dim]Stack height[/dim]", str(stack_height)))
+        rows.append(Label("─" * 40, classes="sep"))
+        rows.append(KVRow("[dim]Stack height[/dim]", _val(str(stack_height))))
 
         if len(target_factions) > 1:
             rows.append(Label(f"[yellow]⚠ Mixed targets: {', '.join(sorted(target_factions))}[/yellow]"))

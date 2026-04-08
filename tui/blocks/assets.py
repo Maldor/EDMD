@@ -100,20 +100,32 @@ class AssetsBlock(TuiBlock):
             self._lbl("assets-ships", "[dim]No ship data[/dim]")
             return
 
-        lines: list[str] = []
+        rows: list = []
         for i, ship in enumerate(all_ships):
             if ship is None:
                 continue
-            name  = ship.get("type_display") or ship.get("type", "Unknown")
-            ident = ship.get("name", "")
-            val   = ship.get("value", 0)
-            tag   = "[green]▶ [/green]" if i == 0 else "  "
-            lines.append(
-                f"{tag}[bold]{name}[/bold]"
-                + (f"  [dim]{ident}[/dim]" if ident else "")
-                + f"  {_fmt_credits(val)}"
-            )
-        self._lbl("assets-ships", "\n".join(lines) or "[dim]No ships[/dim]")
+            name    = ship.get("type_display") or ship.get("type", "Unknown")
+            ident   = ship.get("name", "")
+            station = ship.get("station") or ""
+            system  = ship.get("system")  or ""
+            tag     = "[green]▶[/green] " if i == 0 else "  "
+            label   = f"{tag}[bold]{name}[/bold]" + (f"  [dim]{ident}[/dim]" if ident else "")
+            if station and system and station != system:
+                loc = f"{station}  ({system})"
+            elif system:
+                loc = system
+            else:
+                loc = "—"
+            rows.append(KVRow(label, f"[dim]{loc}[/dim]"))
+        if rows:
+            try:
+                scroll = self.query_one("#assets-tab-ships > VerticalScroll")
+                scroll.remove_children()
+                scroll.mount(*rows)
+                return
+            except Exception:
+                pass
+        self._lbl("assets-ships", "[dim]No ships[/dim]")
 
     def _refresh_modules(self) -> None:
         modules = getattr(self.state, "assets_stored_modules", [])
@@ -126,10 +138,14 @@ class AssetsBlock(TuiBlock):
             sys = m.get("system") or "Unknown"
             by_system.setdefault(sys, []).append(m)
 
-        lines: list[str] = []
-        for sys in sorted(by_system):
-            lines.append(f"[bold]{sys.upper()}[/bold]")
-            for m in sorted(by_system[sys],
+        try:
+            scroll = self.query_one("#assets-tab-modules > VerticalScroll")
+        except Exception:
+            scroll = None
+        mod_rows: list = []
+        for sys_name in sorted(by_system):
+            mod_rows.append(SecHdr(sys_name))
+            for m in sorted(by_system[sys_name],
                             key=lambda x: x.get("name_display", "").lower()):
                 name = m.get("name_display") or m.get("name_internal", "Unknown")
                 val  = m.get("value", 0)
@@ -137,10 +153,15 @@ class AssetsBlock(TuiBlock):
                 bp   = eng.get("BlueprintName", "")
                 lv   = eng.get("Level")
                 hot  = m.get("hot", False)
-                tag  = "[red]⚠ [/red]" if hot else "  "
+                hot_tag = "[red]⚠[/red] " if hot else ""
                 eng_tag = f"  [dim]G{lv}[/dim]" if (bp and lv) else ""
-                lines.append(f"{tag}[dim]{name}[/dim]{eng_tag}  {_fmt_credits(val)}")
-        self._lbl("assets-modules", "\n".join(lines).rstrip())
+                key_str = f"{hot_tag}[dim]{name}[/dim]{eng_tag}"
+                mod_rows.append(KVRow(key_str, _fmt_credits(val)))
+        if scroll is not None:
+            scroll.remove_children()
+            scroll.mount(*mod_rows)
+        else:
+            self._lbl("assets-modules", "[dim]No stored modules[/dim]")
 
     def _refresh_carrier(self) -> None:
         carrier = getattr(self.state, "assets_carrier", None)

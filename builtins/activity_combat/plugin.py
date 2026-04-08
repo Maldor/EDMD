@@ -211,6 +211,7 @@ class ActivityCombatPlugin(BasePlugin, ActivityProviderMixin):
             and self.session_start_time is not None
             and warn_no_kills > 0
             and not state.in_preload
+            and not getattr(state, "in_supercruise", False)
         ):
             threshold_mins = warn_initial if self.kills == 0 else warn_no_kills
             last_kill_ref  = self._last_kill_mono if self._last_kill_mono > 0.0 \

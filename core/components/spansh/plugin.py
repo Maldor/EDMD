@@ -285,7 +285,7 @@ class SpanshPlugin(BasePlugin):
     def _store_record(self, rec: dict) -> None:
         """Parse a Spansh station record dict and push to state."""
         stn_name = rec.get("name", "").strip()
-        sys_name = rec.get("system_name", "").strip()
+        sys_name = (rec.get("system_name") or rec.get("system") or "").strip()
         updated  = rec.get("market_updated_at", "")
         market   = rec.get("market") or []
 

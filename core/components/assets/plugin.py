@@ -543,8 +543,16 @@ class AssetsPlugin(BasePlugin):
                 sq = profile_data.get("squadron") or _cmdr_sq
                 if sq:
                     state.pilot_squadron_name = sq.get("name", "")
-                    state.pilot_squadron_tag  = sq.get("tag") or sq.get("shortName", "")
-                    state.pilot_squadron_rank = sq.get("rank", "") or sq.get("rankName", "")
+                    state.pilot_squadron_tag = (
+                        sq.get("tag") or sq.get("Tag") or sq.get("TAG") or
+                        sq.get("shortName") or sq.get("ShortName") or
+                        sq.get("shortname") or sq.get("short_name") or ""
+                    )
+                    state.pilot_squadron_rank = (
+                        sq.get("rank") or sq.get("Rank") or
+                        sq.get("rankName") or sq.get("currentRankName") or ""
+                    )
+
                 else:
                     state.pilot_squadron_name = ""
                     state.pilot_squadron_tag  = ""
