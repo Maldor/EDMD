@@ -489,7 +489,7 @@ def report_hunting_grounds(journal_dir: Path) -> ReportResult:
 def report_rogues_gallery(journal_dir: Path) -> ReportResult:
     result = ReportResult(
         title="NPC Rogues' Gallery",
-        subtitle="Every named pilot killed by or who has killed CMDR CALURSUS"
+        subtitle="Every named pilot killed by or who has killed you"
     )
 
     # ── Collect own commander names for self-filter ───────────────────────────
