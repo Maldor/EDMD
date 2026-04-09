@@ -104,6 +104,40 @@ class CrewSlfPlugin(BasePlugin):
             pass
 
 
+    def _bootstrap_crew_from_journals(self) -> None:
+        """Scan recent journals for the last CrewAssign {Role: Active} event.
+
+        Called when Loadout fires and SLF type is unknown (state reset path).
+        Finds the most recent CrewAssign to restore crew_name authorit-
+        atively — regardless of NpcCrewPaidWage event ordering.
+        """
+        try:
+            import json as _j, pathlib as _pl
+            jdir     = _pl.Path(self.core.journal_dir)
+            journals = sorted(jdir.glob("Journal*.log"), reverse=True)
+
+            for jp in journals:
+                try:
+                    lines = jp.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for line in reversed(lines):
+                    try:
+                        ev = _j.loads(line)
+                    except ValueError:
+                        continue
+                    if ev.get("event") == "CrewAssign" and ev.get("Role") == "Active":
+                        name = ev.get("Name")
+                        if name:
+                            self.core.state.crew_name   = name
+                            self.core.state.crew_active = True
+                            gq = self.core.gui_queue
+                            if gq:
+                                gq.put(("crew_update", None))
+                            return
+        except Exception:
+            pass
+
     def on_event(self, event: dict, state) -> None:
         core    = self.core
         gq      = core.gui_queue
@@ -156,6 +190,14 @@ class CrewSlfPlugin(BasePlugin):
                     state.slf_loadout  = None
                     state.crew_active  = False
                     state.crew_name    = None
+                    # Bootstrap crew_name from the last CrewAssign in journals
+                    # so we don't rely on NpcCrewPaidWage ordering to identify
+                    # who the active crew member is.
+                    import threading as _ct
+                    _ct.Thread(
+                        target=self._bootstrap_crew_from_journals,
+                        daemon=True,
+                    ).start()
                 if slf_found and state.crew_name and not state.crew_active:
                     state.crew_active = True
                 if gq:
@@ -269,8 +311,10 @@ class CrewSlfPlugin(BasePlugin):
 
             case "NpcCrewPaidWage":
                 wage_name = event.get("NpcCrewName")
-                if not state.crew_name and wage_name:
-                    state.crew_name = wage_name
+                # crew_name is set exclusively by CrewAssign (and its bootstrap).
+                # Never infer active crew from wage events — with multiple crew
+                # hired, both receive NpcCrewPaidWage and the ordering is not
+                # guaranteed to put the active member first.
                 if wage_name and wage_name == state.crew_name:
                     state.crew_active = True
                     if state.crew_total_paid is None:

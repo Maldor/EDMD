@@ -13,9 +13,11 @@ Ranks and Rep tabs are CAPI-sourced; they stay hidden until first poll.
 try:
     import gi
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk
+    from gi.repository import Gtk, GLib
 except ImportError:
     raise ImportError("PyGObject / GTK4 not found.")
+
+import threading
 
 from gui.block_base import BlockWidget
 from gui.helpers    import hull_css, fmt_shield, pp_rank_progress
@@ -77,6 +79,12 @@ class CommanderBlock(BlockWidget):
         self._build_tabbed_layout()
         self._layout_stack.set_visible_child_name("tabbed")
 
+        # Defer footer home search UI (footer doesn't exist during build())
+        self._has_home_search    = False
+        self._home_search_timer  = None
+        self._home_updating_entry = False
+        GLib.idle_add(self._build_footer_home_search)
+
     # ── Tab scaffold ───────────────────────────────────────────────────────────
 
     def _build_tabbed_layout(self) -> None:
@@ -124,66 +132,249 @@ class CommanderBlock(BlockWidget):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_margin_top(4)
 
-        def _row(key_text):
-            r = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            r.add_css_class("data-row")
+        # Single shared grid so all key labels size to the same column width
+        # and all value labels align perfectly regardless of label length.
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(2)
+        box.append(grid)
+
+        gr = 0   # current grid row index
+
+        def _kv(key_text):
+            """Attach a key+value row to the shared grid; return the value label."""
+            nonlocal gr
             k = self.make_label(key_text, css_class="data-key")
-            k.set_hexpand(False)
-            r.append(k)
+            k.set_xalign(0.0)
+            grid.attach(k, 0, gr, 1, 1)
             v = self.make_label("—", css_class="data-value")
-            v.set_hexpand(True)
             v.set_xalign(1.0)
-            r.append(v)
-            box.append(r)
-            return r, v
+            v.set_hexpand(True)
+            grid.attach(v, 1, gr, 1, 1)
+            gr += 1
+            return v
 
-        # Shields
-        row_sh = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row_sh.add_css_class("data-row")
-        row_sh.append(self.make_label("Shields", css_class="data-key"))
-        self._cmdr_shields = self.make_label("—", css_class="data-value")
-        self._cmdr_shields.set_hexpand(True)
-        self._cmdr_shields.set_xalign(1.0)
-        row_sh.append(self._cmdr_shields)
-        box.append(row_sh)
+        def _sep():
+            """Full-width separator spanning both grid columns."""
+            nonlocal gr
+            s = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            s.add_css_class("vitals-sep")
+            grid.attach(s, 0, gr, 2, 1)
+            gr += 1
 
-        # Hull
-        row_hull = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row_hull.add_css_class("data-row")
-        row_hull.append(self.make_label("Hull", css_class="data-key"))
-        self._cmdr_hull = self.make_label("—", css_class="data-value")
-        self._cmdr_hull.set_hexpand(True)
-        self._cmdr_hull.set_xalign(1.0)
-        row_hull.append(self._cmdr_hull)
-        box.append(row_hull)
+        def _bar_row(bar_widget):
+            """Full-width progress bar row spanning both grid columns."""
+            nonlocal gr
+            wrap = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            wrap.add_css_class("pp-rank-bar-row")
+            bar_widget.set_hexpand(True)
+            wrap.append(bar_widget)
+            grid.attach(wrap, 0, gr, 2, 1)
+            gr += 1
 
-        _, self._cmdr_fuel = _row("Fuel")
+        self._cmdr_shields = _kv("Shields")
+        self._cmdr_hull    = _kv("Hull")
+        self._cmdr_fuel    = _kv("Fuel")
 
-        vitals_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        vitals_sep.add_css_class("vitals-sep")
-        box.append(vitals_sep)
+        _sep()
 
-        _, self._cmdr_mode     = _row("Mode")
-        _, self._cmdr_system   = _row("System")
-        _, self._cmdr_location = _row("Body")
-        _, self._cmdr_pp       = _row("Power")
-        _, self._cmdr_pprank   = _row("PP Rank")
+        self._cmdr_mode     = _kv("Mode")
+        self._cmdr_home     = _kv("Home System")
+        self._cmdr_system   = _kv("Current System")
+        self._cmdr_location = _kv("Location")
+        self._cmdr_pp       = _kv("Power")
+        self._cmdr_pprank   = _kv("PP Rank")
 
-        # PP progress bar
         self._pp_rank_bar = Gtk.ProgressBar()
         self._pp_rank_bar.set_fraction(0.0)
         self._pp_rank_bar.add_css_class("pp-rank-bar")
         self._pp_rank_bar.set_show_text(False)
         self._pp_rank_bar.set_size_request(40, 4)
-        bar_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        bar_box.add_css_class("pp-rank-bar-row")
-        bar_box.append(self._pp_rank_bar)
-        self._pp_rank_bar.set_hexpand(True)
-        box.append(bar_box)
+        _bar_row(self._pp_rank_bar)
 
         return box
 
-    # ── Ranks tab ──────────────────────────────────────────────────────────────
+    # ── Home location footer search ───────────────────────────────────────────
+
+    def _build_footer_home_search(self) -> bool:
+        """Idle callback: insert home location search widgets into footer."""
+        ft = self.footer()
+        if ft is None:
+            return False
+        if self._get_commander_plugin() is None:
+            return False
+        self._has_home_search = True
+
+        # Entry
+        self._home_entry = Gtk.Entry()
+        self._home_entry.set_placeholder_text("Set Home Location…")
+        self._home_entry.set_width_chars(16)
+        self._home_entry.set_hexpand(False)
+        self._home_entry.set_valign(Gtk.Align.CENTER)
+        self._home_entry.add_css_class("data-entry")
+        self._home_entry.connect("activate", self._on_home_activate)
+        self._home_entry.connect("changed",  self._on_home_changed)
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_ctrl.connect("key-pressed", lambda c, k, hw, mod: False)
+        self._home_entry.add_controller(key_ctrl)
+
+        # Clear button
+        self._home_clear_btn = Gtk.Button(label="✕")
+        self._home_clear_btn.add_css_class("cmdr-footer-btn")
+        self._home_clear_btn.add_css_class("cargo-clear-btn")
+        self._home_clear_btn.set_can_focus(False)
+        self._home_clear_btn.set_sensitive(False)
+        self._home_clear_btn.set_tooltip_text("Clear home location")
+        self._home_clear_btn.connect("clicked", self._on_home_clear_clicked)
+
+        # Autocomplete popover
+        self._home_popover = Gtk.Popover()
+        self._home_popover.set_autohide(True)
+        self._home_popover.set_has_arrow(False)
+        self._home_popover.set_parent(self._home_entry)
+        self._home_popover.set_position(Gtk.PositionType.TOP)
+        self._home_results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._home_popover.set_child(self._home_results_box)
+
+        ft.prepend(self._home_clear_btn)
+        ft.prepend(self._home_entry)
+
+        # Populate entry if home already set
+        plugin = self._get_commander_plugin()
+        if plugin:
+            home = plugin.get_home_location()
+            if home:
+                self._home_updating_entry = True
+                self._home_entry.set_text("")
+                self._home_updating_entry = False
+                self._home_clear_btn.set_sensitive(True)
+        return False
+
+    def _on_home_changed(self, entry: Gtk.Entry) -> None:
+        if not self._has_home_search or self._home_updating_entry:
+            return
+        text = entry.get_text().strip()
+        self._home_clear_btn.set_sensitive(bool(text))
+        if self._home_search_timer:
+            GLib.source_remove(self._home_search_timer)
+        if len(text) < 3:
+            self._home_popover.popdown()
+            return
+        self._home_search_timer = GLib.timeout_add(400, self._do_home_search_bg, text)
+
+    def _on_home_activate(self, entry: Gtk.Entry) -> None:
+        if self._home_search_timer:
+            GLib.source_remove(self._home_search_timer)
+            self._home_search_timer = None
+        text = entry.get_text().strip()
+        if len(text) >= 3:
+            self._home_popover.popdown()
+            self._fetch_home(text)
+
+    def _on_home_clear_clicked(self, btn: Gtk.Button) -> None:
+        self._home_updating_entry = True
+        self._home_entry.set_text("")
+        self._home_updating_entry = False
+        self._home_clear_btn.set_sensitive(False)
+        self._home_popover.popdown()
+        plugin = self._get_commander_plugin()
+        if plugin:
+            plugin.clear_home_location()
+        root = self._home_entry.get_root()
+        if root and hasattr(root, "set_focus"):
+            root.set_focus(None)
+        self.refresh()
+
+    def _do_home_search_bg(self, query: str) -> bool:
+        self._home_search_timer = None
+        def _run():
+            try:
+                spansh = self._get_spansh()
+                if not spansh:
+                    return
+                results = spansh.search_home(query)
+                GLib.idle_add(self._show_home_results, results)
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True, name="spansh-home-search").start()
+        return False
+
+    def _show_home_results(self, results: list) -> bool:
+        child = self._home_results_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._home_results_box.remove(child)
+            child = nxt
+        if not results:
+            lbl = Gtk.Label(label="No results found")
+            lbl.add_css_class("data-key")
+            lbl.set_margin_start(8); lbl.set_margin_end(8)
+            lbl.set_margin_top(4);   lbl.set_margin_bottom(4)
+            self._home_results_box.append(lbl)
+            self._home_popover.popup()
+            return False
+        for r in results:
+            is_stn = r.get("is_station", False)
+            system = r.get("system", "")
+            prefix = "🚉 " if is_stn else "⭐ "
+            label  = f"{prefix}{r['name']}"
+            if is_stn and system and system != r["name"]:
+                label += f"  |  {system}"
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("mat-tab-btn")
+            btn.set_can_focus(False)
+            btn.connect("clicked", self._on_home_result_picked, r)
+            self._home_results_box.append(btn)
+        self._home_popover.popup()
+        return False
+
+    def _on_home_result_picked(self, btn, result: dict) -> None:
+        self._home_popover.popdown()
+        name     = result["name"]
+        system   = result.get("system", name)
+        star_pos = result.get("star_pos")
+        self._home_updating_entry = True
+        self._home_entry.set_text("")
+        self._home_updating_entry = False
+        self._home_clear_btn.set_sensitive(True)
+        plugin = self._get_commander_plugin()
+        if plugin:
+            plugin.set_home_location(name, system, star_pos)
+        # Surrender focus back to the window so the entry loses its cursor
+        root = self._home_entry.get_root()
+        if root and hasattr(root, "set_focus"):
+            root.set_focus(None)
+        self.refresh()
+
+    def _fetch_home(self, query: str) -> None:
+        """Fetch home by name when user presses Enter (no popover selection)."""
+        def _run():
+            try:
+                spansh = self._get_spansh()
+                if not spansh:
+                    return
+                results = spansh.search_home(query)
+                if results:
+                    GLib.idle_add(self._on_home_result_picked, None, results[0])
+                # No result: popover will have shown "No results found" already
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True, name="spansh-home-fetch").start()
+
+    def _get_commander_plugin(self):
+        try:
+            return self.core._plugins.get("commander")
+        except Exception:
+            return None
+
+    def _get_spansh(self):
+        try:
+            return self.core._plugins.get("spansh")
+        except Exception:
+            return None
+
+        # ── Ranks tab ──────────────────────────────────────────────────────────────
 
     def _build_ranks_tab(self) -> Gtk.Widget:
         scroll = Gtk.ScrolledWindow()
@@ -203,22 +394,31 @@ class CommanderBlock(BlockWidget):
         self._no_ranks_lbl.set_margin_top(8)
         box.append(self._no_ranks_lbl)
 
-        # dict: capi_key -> (row_box, value_label, progress_bar, bar_wrapper)
+        # Shared grid: all rank key labels share column 0 so values align.
+        # Each rank occupies two grid rows: text row + progress-bar row.
+        rank_grid = Gtk.Grid()
+        rank_grid.set_column_spacing(8)
+        rank_grid.set_row_spacing(2)
+        rank_grid.set_margin_top(2)
+        box.append(rank_grid)
+
+        # dict: capi_key -> (key_label, value_label, progress_bar, bar_wrapper)
         self._rank_rows: dict = {}
+        _gr = 0
 
         from core.state import CAPI_RANK_SKILLS
         for capi_key, display_label, _table in CAPI_RANK_SKILLS:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            row.add_css_class("data-row")
             k = self.make_label(display_label, css_class="data-key")
-            k.set_hexpand(False)
-            row.append(k)
+            k.set_xalign(0.0)
+            k.set_visible(False)
+            rank_grid.attach(k, 0, _gr, 1, 1)
+
             v = self.make_label("—", css_class="data-value")
-            v.set_hexpand(True)
             v.set_xalign(1.0)
-            row.append(v)
-            row.set_visible(False)
-            box.append(row)
+            v.set_hexpand(True)
+            v.set_visible(False)
+            rank_grid.attach(v, 1, _gr, 1, 1)
+            _gr += 1
 
             bar = Gtk.ProgressBar()
             bar.set_fraction(0.0)
@@ -230,9 +430,10 @@ class CommanderBlock(BlockWidget):
             bar_wrap.add_css_class("pp-rank-bar-row")
             bar_wrap.append(bar)
             bar_wrap.set_visible(False)
-            box.append(bar_wrap)
+            rank_grid.attach(bar_wrap, 0, _gr, 2, 1)
+            _gr += 1
 
-            self._rank_rows[capi_key] = (row, v, bar, bar_wrap)
+            self._rank_rows[capi_key] = (k, v, bar, bar_wrap)
 
         # Engineer ranks section (dynamic rows built in refresh)
         eng_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -410,7 +611,7 @@ class CommanderBlock(BlockWidget):
         # ── Info tab: Mode ────────────────────────────────────────────────────
         self._cmdr_mode.set_label(s.pilot_mode or "—")
 
-        # ── Info tab: System ──────────────────────────────────────────────────
+        # ── Info tab: Current System ──────────────────────────────────────────────────
         if s.pilot_system:
             self._cmdr_system.set_label(s.pilot_system)
             self._cmdr_system.get_parent().set_visible(True)
@@ -418,7 +619,33 @@ class CommanderBlock(BlockWidget):
             self._cmdr_system.set_label("—")
             self._cmdr_system.get_parent().set_visible(False)
 
-        # ── Info tab: Body ────────────────────────────────────────────────────
+        # ── Info tab: Home System ────────────────────────────────────────────────────
+        cmdr_plugin = self.core._plugins.get("commander") if self.core else None
+        if cmdr_plugin:
+            home = cmdr_plugin.get_home_location()
+            if home:
+                home_name    = home["name"]
+                home_system  = home.get("system", home_name)
+                home_star_pos = home.get("star_pos")
+                # Format: SYSTEM or STATION (SYSTEM)
+                is_station   = home.get("is_station", home_name != home_system and bool(home_system))
+                if is_station and home_system and home_system != home_name:
+                    display = f"{home_name}  ({home_system})"
+                else:
+                    display = home_name
+                # Append distance if current position is known
+                dist = cmdr_plugin.home_distance_ly(getattr(s, "pilot_star_pos", None))
+                if dist is not None:
+                    display += f"  |  {dist:,.0f} ly away"
+                self._cmdr_home.set_label(display)
+                self._cmdr_home.get_parent().set_visible(True)
+            else:
+                self._cmdr_home.set_label("unknown")
+                self._cmdr_home.get_parent().set_visible(True)
+        else:
+            self._cmdr_home.get_parent().set_visible(False)
+
+        # ── Info tab: Location ────────────────────────────────────────────────────
         if s.pilot_body:
             body_str = s.pilot_body
             if s.pilot_system and body_str.startswith(s.pilot_system):
@@ -533,6 +760,186 @@ class CommanderBlock(BlockWidget):
         if hull_row_key:
             hull_row_key.set_label("Health" if vm == "on_foot" else "Hull")
 
+        # ── Home location footer search ───────────────────────────────────────────
+
+    def _build_footer_home_search(self) -> bool:
+        """Idle callback: insert home location search widgets into footer."""
+        ft = self.footer()
+        if ft is None:
+            return False
+        if self._get_commander_plugin() is None:
+            return False
+        self._has_home_search = True
+
+        # Entry
+        self._home_entry = Gtk.Entry()
+        self._home_entry.set_placeholder_text("Set Home Location…")
+        self._home_entry.set_width_chars(16)
+        self._home_entry.set_hexpand(False)
+        self._home_entry.set_valign(Gtk.Align.CENTER)
+        self._home_entry.add_css_class("data-entry")
+        self._home_entry.connect("activate", self._on_home_activate)
+        self._home_entry.connect("changed",  self._on_home_changed)
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_ctrl.connect("key-pressed", lambda c, k, hw, mod: False)
+        self._home_entry.add_controller(key_ctrl)
+
+        # Clear button
+        self._home_clear_btn = Gtk.Button(label="✕")
+        self._home_clear_btn.add_css_class("cmdr-footer-btn")
+        self._home_clear_btn.add_css_class("cargo-clear-btn")
+        self._home_clear_btn.set_can_focus(False)
+        self._home_clear_btn.set_sensitive(False)
+        self._home_clear_btn.set_tooltip_text("Clear home location")
+        self._home_clear_btn.connect("clicked", self._on_home_clear_clicked)
+
+        # Autocomplete popover
+        self._home_popover = Gtk.Popover()
+        self._home_popover.set_autohide(True)
+        self._home_popover.set_has_arrow(False)
+        self._home_popover.set_parent(self._home_entry)
+        self._home_popover.set_position(Gtk.PositionType.TOP)
+        self._home_results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._home_popover.set_child(self._home_results_box)
+
+        ft.prepend(self._home_clear_btn)
+        ft.prepend(self._home_entry)
+
+        # Populate entry if home already set
+        plugin = self._get_commander_plugin()
+        if plugin:
+            home = plugin.get_home_location()
+            if home:
+                self._home_updating_entry = True
+                self._home_entry.set_text("")
+                self._home_updating_entry = False
+                self._home_clear_btn.set_sensitive(True)
+        return False
+
+    def _on_home_changed(self, entry: Gtk.Entry) -> None:
+        if not self._has_home_search or self._home_updating_entry:
+            return
+        text = entry.get_text().strip()
+        self._home_clear_btn.set_sensitive(bool(text))
+        if self._home_search_timer:
+            GLib.source_remove(self._home_search_timer)
+        if len(text) < 3:
+            self._home_popover.popdown()
+            return
+        self._home_search_timer = GLib.timeout_add(400, self._do_home_search_bg, text)
+
+    def _on_home_activate(self, entry: Gtk.Entry) -> None:
+        if self._home_search_timer:
+            GLib.source_remove(self._home_search_timer)
+            self._home_search_timer = None
+        text = entry.get_text().strip()
+        if len(text) >= 3:
+            self._home_popover.popdown()
+            self._fetch_home(text)
+
+    def _on_home_clear_clicked(self, btn: Gtk.Button) -> None:
+        self._home_updating_entry = True
+        self._home_entry.set_text("")
+        self._home_updating_entry = False
+        self._home_clear_btn.set_sensitive(False)
+        self._home_popover.popdown()
+        plugin = self._get_commander_plugin()
+        if plugin:
+            plugin.clear_home_location()
+        root = self._home_entry.get_root()
+        if root and hasattr(root, "set_focus"):
+            root.set_focus(None)
+        self.refresh()
+
+    def _do_home_search_bg(self, query: str) -> bool:
+        self._home_search_timer = None
+        def _run():
+            try:
+                spansh = self._get_spansh()
+                if not spansh:
+                    return
+                results = spansh.search_home(query)
+                GLib.idle_add(self._show_home_results, results)
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True, name="spansh-home-search").start()
+        return False
+
+    def _show_home_results(self, results: list) -> bool:
+        child = self._home_results_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._home_results_box.remove(child)
+            child = nxt
+        if not results:
+            lbl = Gtk.Label(label="No results found")
+            lbl.add_css_class("data-key")
+            lbl.set_margin_start(8); lbl.set_margin_end(8)
+            lbl.set_margin_top(4);   lbl.set_margin_bottom(4)
+            self._home_results_box.append(lbl)
+            self._home_popover.popup()
+            return False
+        for r in results:
+            is_stn = r.get("is_station", False)
+            system = r.get("system", "")
+            prefix = "🚉 " if is_stn else "⭐ "
+            label  = f"{prefix}{r['name']}"
+            if is_stn and system and system != r["name"]:
+                label += f"  |  {system}"
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("mat-tab-btn")
+            btn.set_can_focus(False)
+            btn.connect("clicked", self._on_home_result_picked, r)
+            self._home_results_box.append(btn)
+        self._home_popover.popup()
+        return False
+
+    def _on_home_result_picked(self, btn, result: dict) -> None:
+        self._home_popover.popdown()
+        name     = result["name"]
+        system   = result.get("system", name)
+        star_pos = result.get("star_pos")
+        self._home_updating_entry = True
+        self._home_entry.set_text("")
+        self._home_updating_entry = False
+        self._home_clear_btn.set_sensitive(True)
+        plugin = self._get_commander_plugin()
+        if plugin:
+            plugin.set_home_location(name, system, star_pos)
+        # Surrender focus back to the window so the entry loses its cursor
+        root = self._home_entry.get_root()
+        if root and hasattr(root, "set_focus"):
+            root.set_focus(None)
+        self.refresh()
+
+    def _fetch_home(self, query: str) -> None:
+        """Fetch home by name when user presses Enter (no popover selection)."""
+        def _run():
+            try:
+                spansh = self._get_spansh()
+                if not spansh:
+                    return
+                results = spansh.search_home(query)
+                if results:
+                    GLib.idle_add(self._on_home_result_picked, None, results[0])
+                # No result: popover will have shown "No results found" already
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True, name="spansh-home-fetch").start()
+
+    def _get_commander_plugin(self):
+        try:
+            return self.core._plugins.get("commander")
+        except Exception:
+            return None
+
+    def _get_spansh(self):
+        try:
+            return self.core._plugins.get("spansh")
+        except Exception:
+            return None
+
         # ── Ranks tab ─────────────────────────────────────────────────────────
         capi_ranks    = getattr(s, "capi_ranks",    None)
         capi_progress = getattr(s, "capi_progress", None)
@@ -542,17 +949,19 @@ class CommanderBlock(BlockWidget):
         if has_ranks:
             from core.state import CAPI_RANK_SKILLS
             for capi_key, _display, table in CAPI_RANK_SKILLS:
-                row, v_lbl, bar, bar_wrap = self._rank_rows[capi_key]
+                k_lbl, v_lbl, bar, bar_wrap = self._rank_rows[capi_key]
                 idx = capi_ranks.get(capi_key)
                 if idx is None:
-                    row.set_visible(False)
+                    k_lbl.set_visible(False)
+                    v_lbl.set_visible(False)
                     bar_wrap.set_visible(False)
                     continue
                 rank_name = table[idx] if 0 <= idx < len(table) else str(idx)
                 prog      = (capi_progress or {}).get(capi_key)
                 pct_str   = f" +{prog}%" if prog is not None else ""
                 v_lbl.set_label(f"{rank_name}{pct_str}")
-                row.set_visible(True)
+                k_lbl.set_visible(True)
+                v_lbl.set_visible(True)
                 if prog is not None:
                     bar.set_fraction(min(prog / 100.0, 1.0))
                     bar_wrap.set_visible(True)
@@ -670,7 +1079,7 @@ class CommanderBlock(BlockWidget):
             self._pp_rank_bar.set_fraction(0.0)
             self._pp_rank_bar.set_visible(False)
         if hasattr(self, "_rank_rows"):
-            for _row, _lbl, bar, bar_wrap in self._rank_rows.values():
+            for _k_lbl, _lbl, bar, bar_wrap in self._rank_rows.values():
                 bar.set_fraction(0.0)
                 bar_wrap.set_visible(False)
         if hasattr(self, "_eng_rows"):

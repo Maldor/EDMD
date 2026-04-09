@@ -131,6 +131,67 @@ class SpanshPlugin(BasePlugin):
         except Exception as exc:
             return []
 
+    def search_home(self, query: str) -> list:
+        """Search Spansh for systems AND stations matching query.
+
+        Returns [{name, system, is_station, star_pos, updated}] or [].
+        star_pos is [x, y, z] when available (systems always have it;
+        stations carry the system's coords from the search record).
+        Call from a background thread.
+        """
+        if not query or len(query) < 3:
+            return []
+        try:
+            import urllib.parse, urllib.request, json as _json
+            params = urllib.parse.urlencode({"q": query})
+            url = f"{_SPANSH_SEARCH}?{params}"
+            with urllib.request.urlopen(url, timeout=8) as resp:
+                data = _json.load(resp)
+
+            results = []
+            for r in data.get("results") or []:
+                rtype = r.get("type", "")
+                rec   = r.get("record") or {}
+
+                if rtype == "system":
+                    name      = rec.get("name", "").strip()
+                    if not name:
+                        continue
+                    x = rec.get("x"); y = rec.get("y"); z = rec.get("z")
+                    star_pos  = [x, y, z] if all(v is not None for v in (x, y, z)) else None
+                    results.append({
+                        "name":       name,
+                        "system":     name,
+                        "is_station": False,
+                        "star_pos":   star_pos,
+                        "updated":    rec.get("updated_at", ""),
+                    })
+
+                elif rtype == "station":
+                    name   = rec.get("name", "").strip()
+                    system = rec.get("system_name", "").strip()
+                    if not name:
+                        continue
+                    # Stations carry system coords when the search result includes them
+                    x = rec.get("x"); y = rec.get("y"); z = rec.get("z")
+                    star_pos  = [x, y, z] if all(v is not None for v in (x, y, z)) else None
+                    results.append({
+                        "name":       name,
+                        "system":     system,
+                        "is_station": True,
+                        "star_pos":   star_pos,
+                        "updated":    rec.get("market_updated_at", ""),
+                        "_rec":       rec,
+                    })
+
+                if len(results) >= 8:
+                    break
+
+            return results
+
+        except Exception:
+            return []
+
     def set_target(self, station_name: str, system_name: str = "",
                    _record: dict | None = None) -> None:
         """Set target market. If _record supplied (from search result) use it
@@ -224,7 +285,7 @@ class SpanshPlugin(BasePlugin):
     def _store_record(self, rec: dict) -> None:
         """Parse a Spansh station record dict and push to state."""
         stn_name = rec.get("name", "").strip()
-        sys_name = rec.get("system_name", "").strip()
+        sys_name = (rec.get("system_name") or rec.get("system") or "").strip()
         updated  = rec.get("market_updated_at", "")
         market   = rec.get("market") or []
 

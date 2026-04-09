@@ -70,6 +70,58 @@ class CommanderPlugin(BasePlugin):
         # Read current fuel level from Status.json so the block shows a value
         # immediately on startup rather than waiting for the first refuel event.
         self._read_status_json(core)
+        # Load persisted home location
+        self._load_home_location()
+
+    # ── Home location ──────────────────────────────────────────────────────────
+
+    def _load_home_location(self) -> None:
+        """Load persisted home location from plugin storage."""
+        data = self.storage.read_json("data.json")
+        self._home_name:     str        = data.get("name", "")
+        self._home_system:   str        = data.get("system", "")
+        self._home_star_pos: list | None = data.get("star_pos")  # [x, y, z] or None
+
+    def get_home_location(self) -> dict | None:
+        """Return the stored home location dict or None if not set."""
+        if not self._home_name:
+            return None
+        return {
+            "name":     self._home_name,
+            "system":   self._home_system,
+            "star_pos": self._home_star_pos,
+        }
+
+    def set_home_location(self, name: str, system: str, star_pos: list | None) -> None:
+        """Persist and activate a new home location."""
+        self._home_name     = name
+        self._home_system   = system
+        self._home_star_pos = star_pos
+        self.storage.write_json({
+            "name":     name,
+            "system":   system,
+            "star_pos": star_pos,
+        }, "data.json")
+
+    def clear_home_location(self) -> None:
+        """Clear the home location."""
+        self._home_name     = ""
+        self._home_system   = ""
+        self._home_star_pos = None
+        self.storage.write_json({}, "data.json")
+
+    def home_distance_ly(self, current_star_pos: list | None) -> float | None:
+        """
+        Return distance in ly from current position to home, or None if
+        either position is unknown.
+        """
+        import math
+        if not self._home_star_pos or not current_star_pos:
+            return None
+        dx = current_star_pos[0] - self._home_star_pos[0]
+        dy = current_star_pos[1] - self._home_star_pos[1]
+        dz = current_star_pos[2] - self._home_star_pos[2]
+        return math.sqrt(dx*dx + dy*dy + dz*dz)
 
     def _read_status_json(self, core) -> None:
         """Read FuelMain from Status.json for immediate display on startup."""
@@ -383,6 +435,7 @@ class CommanderPlugin(BasePlugin):
 
             case "Location":
                 if event.get("StarSystem"): state.pilot_system = event["StarSystem"]
+                if event.get("StarPos"):    state.pilot_star_pos = list(event["StarPos"])
                 if event.get("Body"):
                     state.pilot_body = event["Body"] if event.get("Docked") is False else None
                 if event.get("Docked") and event.get("StationName"):
@@ -412,8 +465,9 @@ class CommanderPlugin(BasePlugin):
                 if gq: gq.put(("cmdr_update", None))
 
             case "FSDJump":
-                state.pilot_system = event.get("StarSystem", state.pilot_system)
-                state.pilot_body   = None
+                state.pilot_system   = event.get("StarSystem", state.pilot_system)
+                state.pilot_body     = None
+                if event.get("StarPos"): state.pilot_star_pos = list(event["StarPos"])
                 # Update fuel display — FuelLevel is accurate post-jump
                 fuel_level = event.get("FuelLevel")
                 if fuel_level is not None:

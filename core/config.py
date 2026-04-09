@@ -7,6 +7,7 @@ Does not import from emit, journal, or gui.
 """
 
 import sys
+import re
 import tomllib
 from pathlib import Path
 
@@ -22,6 +23,172 @@ class _T:
     END  = "\x1b[0m"
 
 _WARNING = f"{_T.WARN}Warning:{_T.END}"
+
+
+import re
+
+# ── Canonical TOML format ─────────────────────────────────────────────────────
+
+# Top-level config sections that are written as flat [Section] tables.
+# Anything not in this set is treated as a profile and written under a single
+# [ProfileName] header with dotted sub-keys (Settings.Key = ..., UI.Mode = ...).
+# A [ProfileName.SubSection] sub-table header is NEVER written — that is the
+# old format that this migration is designed to eliminate.
+STANDARD_SECTIONS: frozenset[str] = frozenset({
+    "Settings", "Discord", "LogLevels", "UI",
+    "EDDN", "EDSM", "EDAstro", "Inara", "CAPI",
+})
+
+# Matches any TOML section header that indicates old-format content:
+#   [GUI]               — old interface section name
+#   [ProfileName.Sub]   — old profile sub-table style
+_NEEDS_MIGRATION = re.compile(r'^\[(?:GUI|\w+\.\w+)\]', re.MULTILINE)
+
+
+def _scalar(v) -> str:
+    """Format a Python value as a TOML literal."""
+    if isinstance(v, bool):  return "true" if v else "false"
+    if isinstance(v, int):   return str(v)
+    if isinstance(v, float): return str(v)
+    escaped = str(v).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def config_to_toml(d: dict) -> str:
+    """Serialise a config dict to canonical TOML.
+
+    Rules:
+      • Standard sections (Settings, Discord, UI, LogLevels, EDDN, EDSM,
+        EDAstro, Inara, CAPI) are written as flat [Section] tables.
+      • Profile sections (EDP1, REMOTE, anything else) are written as a
+        single [ProfileName] table whose sub-section keys use dotted notation:
+            [EDP1]
+            Settings.JournalFolder = "..."
+            UI.Mode = "gtk4"
+        The old [EDP1.Settings] / [EDP1.UI] sub-table style is NEVER produced.
+
+    This is the single authoritative writer for config.toml.  Both
+    gui/preferences.py and tui/preferences.py import and use this function.
+    """
+    lines: list[str] = []
+
+    # ── Top-level bare scalars (rare) ─────────────────────────────────────────
+    for k, v in d.items():
+        if not isinstance(v, dict):
+            lines.append(f"{k} = {_scalar(v)}")
+
+    # ── Standard flat sections ────────────────────────────────────────────────
+    for section, val in d.items():
+        if not isinstance(val, dict) or section not in STANDARD_SECTIONS:
+            continue
+        lines += ["", f"[{section}]"]
+        for k, v in val.items():
+            if not isinstance(v, dict):
+                lines.append(f"{k} = {_scalar(v)}")
+
+    # ── Profile sections — single header, dotted sub-keys ─────────────────────
+    for section, val in d.items():
+        if not isinstance(val, dict) or section in STANDARD_SECTIONS:
+            continue
+        lines += ["", f"[{section}]"]
+        # Root-level scalars within the profile (QuitOnLowFuel, _adv_session_mgmt …)
+        for k, v in val.items():
+            if not isinstance(v, dict):
+                lines.append(f"{k} = {_scalar(v)}")
+        # Sub-section keys written as dotted pairs (never as [Profile.Sub] headers)
+        for sub, sub_val in val.items():
+            if not isinstance(sub_val, dict):
+                continue
+            for k, v in sub_val.items():
+                if not isinstance(v, dict):
+                    lines.append(f"{sub}.{k} = {_scalar(v)}")
+
+    return "\n".join(lines) + "\n"
+
+
+# ── Startup migration ─────────────────────────────────────────────────────────
+
+def _apply_gui_to_ui(gui_dict: dict) -> dict:
+    """Convert a [GUI] / profile GUI sub-dict to [UI] representation.
+
+        Enabled = true   →  Mode = "gtk4"
+        Enabled = false  →  Mode = "terminal"
+        (absent)         →  Mode unchanged / not added
+        All other keys   →  kept as-is (Theme, FontFamily, FontSize, …)
+    """
+    src = dict(gui_dict)
+    enabled = src.pop("Enabled", None)
+    result: dict = {}
+    if enabled is True:
+        result["Mode"] = "gtk4"
+    elif enabled is False:
+        result["Mode"] = "terminal"
+    result.update(src)
+    return result
+
+
+def migrate_config_if_needed(config_path: Path) -> bool:
+    """Detect old config formats and silently rewrite to canonical format.
+
+    Handles all of:
+      • [GUI] global section  →  [UI]  (Enabled= → Mode=)
+      • [ProfileName.GUI] sub-table  →  ProfileName.UI.*  (dotted key)
+      • ProfileName.GUI.Enabled = true in a profile block  →  UI.Mode = "gtk4"
+      • [ProfileName.Section] sub-table headers  →  [ProfileName] + dotted keys
+
+    Detection uses a raw-text regex so clean canonical files are never touched.
+    Returns True if the file was rewritten, False if no migration was needed.
+
+    MUST be called before load_config_file() in edmd.py.
+    """
+    try:
+        raw = config_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+    if not _NEEDS_MIGRATION.search(raw):
+        return False   # already canonical — nothing to do
+
+    # File needs migration: parse it, transform, rewrite
+    try:
+        with open(config_path, "rb") as _f:
+            d = tomllib.load(_f)
+    except Exception:
+        return False   # parse errors handled by load_config_file later
+
+    changed = False
+
+    # 1. Global [GUI] → [UI]
+    if "GUI" in d:
+        existing_ui = dict(d.get("UI") or {})
+        migrated = _apply_gui_to_ui(d.pop("GUI"))
+        # Migrated values fill gaps; they never overwrite an explicit [UI] key
+        for k, v in migrated.items():
+            existing_ui.setdefault(k, v)
+        d["UI"] = existing_ui
+        changed = True
+
+    # 2. Profile-level GUI sub-dicts
+    for key, val in d.items():
+        if not isinstance(val, dict) or key in STANDARD_SECTIONS:
+            continue
+        if "GUI" in val:
+            existing_ui = dict(val.get("UI") or {})
+            migrated = _apply_gui_to_ui(val.pop("GUI"))
+            for k, v in migrated.items():
+                existing_ui.setdefault(k, v)
+            val["UI"] = existing_ui
+            changed = True
+
+    # 3. Rewrite in canonical format (fixes [ProfileName.Section] sub-tables
+    #    even if no GUI key was present — the regex already confirmed this file
+    #    has at least one [X.Y] header that needs collapsing)
+    try:
+        config_path.write_text(config_to_toml(d), encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"{_WARNING} Config migration failed — file unchanged: {e}")
+        return False
 
 
 # ── Config defaults ───────────────────────────────────────────────────────────
@@ -46,11 +213,12 @@ CFG_DEFAULTS_EXTRA = {
     "FullStackSize":      20,
 }
 
-CFG_DEFAULTS_GUI = {
-    "Enabled":    False,
-    "Theme":      "default",
-    "FontSize":   14,
-    "FontFamily": "JetBrains Mono",
+CFG_DEFAULTS_UI = {
+    "Mode":             "terminal",  # terminal | textual | gtk4
+    "Theme":            "default",
+    "FontSize":         14,
+    "FontFamily":       "JetBrains Mono",
+    "SoftwareRenderer": False,       # set True if EDMD causes compositor starvation on Linux
 }
 
 CFG_DEFAULTS_DISCORD = {
@@ -143,195 +311,8 @@ def resolve_config_path(script_path: Path) -> Path | None:
 
 
 
-# ── Config format migration ───────────────────────────────────────────────────
-#
-# EDMD originally used [PROFILE.Section] subsection headers for per-profile
-# settings.  The current format uses dotted keys under a single [PROFILE] block:
-#
-#   Old:                         New (identical parsed output):
-#   [EDP1.Settings]              [EDP1]
-#   JournalFolder = "..."        Settings.JournalFolder = "..."
-#
-# On first run after upgrade, migrate_config_format() detects old-format headers
-# and rewrites the file using a two-pass algorithm that handles any ordering —
-# subsections before their parent profile, after it, or interleaved.
-# A backup is written to config.toml.bak before any modification.
-
-_GLOBAL_SECTIONS = frozenset({
-    "Settings", "Discord", "LogLevels", "GUI",
-    "Inara", "EDDN", "EDSM", "EDAstro",
-})
-
-_SUBSEC_RE = __import__("re").compile(r"^\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]")
-_HEADER_RE = __import__("re").compile(r"^\[([A-Za-z0-9_]+)\]$")
-
-
-def _needs_migration(text: str) -> bool:
-    for line in text.splitlines():
-        m = _SUBSEC_RE.match(line.strip())
-        if m and m.group(1) not in _GLOBAL_SECTIONS:
-            return True
-    return False
-
-
-def _migrate_text(text: str) -> str:
-    """Rewrite old [PROFILE.Section] headers to dotted keys under [PROFILE].
-
-    Two-pass algorithm:
-      Pass 1 — collect subsection content and record line positions.
-      Pass 2 — emit the file, injecting pre-parent subsections at their parent
-               header site and suppressing their original content lines.
-
-    Handles all orderings: normal, out-of-order (subsec before parent),
-    interleaved (subsecs of different profiles mixed), and orphaned (no parent
-    header at all — one is synthesised at the point of emission).
-    """
-    lines = text.splitlines(keepends=True)
-
-    # ── Pass 1 ────────────────────────────────────────────────────────────────
-    subsection_lines: dict = {}   # (profile, section) -> [raw content lines]
-    profile_line_idx: dict = {}   # profile_name -> line index of [profile] header
-    subsec_line_idx:  dict = {}   # (profile, section) -> line index of header
-    current_subsec = None
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        m = _SUBSEC_RE.match(stripped)
-        if m:
-            p, s = m.group(1), m.group(2)
-            if p not in _GLOBAL_SECTIONS:
-                current_subsec = (p, s)
-                subsection_lines.setdefault(current_subsec, [])
-                subsec_line_idx[current_subsec] = i
-                continue
-        plain = _HEADER_RE.match(stripped)
-        if plain:
-            current_subsec = None
-            pname = plain.group(1)
-            if pname not in _GLOBAL_SECTIONS:
-                profile_line_idx[pname] = i
-            continue
-        if current_subsec is not None:
-            subsection_lines[current_subsec].append(line)
-
-    # Subsections whose header appears before their parent profile header (or
-    # parent is absent entirely) — these must be injected at the parent, not inline.
-    needs_pre: set = {
-        (p, s) for (p, s), si in subsec_line_idx.items()
-        if profile_line_idx.get(p, 10**9) > si
-    }
-
-    # ── Pass 2 ────────────────────────────────────────────────────────────────
-    def _emit(p: str, s: str) -> list:
-        out = [f"# (migrated from [{p}.{s}])\n"]
-        for kl in subsection_lines.get((p, s), []):
-            ks = kl.strip()
-            out.append(f"{s}.{kl}" if (ks and not ks.startswith("#")) else kl)
-        return out
-
-    output: list = []
-    current_subsec = None
-    emitted: set = set()
-
-    for line in lines:
-        stripped = line.strip()
-
-        m = _SUBSEC_RE.match(stripped)
-        if m:
-            p, s = m.group(1), m.group(2)
-            if p not in _GLOBAL_SECTIONS:
-                current_subsec = (p, s)
-                if (p, s) not in needs_pre and (p, s) not in emitted:
-                    # Normal order: emit inline at header position
-                    emitted.add((p, s))
-                    output.extend(_emit(p, s))
-                # Either way, suppress the raw header line
-                continue
-
-        plain = _HEADER_RE.match(stripped)
-        if plain:
-            current_subsec = None
-            output.append(line)
-            pname = plain.group(1)
-            # Inject any pre-parent subsections for this profile
-            for (p, s) in sorted(needs_pre):
-                if p == pname and (p, s) not in emitted:
-                    emitted.add((p, s))
-                    output.extend(_emit(p, s))
-            continue
-
-        # Skip raw content lines belonging to any already-handled subsection
-        if current_subsec is not None and (
-            current_subsec in emitted or current_subsec in needs_pre
-        ):
-            continue
-
-        output.append(line)
-
-    # Orphaned subsections whose parent profile header never appeared — synthesise one
-    orphaned = [(p, s) for (p, s) in sorted(needs_pre)
-                if (p, s) not in emitted and p not in profile_line_idx]
-    if orphaned:
-        seen: set = set()
-        for (p, s) in orphaned:
-            if p not in seen:
-                seen.add(p)
-                output.append(f"\n[{p}]\n")
-            output.extend(_emit(p, s))
-
-    return "".join(output)
-
-
-def migrate_config_format(config_path: "Path") -> bool:
-    """Check config_path for old-format subsection headers and migrate if found.
-
-    Writes a backup to <config_path>.bak before modifying anything.
-    Returns True if migration was performed, False if no migration was needed.
-    On any error the original file is left untouched and a warning is printed.
-    """
-    try:
-        text = config_path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-    if not _needs_migration(text):
-        return False
-
-    backup = config_path.with_suffix(".toml.bak")
-    try:
-        backup.write_text(text, encoding="utf-8")
-    except OSError as e:
-        print(f"Warning: could not write config backup to {backup}: {e}")
-        print("  Skipping config migration to avoid data loss.")
-        return False
-
-    try:
-        migrated = _migrate_text(text)
-        import tomllib as _tl
-        _tl.loads(migrated)   # verify before writing
-    except Exception as e:
-        print(f"Warning: config migration produced invalid TOML ({e}); "
-              f"original config preserved.")
-        return False
-
-    try:
-        config_path.write_text(migrated, encoding="utf-8")
-    except OSError as e:
-        print(f"Warning: could not write migrated config ({e}); "
-              f"original config preserved.")
-        return False
-
-    print(f"  Config migrated to dotted-key format. Backup saved to {backup.name}")
-    return True
-
-
 def load_config_file(config_path: Path) -> dict:
-    """Read and parse a TOML config file.  Calls sys.exit on decode error.
-
-    Runs migrate_config_format() first to silently upgrade old-format
-    [PROFILE.Section] headers to the current dotted-key style.
-    """
-    migrate_config_format(config_path)
+    """Read and parse a TOML config file.  Calls sys.exit on decode error."""
     with open(config_path, mode="rb") as f:
         try:
             return tomllib.load(f)
@@ -442,7 +423,7 @@ class ConfigManager:
         self.app_settings  = {}
         self.discord_cfg   = {}
         self.notify_levels = {}
-        self.gui_cfg       = {}
+        self.ui_cfg        = {}
         self.capi_cfg      = {}
         self._resolve_all(warn=True)
 
@@ -453,7 +434,7 @@ class ConfigManager:
         )
         self.discord_cfg   = self.load_setting("Discord",   CFG_DEFAULTS_DISCORD,  warn)
         self.notify_levels = self.load_setting("LogLevels", CFG_DEFAULTS_NOTIFY,   warn)
-        self.gui_cfg       = self.load_setting("GUI",       CFG_DEFAULTS_GUI,      False)
+        self.ui_cfg        = self.load_setting("UI",        CFG_DEFAULTS_UI,       False)
         self.eddn_cfg      = self.load_setting("EDDN",      CFG_DEFAULTS_EDDN,     False)
         self.edsm_cfg      = self.load_setting("EDSM",      CFG_DEFAULTS_EDSM,     False)
         self.edastro_cfg   = self.load_setting("EDAstro",   CFG_DEFAULTS_EDASTRO,  False)

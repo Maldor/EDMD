@@ -41,7 +41,7 @@ from core.config import (
     pcfg,
     CFG_DEFAULTS_SETTINGS,
     CFG_DEFAULTS_EXTRA,
-    CFG_DEFAULTS_GUI,
+    CFG_DEFAULTS_UI,
     CFG_DEFAULTS_DISCORD,
     CFG_DEFAULTS_NOTIFY,
 )
@@ -83,7 +83,7 @@ __all__ = [
     # config
     "ConfigManager", "resolve_config_path", "load_config_file",
     "load_setting", "pcfg",
-    "CFG_DEFAULTS_SETTINGS", "CFG_DEFAULTS_EXTRA", "CFG_DEFAULTS_GUI",
+    "CFG_DEFAULTS_SETTINGS", "CFG_DEFAULTS_EXTRA", "CFG_DEFAULTS_UI",
     "CFG_DEFAULTS_DISCORD", "CFG_DEFAULTS_NOTIFY",
     # emit
     "Emitter", "Terminal", "WARNING", "emit_summary",

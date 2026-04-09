@@ -4,9 +4,11 @@ gui/app.py — GTK4 dashboard window for Elite Dangerous Monitor Daemon.
 Canvas sizing: connects to notify::width and notify::height on the canvas so
 we always know the true available pixel dimensions after each layout pass.
 
-Reflow: if the canvas shrinks below what the saved layout needs, blocks are
-scaled down proportionally. When the canvas grows back to full size, blocks
-return to their saved grid positions.
+Reflow: layout is treated as immutable during normal runtime — blocks are only
+repositioned on startup or when the user explicitly resets the layout.  A
+debounced resize handler coalesces burst signals into a single reflow call.
+The _reflow_tick fallback timer fires only until the canvas settles, then
+disarms itself permanently to avoid recurring GTK scene-graph invalidation.
 """
 
 import signal
@@ -90,8 +92,12 @@ def _build_registry(core) -> list[tuple[str, type, str]]:
 class EdmdWindow(Gtk.ApplicationWindow):
 
     POLL_MS   = 100
-    TICK_MS   = 1000
-    REFLOW_MS = 500    # how often to check for WM-driven window resize
+    TICK_MS   = 5000   # Heartbeat: safety net for blocks with no event-driven refresh.
+                       # Most blocks update via _poll_queue on data events; this fires
+                       # at most once every 5 seconds to catch anything that slipped through.
+    REFLOW_MS = 500    # Canvas size fallback poll — fires only until the canvas settles
+                       # after startup, then disarms.  Handles tiling WMs and the case
+                       # where notify::width fires before the scroll widget has realised.
 
     def __init__(self, app, core, program: str, version: str):
         super().__init__(application=app, title=f"{program} v{version}")
@@ -107,8 +113,14 @@ class EdmdWindow(Gtk.ApplicationWindow):
         self._grid          = BlockGrid(canvas_width=1280, canvas_height=760)
         self._blocks: dict  = {}
         self._is_fullscreen = False
-        self._last_canvas_w = 0
-        self._last_canvas_h = 0
+        self._last_canvas_w  = 0
+        self._last_canvas_h  = 0
+        self._reflow_armed   = True   # True until canvas settles; _reflow_tick disarms itself.
+        self._reflow_pending = False  # True while a debounced reflow is queued.
+
+        # Dirty-tracking: only refresh blocks that have received a data change.
+        # The tick is a heartbeat safety net — not the primary refresh driver.
+        self._dirty: set[str] = set()
 
         self._build_ui()
         self._build_and_place_blocks()
@@ -219,12 +231,31 @@ class EdmdWindow(Gtk.ApplicationWindow):
 
     def _on_canvas_size_changed(self, canvas, _param) -> None:
         """notify::width or notify::height — fires when the viewport changes."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
+        # Read dimensions only if the signal suggests a real change.
+        # _apply_canvas_size has its own equality guard, but get_width()/
+        # get_height() can force a layout pass even in the no-op case.
+        w = self._scroll.get_width()
+        h = self._scroll.get_height()
+        if w != self._last_canvas_w or h != self._last_canvas_h:
+            self._apply_canvas_size(w, h)
 
     def _reflow_tick(self) -> bool:
-        """Fallback poll every REFLOW_MS — catches tiling WM resizes."""
-        self._apply_canvas_size(self._scroll.get_width(), self._scroll.get_height())
-        return True
+        """Startup fallback — fires every REFLOW_MS until the canvas has a real size,
+        then disarms permanently.  Handles tiling WMs and the startup race where
+        notify::width fires before the scroll widget has realised (get_width()
+        returns 0 and the later real-size signal never re-fires).
+        Once _last_canvas_w > 0 the notify signals take over; this never fires again.
+        """
+        if not self._reflow_armed:
+            return False  # disarmed — stop the repeating timer
+        w = self._scroll.get_width()
+        h = self._scroll.get_height()
+        if w > 0 and h > 0:
+            self._apply_canvas_size(w, h)
+            if self._last_canvas_w > 0:
+                self._reflow_armed = False   # canvas has settled — disarm
+                return False
+        return True  # still waiting for a valid size
 
     def _poll_canvas_size(self) -> bool:
         """One-shot after realize settle."""
@@ -232,18 +263,29 @@ class EdmdWindow(Gtk.ApplicationWindow):
         return False
 
     def _apply_canvas_size(self, w: int, h: int) -> None:
-        """Apply both dimensions — only reflows if something actually changed."""
+        """Apply both dimensions — only reflows if something actually changed.
+
+        Debounced: rapid resize signals (e.g. from dragging a window edge) are
+        coalesced into a single reflow 150ms after the last event, preventing
+        GTK from invalidating the scene graph on every intermediate pixel.
+        """
         if w < 100 or h < 50:
             return
-        w_changed = (w != self._last_canvas_w)
-        h_changed = (h != self._last_canvas_h)
-        if not w_changed and not h_changed:
+        if w == self._last_canvas_w and h == self._last_canvas_h:
             return
         self._last_canvas_w = w
         self._last_canvas_h = h
         self._grid.update_canvas_width(w)
         self._grid.update_canvas_height(h)
+        if not self._reflow_pending:
+            self._reflow_pending = True
+            GLib.timeout_add(150, self._do_reflow)
+
+    def _do_reflow(self) -> bool:
+        """Deferred reflow — called once 150ms after the last resize event."""
+        self._reflow_pending = False
         self._replace_all_blocks()
+        return False  # one-shot
 
     # ── Block construction & placement ────────────────────────────────────────
 
@@ -308,10 +350,22 @@ class EdmdWindow(Gtk.ApplicationWindow):
             block.refresh()
 
     def _refresh_block(self, name: str) -> None:
+        """Refresh a block immediately. Only used by _tick heartbeat."""
         entry = self._blocks.get(name)
         if entry:
             block, _ = entry
             block.refresh()
+
+    def _mark_dirty(self, name: str) -> None:
+        """Mark a block as needing refresh. Flushed at end of each poll cycle."""
+        if name in self._blocks:
+            self._dirty.add(name)
+
+    def _flush_dirty(self) -> None:
+        """Refresh all dirty blocks once, then clear. Called once per poll cycle."""
+        for name in self._dirty:
+            self._refresh_block(name)
+        self._dirty.clear()
 
     # ── Fullscreen ────────────────────────────────────────────────────────────
 
@@ -359,55 +413,61 @@ class EdmdWindow(Gtk.ApplicationWindow):
     # ── Queue polling ─────────────────────────────────────────────────────────
 
     def _poll_queue(self) -> bool:
+        # Drain the entire queue first, marking blocks dirty as we go.
+        # This coalesces bursts of updates (e.g. Status.json firing
+        # vessel_update + slf_update + plugin_refresh in one 500ms window)
+        # so each affected block repaints at most once per 100ms poll cycle.
         try:
             while True:
                 msg_type, payload = self._core.gui_queue.get_nowait()
 
                 if msg_type in ("cmdr_update", "vessel_update"):
-                    self._refresh_block("commander")
+                    self._mark_dirty("commander")
                 elif msg_type in ("crew_update", "slf_update"):
-                    self._refresh_block("crew_slf")
+                    self._mark_dirty("crew_slf")
                 elif msg_type == "mission_update":
-                    self._refresh_block("missions")
+                    self._mark_dirty("missions")
                 elif msg_type == "stats_update":
-                    self._refresh_block("session_stats")
+                    self._mark_dirty("session_stats")
                 elif msg_type == "holdings_update":
-                    self._refresh_block("assets")
+                    self._mark_dirty("assets")
                 elif msg_type == "alerts_update":
-                    self._refresh_block("alerts")
+                    self._mark_dirty("alerts")
                 elif msg_type == "career_update":
-                    self._refresh_block("career")
+                    self._mark_dirty("career")
                 elif msg_type == "capi_updated":
-                    # A CAPI endpoint refreshed — refresh all blocks that
-                    # might display CAPI-sourced data
                     for _n in ("assets", "commander", "cargo", "crew_slf"):
-                        self._refresh_block(_n)
+                        self._mark_dirty(_n)
                 elif msg_type == "all_update":
-                    self._refresh_all()
+                    for _n in self._blocks:
+                        self._mark_dirty(_n)
                 elif msg_type == "update_notice":
                     self._on_update_notice(payload)
                 elif msg_type == "plugin_refresh":
-                    # payload = plugin name; allows plugins to trigger their
-                    # own block refresh via core.gui_queue.put(("plugin_refresh", name))
-                    self._refresh_block(payload)
+                    self._mark_dirty(payload)
 
         except Exception:
             pass
 
+        # Flush: each dirty block renders exactly once this cycle.
+        self._flush_dirty()
         return True
 
     def _tick(self) -> bool:
-        # Give activity_combat plugin a chance to check no-kill timeout each second
+        # Heartbeat: give activity_combat a chance to check no-kill timeout.
         combat = getattr(self._core, "_plugins", {}).get("activity_combat")
         if combat and hasattr(combat, "tick"):
             try:
                 combat.tick(self._core.state)
             except Exception:
                 pass
-        # Refresh all blocks on the tick — builtins and plugin blocks alike.
-        # _refresh_block is a no-op for unknown names, so this is always safe.
+        # Mark all registered blocks dirty. The flush at the end of the next
+        # _poll_queue call renders each once. Blocks already dirty from
+        # a data event are not double-rendered — set.add() is idempotent.
+        # At TICK_MS=5000 this fires at most once every 5 seconds, acting as
+        # a safety net for blocks that have no event-driven refresh path.
         for name, _, _ in self._registry:
-            self._refresh_block(name)
+            self._mark_dirty(name)
         return True
 
     # ── Update notice ─────────────────────────────────────────────────────────
@@ -420,10 +480,11 @@ class EdmdWindow(Gtk.ApplicationWindow):
             # Legacy string format fallback
             kind, value = "release", payload
 
+        url = "github.com/drworman/EDMD/releases/latest"
         if kind == "release":
-            label = f"\u2b06 v{value} available  (File \u2192 Upgrade)"
+            label = f"\u2b06 v{value} available  —  {url}"
         else:
-            label = f"\u2b06 {value} new commit(s) on main  (File \u2192 Upgrade)"
+            label = f"\u2b06 {value} new commit(s) on main  —  {url}"
 
         self._title_lbl.set_label(
             f"{self._program}  v{self._version}  ·  {label}"
@@ -440,9 +501,9 @@ class EdmdApp(Gtk.Application):
         self._core    = core
         self._program = program
         self._version = version
-        self._theme       = core.cfg.gui_cfg.get("Theme",      "default")
-        self._font_size   = core.cfg.gui_cfg.get("FontSize",   14)
-        self._font_family = core.cfg.gui_cfg.get("FontFamily", "JetBrains Mono")
+        self._theme       = core.cfg.ui_cfg.get("Theme",      "default")
+        self._font_size   = core.cfg.ui_cfg.get("FontSize",   14)
+        self._font_family = core.cfg.ui_cfg.get("FontFamily", "JetBrains Mono")
 
     def do_activate(self) -> None:
         # Switch GTK theme to "Default" (minimal, no Adwaita CSD graphics)

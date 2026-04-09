@@ -539,15 +539,28 @@ class AssetsPlugin(BasePlugin):
                 bal = cmdr.get("credits")
                 if bal is not None:
                     state.assets_balance = float(bal)
-                sq = profile_data.get("squadron") or {}
+                _cmdr_sq = (profile_data.get("commander") or {}).get("squadron") or {}
+                sq = profile_data.get("squadron") or _cmdr_sq
                 if sq:
                     state.pilot_squadron_name = sq.get("name", "")
-                    state.pilot_squadron_tag  = sq.get("tag", "")
-                    state.pilot_squadron_rank = sq.get("rank", "")
+                    state.pilot_squadron_tag = (
+                        sq.get("tag") or sq.get("Tag") or sq.get("TAG") or
+                        sq.get("shortName") or sq.get("ShortName") or
+                        sq.get("shortname") or sq.get("short_name") or ""
+                    )
+                    state.pilot_squadron_rank = (
+                        sq.get("rank") or sq.get("Rank") or
+                        sq.get("rankName") or sq.get("currentRankName") or ""
+                    )
+
                 else:
                     state.pilot_squadron_name = ""
                     state.pilot_squadron_tag  = ""
                     state.pilot_squadron_rank = ""
+                gq = self.core.gui_queue if self.core else None
+                if gq:
+                    try: gq.put_nowait(("plugin_refresh", "commander"))
+                    except Exception: pass
 
                 # NOTE: CAPI launchBays reports wrong fighter type — not used.
         except Exception:

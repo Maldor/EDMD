@@ -28,7 +28,7 @@ if str(_HERE) not in sys.path:
 
 from core.state  import PROGRAM, VERSION, AUTHOR, GITHUB_REPO, DEBUG_MODE
 from core.emit   import Terminal
-from core.config import resolve_config_path, load_config_file, ConfigManager
+from core.config import resolve_config_path, load_config_file, ConfigManager, migrate_config_if_needed
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -44,7 +44,12 @@ parser.add_argument("-t", "--test", action="store_true", default=None,
 parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
 parser.add_argument("-g", "--gui", action="store_true", default=None,
-                    help="Launch GTK4 GUI (Linux only; requires PyGObject)")
+                    help="Alias for --mode gtk4 (launch GTK4 GUI)")
+parser.add_argument("--mode", choices=["terminal", "textual", "gtk4"],
+                    default=None, metavar="MODE",
+                    help="UI mode: terminal (default) | textual | gtk4")
+parser.add_argument("--log-file", metavar="PATH",
+                    help="Tee all terminal output to PATH (safe with --mode gtk4; avoids pipe buffer deadlock)")
 parser.add_argument("--upgrade",         action="store_true", default=False,
                     help="Pull latest release and restart")
 parser.add_argument("--upgrade-nightly", action="store_true", default=False,
@@ -192,9 +197,56 @@ if config_path is None:
     )
     sys.exit(1)
 
+migrate_config_if_needed(config_path)  # silently rewrite old [GUI]/sub-table format before loading
 config_dict = load_config_file(config_path)
 notify_test = bool(args.test)  if args.test  is not None else False
 trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
+
+# ── Log file (--log-file) ─────────────────────────────────────────────────────
+# Opens a log file and tees ALL stdout output to it alongside the terminal.
+# This is intentionally separate from shell redirection (> file) to avoid
+# the pipe-buffer deadlock that occurs when running with --gui and --trace:
+# shell pipes are bounded buffers; a blocked print() in the monitor thread
+# stalls the journal loop, starving the GTK main loop of events.
+# Opening the file directly bypasses the pipe entirely.
+
+_log_fh = None
+
+if args.log_file:
+    import io as _io
+    _log_path = Path(args.log_file).expanduser().resolve()
+    try:
+        _log_fh = open(_log_path, "w", encoding="utf-8", buffering=1)
+
+        class _TeeWriter(_io.TextIOBase):
+            """Write to both the original stdout and a log file simultaneously."""
+            def __init__(self, primary, secondary):
+                self._primary   = primary
+                self._secondary = secondary
+            def write(self, text):
+                self._primary.write(text)
+                self._primary.flush()
+                try:
+                    self._secondary.write(text)
+                    self._secondary.flush()
+                except Exception:
+                    pass
+                return len(text)
+            def flush(self):
+                self._primary.flush()
+                try:
+                    self._secondary.flush()
+                except Exception:
+                    pass
+            @property
+            def encoding(self):
+                return getattr(self._primary, "encoding", "utf-8")
+
+        sys.stdout = _TeeWriter(sys.stdout, _log_fh)
+        print(f"[EDMD] Logging to: {_log_path}")
+    except OSError as _e:
+        print(f"[EDMD] Warning: could not open log file {_log_path!r}: {_e}")
+        _log_fh = None
 
 # Preliminary manager — profile may be updated after commander name is known
 mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile)
@@ -263,12 +315,10 @@ def _scan_fid_from_journals(jdir: Path) -> str:
             pass
     return ""
 
-from core.state import set_active_fid, get_last_fid, migrate_legacy_cmdr_files
+from core.state import set_active_fid, get_last_fid
 
 _fid = _scan_fid_from_journals(journal_dir) or get_last_fid()
 if _fid:
-    # Migrate legacy flat files to per-commander directory (no-op if already done)
-    migrate_legacy_cmdr_files(_fid)
     set_active_fid(_fid)
     state.pilot_fid = _fid
     print(f"{Terminal.YELL}Commander FID:{Terminal.END} {_fid}")
@@ -290,9 +340,22 @@ print(
 )
 
 
-# ── GUI mode ──────────────────────────────────────────────────────────────────
+# ── UI mode ───────────────────────────────────────────────────────────────────
+# Priority: --mode CLI flag > --gui alias > config [UI] Mode value > default
+# --gui is kept as a backwards-compatible alias for --mode gtk4.
 
-gui_mode = bool(args.gui) or bool(mgr.gui_cfg.get("Enabled", False))
+_cfg_mode = mgr.ui_cfg.get("Mode", "terminal").lower().strip()
+
+if args.mode:
+    ui_mode = args.mode
+elif args.gui:
+    ui_mode = "gtk4"
+elif _cfg_mode in ("terminal", "textual", "gtk4"):
+    ui_mode = _cfg_mode
+else:
+    ui_mode = "terminal"
+
+gui_mode = (ui_mode == "gtk4")   # kept for internal compat (emitter, update notices)
 
 
 # ── Emitter ───────────────────────────────────────────────────────────────────
@@ -405,12 +468,36 @@ def run_monitor() -> None:
 
 
 if __name__ == "__main__":
-    if gui_mode:
+    if ui_mode == "textual":
+        try:
+            from tui.app import run_tui
+        except ImportError:
+            print(
+                f"{Terminal.WARN}ERROR:{Terminal.END} Textual TUI requested but not installed.\n"
+                f"Install with: pip install textual"
+            )
+            sys.exit(1)
+
+        _tui_theme = mgr.ui_cfg.get("Theme", "default")
+
+        monitor_thread = threading.Thread(target=run_monitor, daemon=True)
+        monitor_thread.start()
+
+        status_thread = threading.Thread(
+            target=_poll_status_json,
+            args=(journal_dir, state, gui_queue),
+            daemon=True,
+        )
+        status_thread.start()
+
+        run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
+
+    elif ui_mode == "gtk4":
         try:
             from gui.app import EdmdApp
         except ImportError as e:
             print(
-                f"{Terminal.WARN}ERROR:{Terminal.END} GUI mode requested but gui/ could not be loaded: {e}\n"
+                f"{Terminal.WARN}ERROR:{Terminal.END} GTK4 mode requested but gui/ could not be loaded: {e}\n"
                 f"Ensure PyGObject (GTK4) is installed: pacman -S python-gobject gtk4"
             )
             sys.exit(1)
@@ -460,9 +547,21 @@ if __name__ == "__main__":
                                 if not all(p in line for p in _DROP):
                                     _orig_out.write(line)
                                     _orig_out.flush()
+                                    if _log_fh is not None:
+                                        try:
+                                            _log_fh.write(line.decode("utf-8", errors="replace"))
+                                            _log_fh.flush()
+                                        except Exception:
+                                            pass
                     if buf and not all(p in buf for p in _DROP):
                         _orig_out.write(buf)
                         _orig_out.flush()
+                        if _log_fh is not None:
+                            try:
+                                _log_fh.write(buf.decode("utf-8", errors="replace"))
+                                _log_fh.flush()
+                            except Exception:
+                                pass
 
                 _th.Thread(target=_pump, daemon=True,
                            name="stderr-filter").start()
@@ -472,5 +571,11 @@ if __name__ == "__main__":
         app = EdmdApp(core, PROGRAM, VERSION)
         app.run(None)
 
-    else:
+    else:  # terminal
         run_monitor()
+
+    if _log_fh is not None:
+        try:
+            _log_fh.close()
+        except Exception:
+            pass

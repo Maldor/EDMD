@@ -10,7 +10,7 @@ EDMD has two types of dependencies:
 
 **System packages** (install via your package manager — do NOT use pip for these on Linux):
 - `python-psutil` — process and system utilities
-- `python-gobject` + `gtk4` — GTK4 GUI support (Linux and macOS; optional)
+- `python-gobject` + `gtk4` — GTK4 GUI support (Linux; optional)
 
 **pip packages:**
 - `discord-webhook` — Discord notification support
@@ -72,27 +72,11 @@ pip install discord-webhook cryptography --break-system-packages
 
 Download **`EDMD-Setup-{version}.exe`** from the [latest release](https://github.com/drworman/EDMD/releases/latest).
 
-The installer handles everything automatically: MSYS2, GTK4, Python, all pip dependencies, Start Menu shortcuts for both GUI and terminal mode, and the EDMD source. See **[docs/guides/WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md)** for full details.
+The installer is fully self-contained — it ships a bundled Python + GTK4 runtime and requires **no MSYS2 installation** on your machine. The only external requirement is [Git for Windows](https://git-scm.com/download/win) for downloading the EDMD source and future updates; the installer will offer to install git automatically if it is not found.
 
-**Requirement:** [Git for Windows](https://git-scm.com/download/win) must be installed and on your PATH before running the installer. Git is required to download the EDMD source and to apply future updates.
+See **[docs/guides/WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md)** for full details.
 
 > **Developer notice:** EDMD is developed and tested on Linux. Windows support is best-effort — the developer cannot provide direct troubleshooting for Windows-specific issues.
-
----
-
-## macOS
-
-Elite Dangerous does not run natively on macOS — see [docs/guides/MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) for how to point EDMD at a journal folder from a remote or Wine-based setup.
-
-```bash
-bash install_macos.sh
-```
-
-GTK4 is installed via [Homebrew](https://brew.sh). The GUI is supported on macOS 13 Ventura or newer.
-
-See **[docs/guides/MACOS_SETUP.md](docs/guides/MACOS_SETUP.md)** for full instructions.
-
-> **Developer notice:** EDMD is developed and tested on Linux. macOS support is a best-effort community resource — the developer cannot provide direct troubleshooting for macOS-specific installation issues.
 
 ---
 
@@ -105,7 +89,6 @@ If you need to locate or create it manually:
 |----------|------|
 | Linux | `~/.local/share/EDMD/config.toml` |
 | Windows | `%APPDATA%\EDMD\config.toml` |
-| macOS | `~/Library/Application Support/EDMD/config.toml` |
 
 On Linux, `~/.config/EDMD` is a symlink to `~/.local/share/EDMD/` — you can use
 either path. A repo-adjacent `config.toml` is also accepted as a fallback for
@@ -148,7 +131,6 @@ The GUI requires PyGObject with GTK4 bindings. If these are not available EDMD f
 | Platform | GUI support | How to get GTK4 |
 |---|---|---|
 | Linux | ✅ First-class | System package manager — see distro sections above |
-| macOS | ⚠️ Best-effort | Homebrew — see [MACOS_SETUP.md](docs/guides/MACOS_SETUP.md) |
 | Windows | ⚠️ Experimental | Installer — see [WINDOWS_INSTALLER.md](docs/guides/WINDOWS_INSTALLER.md) |
 
 GTK4 availability is checked at runtime — if `--gui` is passed but PyGObject cannot be loaded, EDMD prints a clear error and falls back to terminal mode.

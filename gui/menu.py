@@ -10,9 +10,6 @@ Menu structure:
 About dialog: version, author, Ko-Fi, PayPal, GitHub links.
 """
 
-import subprocess
-import sys
-import os
 import webbrowser
 
 try:
@@ -111,9 +108,6 @@ class EdmdMenuBar:
         pop = self._popover()
         box = self._vbox()
 
-        box.append(self._menu_btn("⬆  Upgrade  (Release)", self._on_upgrade))
-        box.append(self._menu_btn("⬆  Upgrade  (Nightly)", self._on_upgrade_nightly))
-        box.append(self._separator())
         box.append(self._menu_btn("✕  Exit", self._on_exit))
 
         pop.set_child(box)
@@ -197,26 +191,6 @@ class EdmdMenuBar:
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
-    def _on_upgrade(self, *_) -> None:
-        try:
-            from core.state import save_session_state
-            from pathlib import Path
-            save_session_state(Path("."), self._win._core.active_session)
-        except Exception:
-            pass
-        new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")] + ["--upgrade"]
-        os.execv(sys.executable, [sys.executable] + new_argv)
-
-    def _on_upgrade_nightly(self, *_) -> None:
-        try:
-            from core.state import save_session_state
-            from pathlib import Path
-            save_session_state(Path("."), self._win._core.active_session)
-        except Exception:
-            pass
-        new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")] + ["--upgrade-nightly"]
-        os.execv(sys.executable, [sys.executable] + new_argv)
-
     def _on_exit(self, *_) -> None:
         self._win.get_application().quit()
 
@@ -291,7 +265,7 @@ class EdmdMenuBar:
 
     def _show_about_dialog(self) -> None:
         from gui.helpers import avatar_path_for_theme
-        theme = self._win._core.cfg.gui_cfg.get("Theme", "default")
+        theme = self._win._core.cfg.ui_cfg.get("Theme", "default")
 
         dlg = Gtk.Window(title="About EDMD")
         dlg.set_transient_for(self._win)
