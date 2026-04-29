@@ -7,6 +7,8 @@ The Python backend is completely unchanged — all existing modes (`terminal`,
 `textual`, `gtk4`) continue to work exactly as before.
 
 ---
+## Notice
+Support for Electron GUI was added by the original developer but hasn't been tested by the current developer. Your mileage may vary, I welcome recommendations for improvements though!
 
 ## Prerequisites
 

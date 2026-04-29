@@ -4,6 +4,10 @@ All EDMD commits, tags, and release artifacts are signed with an SSH key.
 
 ---
 
+## Warning
+
+This functionality may be impacted because of a codebase transfer. You may take this warning how you wish.
+
 ## Verifying a release artifact
 
 Every file on the [releases page](https://github.com/maldor/EDMD/releases) is
