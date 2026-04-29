@@ -16,7 +16,7 @@ a = Analysis(
            ('themes', 'themes'),
            ('tui', 'tui')
     ],
-    hiddenimports=[],
+    hiddenimports=['sqlite3'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
