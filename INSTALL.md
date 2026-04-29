@@ -4,7 +4,10 @@ EDMD is a Python daemon for real-time Elite Dangerous session monitoring. It sup
 
 ---
 
-## Windows
+# IMPORTANT
+**There are not any releases that are available at this time because of a codebase transfer, this will be recitified as soon as practical.**
+
+~~## Windows
 
 Download `EDMD-{version}-win.exe` from the [releases page](https://github.com/maldor/EDMD/releases) and run the installer. **No prerequisites are required.** Python 3.12, all Python dependencies, and the EDMD source are bundled inside the installer.
 
@@ -31,9 +34,9 @@ If EDMD cannot find your journal directory it will display a clear error with a 
 
 The launcher log captures all startup activity and Python output. Check it first if EDMD fails to start.
 
----
+---~~
 
-## macOS
+~~## macOS
 
 Download `EDMD-{version}-mac.dmg` from the [releases page](https://github.com/maldor/EDMD/releases). Drag EDMD to Applications and launch it.
 
@@ -45,9 +48,9 @@ pip3 install websockets discord-webhook cryptography psutil
 
 Config file location: `~/Library/Application Support/EDMD/config.toml`
 
----
+---~~
 
-## Linux — Arch
+~~## Linux — Arch
 
 Arch ships current versions of everything EDMD needs.
 
@@ -67,9 +70,9 @@ nano ~/.local/share/EDMD/config.toml   # set JournalFolder at minimum
 ./edmd.py --mode gtk4        # GTK4 GUI
 ```
 
----
+---~~
 
-## Linux — Debian / Ubuntu
+~~## Linux — Debian / Ubuntu
 
 ```bash
 sudo apt install python3-psutil python3-gi gir1.2-gtk-4.0
@@ -87,18 +90,18 @@ nano ~/.local/share/EDMD/config.toml
 ./edmd.py --mode gtk4
 ```
 
----
+---~~
 
-## Linux — Fedora
+~~## Linux — Fedora
 
 ```bash
 sudo dnf install python3-psutil python3-gobject gtk4
 pip install discord-webhook cryptography --break-system-packages
 ```
 
----
+---~~
 
-## Electron GUI (Linux / macOS from source)
+~~## Electron GUI (Linux / macOS from source)
 
 The Electron GUI is bundled in the Windows installer. On Linux and macOS it can be run from source alongside the Python backend:
 
@@ -109,7 +112,7 @@ cd electron && npm install && npm run dev
 
 For a packaged AppImage (Linux) or DMG (macOS), download the appropriate release artifact — Python must be installed on the system.
 
----
+---~~
 
 ## Config file locations
 
@@ -140,15 +143,15 @@ If no config file is found on startup, EDMD creates one with safe defaults and p
 
 ---
 
-## Verifying a Linux install
+~~## Verifying a Linux install
 
 ```bash
 python3 -c "import psutil, discord_webhook, cryptography; print('All dependencies OK')"
 ```
 
----
+---~~
 
-## Troubleshooting
+~~## Troubleshooting
 
 **`ModuleNotFoundError: No module named 'psutil'`**
 Install via package manager: `sudo pacman -S python-psutil` (Arch) · `sudo apt install python3-psutil` (Debian/Ubuntu).
@@ -172,4 +175,4 @@ Open `%APPDATA%\EDMD\electron-launcher.log` in any text editor. All startup acti
 Ensure `adwaita-icon-theme` (or equivalent) is installed.
 
 **sshfs for remote access**
-`sudo pacman -S sshfs` (Arch) · `sudo apt install sshfs` (Debian/Ubuntu) · `sudo dnf install fuse-sshfs` (Fedora). See [docs/guides/REMOTE_ACCESS.md](docs/guides/REMOTE_ACCESS.md).
+`sudo pacman -S sshfs` (Arch) · `sudo apt install sshfs` (Debian/Ubuntu) · `sudo dnf install fuse-sshfs` (Fedora). See [docs/guides/REMOTE_ACCESS.md](docs/guides/REMOTE_ACCESS.md).~~
