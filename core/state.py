@@ -21,7 +21,7 @@ from pathlib import Path
 
 PROGRAM = "Elite Dangerous Monitor Daemon"
 DESC    = "Continuous monitoring of Elite Dangerous AFK sessions."
-AUTHOR  = "CMDR CALURSUS"
+AUTHOR  = "CMDR MALDOR96"
 VERSION = (Path(__file__).parent / "version").read_text().strip()
 GITHUB_REPO = "maldor/EDMD"
 DEBUG_MODE  = False
