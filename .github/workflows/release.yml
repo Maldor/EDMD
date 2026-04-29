@@ -1,0 +1,498 @@
+name: Release
+
+# Two triggers:
+#
+#   1. push: tags: ['*']
+#      Fires on any tag push or force-push, from any branch.
+#      Use for test builds: git push origin vX.Y.Z
+#      Re-trigger: git push --force origin vX.Y.Z
+#
+#   2. release: types: [published]
+#      Fires when you publish a release in the GitHub UI.
+#
+# Artifacts:
+#   EDMD-{version}.tar.gz / .sig
+#   EDMD-{version}.sha256 / .sig
+#   EDMD-{version}-linux.AppImage / .sig
+#   EDMD-{version}-linux.deb      / .sig
+#   EDMD-{version}-win.exe        / .sig   (bundles Python 3.12 + deps)
+#   EDMD-{version}-mac.dmg        / .sig
+#
+# Secrets required:
+#   SIGNING_KEY       ed25519 private key, no passphrase
+#   SIGNING_IDENTITY  email matching signing_key.pub
+
+on:
+  push:
+    tags:
+      - '*'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  VERSION:    ${{ github.event.release.tag_name || github.ref_name }}
+  SIGNING_NS: edmd.release
+
+# ── Job 1: Source tarball ──────────────────────────────────────────────────────
+
+jobs:
+  source:
+    name: Source tarball
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Verify version matches core/version
+        run: |
+          TAG="${{ env.VERSION }}"
+          FILE_VER=$(cat core/version | tr -d '[:space:]')
+          echo "Tag: $TAG  |  core/version: $FILE_VER"
+          if [ "$TAG" != "$FILE_VER" ]; then
+            echo "ERROR: tag '$TAG' does not match core/version '$FILE_VER'"
+            exit 1
+          fi
+
+      - name: Create dist
+        run: mkdir -p dist
+
+      - name: Build source tarball
+        run: |
+          tar czf "dist/EDMD-${{ env.VERSION }}.tar.gz" \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            --exclude='components/ksw' \
+            --exclude='ksw-admin' \
+            --exclude='allowlist.ksw' \
+            --exclude='electron/node_modules' \
+            --exclude='electron/renderer/node_modules' \
+            --exclude='electron/renderer/dist' \
+            --exclude='electron/dist' \
+            --exclude='electron/bundled-python' \
+            --exclude='dist' \
+            --transform "s|^\.|EDMD-${{ env.VERSION }}|" \
+            .
+          echo "Size: $(du -sh dist/EDMD-${{ env.VERSION }}.tar.gz | cut -f1)"
+
+      - name: Sign tarball
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" \
+            "dist/EDMD-${{ env.VERSION }}.tar.gz"
+          rm -f "$KEY"
+          ls -lh dist/
+
+      - name: Save artifacts for checksums job
+        uses: actions/upload-artifact@v6
+        with:
+          name: source-artifacts
+          path: dist/EDMD-${{ env.VERSION }}.*
+          if-no-files-found: error
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ env.VERSION }}" dist/* --clobber \
+            2>/dev/null || echo "No matching release — artifacts available in Actions run"
+
+# ── Job 2: Electron — Linux ────────────────────────────────────────────────────
+
+  electron-linux:
+    name: Electron (Linux)
+    runs-on: ubuntu-latest
+    needs: source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install dependencies
+        working-directory: electron
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        working-directory: electron
+        run: cd renderer && npx vite build
+
+      - name: Create bundled-python placeholder (Linux — Python is system-installed)
+        working-directory: electron
+        run: mkdir -p bundled-python && touch bundled-python/.placeholder
+
+      - name: Build Electron (Linux)
+        working-directory: electron
+        run: |
+          VER="${{ env.VERSION }}"
+          SEMVER="${VER:0:4}.${VER:4:2}.${VER:6:2}${VER:8}"
+          echo "EDMD: $VER  ->  semver: $SEMVER"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+            pkg.version = '$SEMVER';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+          npx electron-builder --linux AppImage deb --publish never
+
+      - name: Collect and rename artifacts
+        run: |
+          mkdir -p dist
+          APP=$(ls electron/dist/*.AppImage 2>/dev/null | head -1)
+          DEB=$(ls electron/dist/*.deb       2>/dev/null | head -1)
+          [ -f "$APP" ] && cp "$APP" "dist/EDMD-${{ env.VERSION }}-linux.AppImage"
+          [ -f "$DEB" ] && cp "$DEB" "dist/EDMD-${{ env.VERSION }}-linux.deb"
+          ls -lh dist/
+
+      - name: Sign Linux artifacts
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          for f in dist/EDMD-${{ env.VERSION }}-linux.*; do
+            case "$f" in *.sig) continue ;; esac
+            [ -f "$f" ] && ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" "$f"
+          done
+          rm -f "$KEY"
+
+      - name: Save artifacts for checksums job
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-artifacts
+          path: dist/EDMD-${{ env.VERSION }}-linux.*
+          if-no-files-found: warn
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in dist/EDMD-${{ env.VERSION }}-linux.*; do
+            [ -f "$f" ] && gh release upload "${{ env.VERSION }}" "$f" --clobber \
+              2>/dev/null || true
+          done
+
+# ── Job 3: Electron — Windows ──────────────────────────────────────────────────
+
+  electron-windows:
+    name: Electron (Windows)
+    runs-on: windows-latest
+    needs: source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install dependencies
+        working-directory: electron
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        working-directory: electron
+        run: cd renderer && npx vite build
+
+      - name: Bundle Python embeddable + dependencies (Windows)
+        working-directory: electron
+        shell: pwsh
+        run: |
+          $PY_VER = "3.12.9"
+          $PY_URL = "https://www.python.org/ftp/python/$PY_VER/python-$PY_VER-embed-amd64.zip"
+          Write-Host "Downloading Python $PY_VER embeddable..."
+          Invoke-WebRequest -Uri $PY_URL -OutFile python-embed.zip -UseBasicParsing
+          Expand-Archive -Path python-embed.zip -DestinationPath bundled-python -Force
+          Remove-Item python-embed.zip
+
+          $pth = Get-ChildItem bundled-python -Filter "python*._pth" | Select-Object -First 1
+          Write-Host "Enabling site-packages in $($pth.Name)..."
+          (Get-Content $pth.FullName) -replace "^#import site","import site" |
+            Set-Content $pth.FullName
+
+          Write-Host "Installing pip..."
+          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" `
+            -OutFile get-pip.py -UseBasicParsing
+          .\bundled-python\python.exe get-pip.py --no-warn-script-location -q
+          Remove-Item get-pip.py
+
+          Write-Host "Installing EDMD Python dependencies..."
+          .\bundled-python\python.exe -m pip install `
+            "websockets>=12.0" `
+            "discord-webhook>=1.3.0" `
+            "cryptography>=41.0.0" `
+            "psutil>=5.9.0" `
+            --no-warn-script-location -q
+
+          .\bundled-python\python.exe --version
+          .\bundled-python\python.exe -c "import websockets; print('websockets OK')"
+          .\bundled-python\python.exe -c "import discord_webhook; print('discord-webhook OK')"
+          .\bundled-python\python.exe -c "import cryptography; print('cryptography OK')"
+
+      - name: Verify bundled-python contents before build
+        working-directory: electron
+        shell: pwsh
+        run: |
+          Write-Host "=== bundled-python contents ==="
+          if (Test-Path bundled-python) {
+            $items = Get-ChildItem bundled-python -Recurse | Measure-Object
+            $size  = (Get-ChildItem bundled-python -Recurse | Measure-Object -Property Length -Sum).Sum
+            Write-Host "Files: $($items.Count)  Total size: $([math]::Round($size/1MB, 1)) MB"
+            Get-ChildItem bundled-python | Select-Object Name, Length | Format-Table
+            # Verify python.exe exists
+            if (Test-Path bundled-python/python.exe) {
+              Write-Host "python.exe: OK"
+            } else {
+              Write-Error "python.exe NOT FOUND in bundled-python — build will lack embedded Python"
+              exit 1
+            }
+          } else {
+            Write-Error "bundled-python directory does not exist — Python bundling step failed"
+            exit 1
+          }
+
+      - name: Patch version and build
+        working-directory: electron
+        shell: pwsh
+        run: |
+          $ver = "${{ env.VERSION }}"
+          $semver = $ver.Substring(0,4) + '.' + $ver.Substring(4,2) + '.' + $ver.Substring(6,2) + $ver.Substring(8)
+          Write-Host "EDMD: $ver  ->  semver: $semver"
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $pkg.version = $semver
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+          npx electron-builder --win nsis --publish never
+          # Verify output installer size — should be >100 MB with bundled Python
+          $exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+          if ($exe) {
+            $sizeMB = [math]::Round($exe.Length / 1MB, 1)
+            Write-Host "Installer size: $sizeMB MB  ($($exe.Name))"
+            if ($sizeMB -lt 50) {
+              Write-Warning "Installer is suspiciously small ($sizeMB MB) — bundled Python may be missing"
+            }
+          }
+
+      - name: Collect and sign
+        shell: bash
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          mkdir -p dist
+          EXE=$(ls electron/dist/*.exe 2>/dev/null | head -1)
+          [ -f "$EXE" ] && cp "$EXE" "dist/EDMD-${{ env.VERSION }}-win.exe"
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          [ -f "dist/EDMD-${{ env.VERSION }}-win.exe" ] && \
+            ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" \
+              "dist/EDMD-${{ env.VERSION }}-win.exe"
+          rm -f "$KEY"
+          ls -lh dist/
+
+      - name: Save artifacts for checksums job
+        uses: actions/upload-artifact@v6
+        with:
+          name: win-artifacts
+          path: dist/EDMD-${{ env.VERSION }}-win.*
+          if-no-files-found: warn
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in dist/EDMD-${{ env.VERSION }}-win.*; do
+            [ -f "$f" ] && gh release upload "${{ env.VERSION }}" "$f" --clobber \
+              2>/dev/null || true
+          done
+
+# ── Job 4: Electron — macOS ────────────────────────────────────────────────────
+
+  electron-mac:
+    name: Electron (macOS)
+    runs-on: macos-latest
+    needs: source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install dependencies
+        working-directory: electron
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        working-directory: electron
+        run: cd renderer && npx vite build
+
+      - name: Create bundled-python placeholder (macOS — Python is system-installed)
+        working-directory: electron
+        run: mkdir -p bundled-python && touch bundled-python/.placeholder
+
+      - name: Patch version and build
+        working-directory: electron
+        run: |
+          VER="${{ env.VERSION }}"
+          SEMVER="${VER:0:4}.${VER:4:2}.${VER:6:2}${VER:8}"
+          echo "EDMD: $VER  ->  semver: $SEMVER"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+            pkg.version = '$SEMVER';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+          npx electron-builder --mac dmg --publish never
+
+      - name: Collect and sign
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          mkdir -p dist
+          DMG=$(ls electron/dist/*.dmg 2>/dev/null | head -1)
+          [ -f "$DMG" ] && cp "$DMG" "dist/EDMD-${{ env.VERSION }}-mac.dmg"
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          [ -f "dist/EDMD-${{ env.VERSION }}-mac.dmg" ] && \
+            ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" \
+              "dist/EDMD-${{ env.VERSION }}-mac.dmg"
+          rm -f "$KEY"
+
+      - name: Save artifacts for checksums job
+        uses: actions/upload-artifact@v6
+        with:
+          name: mac-artifacts
+          path: dist/EDMD-${{ env.VERSION }}-mac.*
+          if-no-files-found: warn
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in dist/EDMD-${{ env.VERSION }}-mac.*; do
+            [ -f "$f" ] && gh release upload "${{ env.VERSION }}" "$f" --clobber \
+              2>/dev/null || true
+          done
+
+# ── Job 5: Checksums ───────────────────────────────────────────────────────────
+
+  checksums:
+    name: Aggregate checksums
+    runs-on: ubuntu-latest
+    needs: [source, electron-linux, electron-windows, electron-mac]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Download all artifacts from build jobs
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Remove any stale checksum/sig files before regenerating
+        run: |
+          mkdir -p dist
+          rm -f dist/*.sha256 dist/*.sha256.sig dist/*.sig
+          ls -lh dist/
+
+      - name: Generate unified SHA-256 file
+        working-directory: dist
+        run: |
+          sha256sum EDMD-${{ env.VERSION }}* \
+            | grep -v '\.sha256' \
+            | grep -v '\.sig' \
+            > EDMD-${{ env.VERSION }}.sha256
+          echo ""
+          cat EDMD-${{ env.VERSION }}.sha256
+
+      - name: Sign checksum file
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          ssh-keygen -Y sign -f "$KEY" -n "${{ env.SIGNING_NS }}" \
+            "dist/EDMD-${{ env.VERSION }}.sha256"
+          rm -f "$KEY"
+
+      - name: Verify all signatures
+        env:
+          SIGNING_KEY:      ${{ secrets.SIGNING_KEY }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          KEY=$(mktemp); chmod 600 "$KEY"; echo "$SIGNING_KEY" > "$KEY"
+          PUB=$(ssh-keygen -y -f "$KEY")
+          rm -f "$KEY"
+          ALLOWED=$(mktemp)
+          echo "${{ env.SIGNING_IDENTITY }} namespaces=\"${{ env.SIGNING_NS }}\" $PUB" > "$ALLOWED"
+          FAIL=0
+          for sig in dist/*.sig; do
+            artifact="${sig%.sig}"
+            [ -f "$artifact" ] || continue
+            echo -n "Verifying $artifact ... "
+            if ssh-keygen -Y verify \
+                -f "$ALLOWED" -I "${{ env.SIGNING_IDENTITY }}" \
+                -n "${{ env.SIGNING_NS }}" -s "$sig" < "$artifact" 2>/dev/null; then
+              echo "OK"
+            else
+              echo "FAILED"; FAIL=1
+            fi
+          done
+          rm -f "$ALLOWED"
+          [ "$FAIL" -eq 0 ] || { echo "Signature verification failed"; exit 1; }
+          echo "All signatures OK."
+
+      - name: Upload checksums and sigs to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ env.VERSION }}" \
+            dist/EDMD-${{ env.VERSION }}.sha256 \
+            dist/EDMD-${{ env.VERSION }}.sha256.sig \
+            --clobber 2>/dev/null \
+            || echo "No matching release — checksums available in Actions run"
+          for f in dist/*.sig; do
+            [ -f "$f" ] && gh release upload "${{ env.VERSION }}" "$f" \
+              --clobber 2>/dev/null || true
+          done
