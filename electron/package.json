@@ -1,0 +1,28 @@
+{
+  "name": "edmd-electron",
+  "version": "0.0.1",
+  "description": "Elite Dangerous Monitor Daemon — Electron GUI",
+  "main": "main.js",
+  "scripts": {
+    "dev": "concurrently --kill-others \"npm run dev:renderer\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:renderer": "cd renderer && npx vite",
+    "build": "cd renderer && npx vite build && cd .. && npx electron-builder",
+    "build:win": "cd renderer && npx vite build && cd .. && npx electron-builder --win",
+    "build:linux": "cd renderer && npx vite build && cd .. && npx electron-builder --linux",
+    "build:mac": "cd renderer && npx vite build && cd .. && npx electron-builder --mac",
+    "preview": "cd renderer && npx vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": ">=6.0.0",
+    "concurrently": "^8.0.0",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.8.1",
+    "vite": "^8.0.0",
+    "wait-on": "^7.0.0"
+  },
+  "author": "CMDR CALURSUS",
+  "homepage": "https://github.com/maldor/EDMD"
+}

@@ -1,0 +1,179 @@
+/* ── EDMD Elite theme ──────────────────────────────────────────────────────── */
+
+:root {
+  /* Elite orange — primary accent, matches GTK4/TUI themes */
+  --accent:        #e07b20;
+  --accent-dim:    #a05810;
+  --accent-bright: #f09030;
+
+  /* Backgrounds */
+  --bg:            #0d0d0d;
+  --bg-panel:      #141414;
+  --bg-header:     #1a1a1a;
+  --bg-hover:      #1f1f1f;
+  --bg-input:      #111111;
+
+  /* Text */
+  --text:          #d4d4d4;
+  --text-dim:      #888888;
+  --text-bright:   #ffffff;
+  --text-muted:    #555555;
+
+  /* Status colours */
+  --health-good:   #44cc44;
+  --health-warn:   #e0a020;
+  --health-crit:   #cc3333;
+  --shield-up:     #4488cc;
+  --shield-down:   #cc3333;
+
+  /* Borders */
+  --border:        #2a2a2a;
+  --border-accent: #e07b20;
+
+  /* Layout */
+  --panel-gap:     4px;
+  --panel-pad:     8px;
+  --header-h:      28px;
+}
+
+body {
+  background: var(--bg);
+  color:      var(--text);
+  font-family: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  user-select: none;
+}
+
+/* ── Panels ─────────────────────────────────────────────────────────────────── */
+
+.panel {
+  background:    var(--bg-panel);
+  border:        1px solid var(--border);
+  border-radius: 2px;
+  display:       flex;
+  flex-direction: column;
+  overflow:      hidden;
+  min-height:    0;
+}
+
+.panel-header {
+  background:  var(--bg-header);
+  color:       var(--accent);
+  font-weight: bold;
+  font-size:   11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding:     3px var(--panel-pad);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  height:      var(--header-h);
+  display:     flex;
+  align-items: center;
+}
+
+.panel-body {
+  padding:    var(--panel-pad);
+  flex:       1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ── Key-value rows ──────────────────────────────────────────────────────────── */
+
+.kv-row {
+  display:       flex;
+  align-items:   baseline;
+  padding:       1px 0;
+  border-bottom: 1px solid transparent;
+}
+.kv-row:hover { background: var(--bg-hover); }
+
+.kv-key {
+  color:       var(--text-dim);
+  flex:        1;
+  font-size:   11px;
+  white-space: nowrap;
+  overflow:    hidden;
+  text-overflow: ellipsis;
+}
+
+.kv-val {
+  color:      var(--text);
+  text-align: right;
+  font-size:  12px;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
+/* ── Alerts ──────────────────────────────────────────────────────────────────── */
+
+.alert-entry {
+  padding:    2px var(--panel-pad);
+  font-size:  12px;
+  border-left: 2px solid var(--accent);
+  margin-bottom: 2px;
+  background: var(--bg);
+}
+.alert-entry.faded {
+  opacity: 0.4;
+  border-left-color: var(--text-muted);
+}
+
+/* ── Health bar ──────────────────────────────────────────────────────────────── */
+
+.health-bar-outer {
+  height:       6px;
+  background:   var(--bg);
+  border:       1px solid var(--border);
+  border-radius: 2px;
+  overflow:     hidden;
+  margin:       2px 0;
+}
+.health-bar-inner {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.health-bar-inner.good { background: var(--health-good); }
+.health-bar-inner.warn { background: var(--health-warn); }
+.health-bar-inner.crit { background: var(--health-crit); }
+
+/* ── Connection overlay ──────────────────────────────────────────────────────── */
+
+.connecting-overlay {
+  position: fixed;
+  inset:    0;
+  display:  flex;
+  flex-direction: column;
+  align-items:   center;
+  justify-content: center;
+  background: var(--bg);
+  z-index:   999;
+  gap:       16px;
+}
+
+.connecting-overlay .spinner {
+  width:  40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.connecting-overlay .msg {
+  color:     var(--text-dim);
+  font-size: 13px;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }

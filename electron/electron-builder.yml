@@ -1,0 +1,101 @@
+# electron/electron-builder.yml — build configuration for all platforms
+#
+# Produces:
+#   Windows : EDMD-Setup-{version}.exe       (NSIS installer)
+#   Linux   : EDMD-{version}.AppImage        (portable, no install needed)
+#             edmd_{version}_amd64.deb       (Debian/Ubuntu package)
+#   macOS   : EDMD-{version}.dmg             (drag-to-Applications)
+
+appId:       com.indevlin.edmd
+productName: EDMD
+copyright:   "CMDR CALURSUS"
+
+directories:
+  output: dist
+
+# ── Electron app bundle files ─────────────────────────────────────────────────
+files:
+  - main.js
+  - preload.js
+  - renderer/dist/**
+
+# ── Python source bundled as extra resources ──────────────────────────────────
+# The Python backend ships inside resources/edmd-src/ alongside the Electron
+# app. main.js looks there first so no separate Python install is needed.
+# Users who want to run the Python backend standalone can still do so.
+#
+# Excluded from the bundle:
+#   - .git / .github        version control and CI
+#   - __pycache__ / *.pyc   compiled bytecode (platform-specific)
+#   - components/ksw        private plugin — never ships publicly
+#   - electron/             the Electron app itself (already in files above)
+#   - tests/ docs/          not needed at runtime
+#   - *.md                  documentation
+extraResources:
+  # Python source — all platforms
+  - from: ../
+    to:   edmd-src
+    filter:
+      - "**/*"
+      - "!.git/**"
+      - "!.github/**"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+      - "!**/*.pyo"
+      - "!components/ksw/**"
+      - "!ksw-admin/**"
+      - "!allowlist.ksw"
+      - "!electron/**"
+      - "!**/node_modules/**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "!tests/**"
+      - "!dist/**"
+
+  # Bundled Python embeddable — Windows only (populated by CI build step).
+  # Empty on Linux/macOS builds; electron-builder silently skips empty dirs.
+  - from: bundled-python
+    to:   python
+    filter:
+      - "**"
+      - "!.placeholder"
+
+extraMetadata:
+  edmdRepo: "https://github.com/maldor/EDMD"
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch:   [x64]
+  icon: ../images/edmd_avatar_512.png
+
+nsis:
+  oneClick:         false
+  allowToChangeInstallationDirectory: true
+  installerHeaderIcon: ../images/edmd_avatar_512.png
+
+# ── Linux ─────────────────────────────────────────────────────────────────────
+linux:
+  target:
+    - target: AppImage
+      arch:   [x64]
+    - target: deb
+      arch:   [x64]
+  icon:        ../images/edmd_avatar_512.png
+  category:    Utility
+  description: "Real-time session monitoring dashboard for Elite Dangerous"
+  maintainer:  "CMDR CALURSUS"
+
+deb:
+  depends:
+    - python3
+    - python3-pip
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+mac:
+  target:
+    - target: dmg
+      arch:   [x64, arm64]
+  icon:      ../images/edmd_avatar_512.png
+  category:  public.app-category.utilities
