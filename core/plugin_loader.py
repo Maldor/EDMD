@@ -282,11 +282,7 @@ def _make_sandboxed_open(allowed_dir: Path, plugin_name: str):
 
     return _sandboxed_open
 
-
 # ── Plugin state persistence ──────────────────────────────────────────────────
-
-# ── Plugin state persistence ──────────────────────────────────────────────────
-
 
 def _states_file() -> Path:
     return cmdr_data_dir() / "plugin_states.json"
