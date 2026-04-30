@@ -50,4 +50,3 @@ exe = EXE(
     entitlements_file=None,
     icon='images/edmd.ico'
 )
-# Use https://stackoverflow.com/questions/9946760/add-image-to-spec-file-in-pyinstaller to add an icon to the executable
