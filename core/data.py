@@ -173,6 +173,7 @@ def _http_get(url: str, token: str, timeout: int = 20) -> dict:
     with opener.open(req, timeout=timeout) as r:
         return json.loads(r.read())
 
+# Class isn't used anywhere apparently... Not sure if its part of the original github pages that are now gone
 class _CallbackHandler(urllib.request.BaseHandler):
     """Minimal HTTP server to receive OAuth callback."""
     def __init__(self, result_q: queue.Queue):
