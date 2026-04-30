@@ -113,7 +113,7 @@ AUTH_BASE    = "https://auth.frontierstore.net"
 CLIENT_ID    = "0a0bfa8e-18e7-4027-ab50-a697a2d5b2cd" # 25ae274d-d16b-45e5-bbf3-d143a401d1a7
 # Mine is in there, but the original devs ID is still there for legacy purposes
 # https://github.com/EDCD/FDevIDs/blob/master/Frontier%20API/FrontierDevelopments-oAuth2-notes.md
-# Mentions that a shared key is also given, but I'm not sure where it needs to be here...
+# Mentions that a shared key is also given, but I'm not sure where it needs to be here... Future me: Its not needed
 REDIRECT_URI = "https://maldor.github.io/EDMD/auth/callback"
 SCOPE        = "auth capi"
 
