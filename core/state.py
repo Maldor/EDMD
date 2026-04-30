@@ -30,6 +30,7 @@ DEBUG_MODE  = False
 # ── User data directory ───────────────────────────────────────────────────────
 # Linux: ~/.local/share/EDMD/  (symlinked from ~/.config/EDMD)
 # macOS: ~/Library/Application Support/EDMD/
+# Windows: %APPDATA%\EDMD\
 
 def _user_data_dir() -> Path:
     system = _pl.system()
