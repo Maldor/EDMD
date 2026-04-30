@@ -1,6 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from operator import iconcat
+
+
 a = Analysis(
     ['edmd.py'],
     pathex=[],
@@ -32,7 +35,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='EDMD_single',
+    name='EDMD',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -45,4 +48,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='images/edmd.ico'
 )
+# Use https://stackoverflow.com/questions/9946760/add-image-to-spec-file-in-pyinstaller to add an icon to the executable

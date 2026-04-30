@@ -31,7 +31,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='edmd',
+    name='edmd_debug',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
