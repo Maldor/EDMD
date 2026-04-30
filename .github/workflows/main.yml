@@ -1,3 +1,4 @@
+name: Generate new release
 on:
   workflow_dispatch:
   
