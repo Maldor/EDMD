@@ -1,19 +1,21 @@
 # EDMD Roadmap
 
-Last updated: 20260416
+Last updated: 20260429
 
 ---
 
 ## Active / In Progress
 
-Review the codebase and find the elements of tech debt that are mentioned
-Review near term goals and see if they are something that still need to be done or if they should be done
-
+- Review the codebase and find the elements of tech debt that are mentioned
+- Review near term goals and see if they are something that still need to be done or if they should be done
 
 ---
 
 
 ## Near-term
+
+### Change Versioning
+Change the versioning to use semantic versioning rather than date
 
 ### Context-aware Commander block
 The Commander block shows fixed rows regardless of vehicle. Rows should adapt:
@@ -36,6 +38,10 @@ Per-body scan progress with species names and estimated values, unanalysed sampl
 
 ### Combat Zone Block
 Active CZ tracking separate from Session Stats: faction, intensity, bonds and rate for the current zone.
+
+### EDDN Powered Wingman Block
+Allow you to set up to *n* CMDRs and get events about their state sent to you. Allows Squadron leaders to see status at a glance of their fellows
+Would also be useful for Operations to determine if certain actions are needed (Heal, Resupply, Support)
 
 ---
 
