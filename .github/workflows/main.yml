@@ -1,5 +1,8 @@
 name: Generate new release
 on:
+  push:
+    paths:
+      - 'core/version'
   workflow_dispatch:
   
 jobs:
