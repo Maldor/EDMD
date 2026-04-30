@@ -103,6 +103,11 @@ def _electron_fatal(
 
 # ── In-place upgrade (self-contained — runs before full package import) ────────
 
+# ── Git Based upgrades
+# Will likely need to run through this a couple of times and make sure that it is
+# pulling the correct data from the new repo, but until then, I'm half tempted to
+# comment it out until I can get a different system in place.
+
 def _do_upgrade(nightly: bool = False) -> None:
     repo_dir = _HERE
     mode_label = "Nightly (dev)" if nightly else "Release"
@@ -202,6 +207,10 @@ def _check_for_update() -> None:
     # so 20260325a < 20260325b < 20260326 all sort correctly.
     # Commits that land on main after a release do NOT trigger a notice —
     # users who want nightly builds can run --upgrade themselves.
+
+    # Will need to refactor this if we plan on moving to a different method of versioning and updates.
+    # We can leave this for now though.
+
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         with urlopen(url, timeout=4) as resp:
@@ -335,6 +344,9 @@ if not journal_dir or not journal_dir.is_dir():
             Path(_os.environ.get("USERPROFILE", Path.home()))
             / "Saved Games" / "Frontier Developments" / "Elite Dangerous",
         ]
+    # Might drop Mac support in the future.
+    # Its a pain to work with at work, don't want to do that here
+    # Sorry Mac Users... But I don't think FDev supports you either
     elif _platform.system() == "Darwin":
         _candidates = [
             Path.home() / "Library" / "Application Support"
@@ -356,7 +368,7 @@ if not journal_dir or not journal_dir.is_dir():
             journal_dir = _c
             journal_dir_str = str(_c)
             break
-
+# Might change the logic here to give a OS specific message.
 if not journal_dir or not journal_dir.is_dir():
     _msg = (
         f"JournalFolder is not set or the directory does not exist.\n\n"
@@ -453,7 +465,7 @@ print(
 
 # ── UI mode ───────────────────────────────────────────────────────────────────
 # Priority: --mode CLI flag > --gui alias > config [UI] Mode value > default
-# --gui is kept as a backwards-compatible alias for --mode gtk4.
+# --gui is kept as a backwards-compatible alias for --mode gtk4. THIS WILL CHANGE!!
 
 _cfg_mode = mgr.ui_cfg.get("Mode", "terminal").lower().strip()
 
@@ -470,7 +482,7 @@ gui_mode = (ui_mode == "gtk4")   # kept for internal compat (emitter, update not
 
 
 # ── Emitter ───────────────────────────────────────────────────────────────────
-
+# What do you do I wonder...
 from core.emit import Emitter, emit_summary
 
 emitter = Emitter(
@@ -530,10 +542,14 @@ bootstrap_missions(state, journal_dir, mgr, trace_mode=trace_mode)
 bootstrap_burn_rate(state, journal_dir, active_session, trace_mode=trace_mode)
 
 # ── Update notice ─────────────────────────────────────────────────────────────
-
+# Something is funky here... _update_notice is a tuple (kind, value) but _kind is always "release" now. Huh?
+# Also... IDE thinks this code is inaccessible... HUH?!
+# So... according to basedpyright...
+# reportUnreachable [boolean or string, optional]:
+# Generate or suppress diagnostics for code that is determined to be structurally unreachable or unreachable by type analysis.
 _update_thread.join(timeout=2)
 if _update_notice:
-    _kind, _value = _update_notice   # _kind is always "release" now
+    _kind, _value = _update_notice   # _kind is always "release" now.
     _repo_url = f"https://github.com/{GITHUB_REPO}"
     _term_msg = (
         f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
@@ -546,6 +562,7 @@ if _update_notice:
         gui_queue.put(("update_notice", ("release", _value)))
     emitter.set_update_notice(_value)
 
+# TODO: Fix this update code and figure out why its unreachable...
 
 # ── Session restore + startup banner ─────────────────────────────────────────
 
@@ -561,7 +578,7 @@ emit_summary(
 # ── Monitor + launch ──────────────────────────────────────────────────────────
 
 from core.journal      import run_monitor as _run_monitor, _poll_status_json
-from core.state        import save_session_state
+from core.state        import save_session_state  # Session state persistence? See state.py line 363
 
 _edmd_start_mono = time.monotonic()
 
@@ -576,7 +593,7 @@ def run_monitor() -> None:
         data_provider=data_provider,
         core=core,
     )
-
+# Wonder why we are complaining about journal_file and journal_dir...
 
 if __name__ == "__main__":
     if ui_mode == "textual":
