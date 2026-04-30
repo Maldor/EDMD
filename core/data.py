@@ -946,6 +946,7 @@ class CAPISource:
             if mods:
                 state.assets_stored_modules = mods
 
+# Might try and get this to be spit out to the webhook, would definitely be a configureable option
     def _extract_communitygoals(self, data: dict, state) -> None:
         goals = data if isinstance(data, list) else data.get("communityGoals", [])
         state.capi_community_goals = [
