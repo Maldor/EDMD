@@ -3,6 +3,7 @@ core/core_api.py — CoreAPI: the interface every component receives via on_load
 
 Plugins must not import from edmd.py or from each other.
 All shared access goes through this object.
+Keep this short, simple and clean.
 """
 
 import queue
