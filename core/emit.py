@@ -19,6 +19,14 @@ from core.state import MAX_DUPLICATES, PATTERN_WEBHOOK
 
 
 # ── Terminal colour codes ─────────────────────────────────────────────────────
+# https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
+# Because I'm never going to remember all of these codes, I'll just copy them from the stack overflow answer if I need more.
+
+# Format is \033[OPT1;OPT2m
+#
+# Also, there seem to be a difference between \x1b and \033. Something something
+# "\033 is octal base, \x1b is hex base, and 27 is decimal base."
+# Whatever that means...
 
 class Terminal:
     CYAN  = "\033[96m"
@@ -214,6 +222,7 @@ class Emitter:
             self._gui_queue.put(("log", f"[{logtime_str}] {emoji_fmt}{clean}"))
 
         # ── Deferred Discord update notice ────────────────────────────────
+        # Got you... This will be changed as we don't want update notices in the webhook, only in terminal
         if self._discord_update_pending and self._discord_up and not self.notify_test:
             self._discord_update_pending = False
             from core.state import GITHUB_REPO
@@ -386,4 +395,3 @@ def emit_summary(emitter: "Emitter", state, providers: list, session_plugin) -> 
         loglevel=2,
         force_terminal=True,
     )
-
