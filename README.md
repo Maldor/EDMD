@@ -42,7 +42,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 💥 **Combat Tracking** | Kills, bounties, combat bonds, deaths, and fighter losses with per-kill timing and faction tally |
 | 🎯 **Mission Stack** | Active massacre mission tracking — stack value, completion status, and full bootstrap on start |
 | 📊 **Session Statistics** | Tabbed activity dashboard — Combat, Trade, Mining, Exploration, Missions, Exobiology, PowerPlay — showing totals and /hr rates |
-| 🪟 **Electron GUI** | Cross-platform graphical interface (Windows, Linux, macOS) — self-contained installer on Windows (Python bundled), no prerequisites required |
+| ⚡ **Electron GUI** | Cross-platform graphical interface (Windows, Linux, macOS) — self-contained installer on Windows (Python bundled), no prerequisites required |
 | 🖵 **Textual TUI** | Full terminal dashboard — same layout and data as the GUI. Runs on any machine with Python and a modern terminal |
 | 🛡️ **Combat Alerts** | Shield drops, hull damage, fighter loss, ship destruction |
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |
