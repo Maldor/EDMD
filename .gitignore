@@ -4,7 +4,6 @@
 # Personal config is never committed — only the example template is tracked.
 # Your config.toml contains webhook URLs, user IDs, and personal paths.
 config.toml
-ruff.toml
 
 # ── Auth & key material ───────────────────────────────────────────────────────
 # These files contain sensitive cryptographic material — never commit them.
