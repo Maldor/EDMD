@@ -551,13 +551,14 @@ _cfg_mode = mgr.ui_cfg.get("Mode", "terminal").lower().strip()
 if args.mode:
     ui_mode = args.mode
 elif args.gui:
-    ui_mode = "Textual"
+    ui_mode = "textual"
 elif _cfg_mode in ("terminal", "textual", "electron"):
     ui_mode = _cfg_mode
 else:
     ui_mode = "terminal"
 
-gui_mode = ui_mode == "Textual"
+gui_mode = ui_mode == "textual"
+print(f"{Terminal.YELL}UI mode:{Terminal.END} {ui_mode}")
 
 
 # ── Emitter ───────────────────────────────────────────────────────────────────
