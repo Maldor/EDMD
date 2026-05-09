@@ -27,7 +27,7 @@ Maintained by **CMDR MALDOR96**, with permission
 
 ## Overview
 
-EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails your journal and presents a live dashboard — a GTK4 window, a Textual terminal UI, or an Electron app — alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
+EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails your journal and presents a live dashboard — a Textual terminal UI, or an Electron app (Alpha) — alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
 
 Alerts fire when things go wrong: shields down, hull taking damage, fuel running low, fighter destroyed. Session statistics accumulate across all activity types in a tabbed panel that shows only what's relevant to your current session.
 
@@ -43,7 +43,6 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🎯 **Mission Stack** | Active massacre mission tracking — stack value, completion status, and full bootstrap on start |
 | 📊 **Session Statistics** | Tabbed activity dashboard — Combat, Trade, Mining, Exploration, Missions, Exobiology, PowerPlay — showing totals and /hr rates |
 | 🪟 **Electron GUI** | Cross-platform graphical interface (Windows, Linux, macOS) — self-contained installer on Windows (Python bundled), no prerequisites required |
-| 🖥️ **GTK4 GUI** | Live graphical interface for Linux with all dashboard panels |
 | 🖵 **Textual TUI** | Full terminal dashboard — same layout and data as the GUI. Runs on any machine with Python and a modern terminal |
 | 🛡️ **Combat Alerts** | Shield drops, hull damage, fighter loss, ship destruction |
 | ⛽ **Fuel Monitoring** | Warn and critical thresholds for fuel percentage and estimated time remaining |
@@ -56,11 +55,6 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 | 🛡️ **Unified Data Provider** | Single source of truth for all game state — CAPI › journal › Status.json |
 | 🌐 **Data Contributions** | Opt-in journal uploading to EDDN, EDSM, EDAstro, and Inara |
 | 🏗️ **Colonisation Tracking** | Construction site resource requirements, delivery progress, and Raven Colonial integration (experimental) |
-
-<div align="center">
-<img src="images/gui-screenshot.png" alt="EDMD Electron GUI" width="900"/>
-<br><em>GTK4 GUI — default theme, live session in progress</em>
-</div>
 
 <div align="center">
 <img src="images/tui-screenshot.png" alt="EDMD Textual TUI" width="900"/>
@@ -85,21 +79,21 @@ C:\Users\YourName\Saved Games\Frontier Developments\Elite Dangerous
 
 ### Linux (Arch)
 ```bash
-sudo pacman -S python-psutil python-gobject gtk4
+sudo pacman -S python-psutil python-gobject
 pip install discord-webhook cryptography --break-system-packages
 ./install.sh
 ```
 
 ### Linux (Debian / Ubuntu)
 ```bash
-sudo apt install python3-psutil python3-gi gir1.2-gtk-4.0
+sudo apt install python3-psutil python3-gi
 pip install discord-webhook cryptography --break-system-packages
 bash install.sh
 ```
 
 ### Linux (Fedora)
 ```bash
-sudo dnf install python3-psutil python3-gobject gtk4
+sudo dnf install python3-psutil python3-gobject
 pip install discord-webhook cryptography --break-system-packages
 bash install.sh
 ```
@@ -117,7 +111,6 @@ bash install.sh          # Linux / macOS
 
 ./edmd.py                    # terminal output only
 ./edmd.py --mode textual      # Textual TUI
-./edmd.py --mode gtk4         # GTK4 GUI (Linux)
 ./edmd.py --mode electron     # Electron GUI (all platforms)
 ./edmd.py -p MyProfile        # named config profile
 ```
@@ -170,7 +163,7 @@ UserID = 123456789012345678
 | [Reports](docs/REPORTS.md) | Statistical reports — what each report covers and how data is sourced |
 
 ### Guides
-
+These guides are significantly out of date and may not reflect the latest version of EDMD.
 | Guide | Description |
 |-------|-------------|
 | [Linux Setup](docs/guides/LINUX_SETUP.md) | Elite Dangerous on Linux with Steam, Proton, Minimal ED Launcher, EDMC, and EDMD |
@@ -185,6 +178,9 @@ UserID = 123456789012345678
 
 <img src="images/edmd_avatar_512.png" width="56" alt="EDMD"/>
 
-**Elite Dangerous Monitor Daemon** · by CMDR CALURSUS
+**Elite Dangerous Monitor Daemon**
+
+Original code by CMDR CALURSUS
+Maintained by **CMDR MALDOR96**, with permission
 
 </div>
