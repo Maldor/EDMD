@@ -225,6 +225,7 @@ print(f"{Terminal.CYAN}{'=' * len(title)}\n{title}\n{'=' * len(title)}{Terminal.
 #
 # In both cases File → Upgrade runs the same git-pull path.
 
+"""
 _update_notice: tuple[str, str] | None = None
 
 
@@ -260,7 +261,8 @@ def _check_for_update() -> None:
 
 _update_thread = threading.Thread(target=_check_for_update, daemon=True)
 _update_thread.start()
-
+"""
+# More Update code commenting...
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -309,6 +311,7 @@ migrate_config_if_needed(
 config_dict = load_config_file(config_path)
 notify_test = bool(args.test) if args.test is not None else False
 trace_mode = bool(args.trace) if args.trace is not None else DEBUG_MODE
+
 
 # ── Log file (--log-file) ─────────────────────────────────────────────────────
 # Opens a log file and tees ALL stdout output to it alongside the terminal.
@@ -398,7 +401,7 @@ if not journal_dir or not journal_dir.is_dir():
             / "Elite Dangerous",
         ]
     # Might drop Mac support in the future.
-    # Its a pain to work with at work, don't want to do that here
+    # Its a pain to work with at IRL work, don't want to do that here
     # Sorry Mac Users... But I don't think FDev supports you either
     elif _platform.system() == "Darwin":
         _candidates = [
@@ -634,6 +637,7 @@ bootstrap_burn_rate(state, journal_dir, active_session, trace_mode=trace_mode)
 # So... according to basedpyright...
 # reportUnreachable [boolean or string, optional]:
 # Generate or suppress diagnostics for code that is determined to be structurally unreachable or unreachable by type analysis.
+"""
 _update_thread.join(timeout=2)
 if _update_notice:
     _kind, _value = _update_notice  # _kind is always "release" now.
@@ -646,8 +650,9 @@ if _update_notice:
     if not gui_mode:
         print(_term_msg)
     emitter.set_update_notice(_value)
-
+"""
 # TODO: Fix this update code and figure out why its unreachable...
+# Also TODO: Actually put in a proper update check and notification system.
 
 # ── Session restore + startup banner ─────────────────────────────────────────
 
