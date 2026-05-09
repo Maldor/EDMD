@@ -6,8 +6,8 @@ All business logic lives in the packages below:
   core/     — state, config, emit, journal loop, plugin loader, shared API
   components/ — all application components
   plugins/  — user plugin directory
-  gui/      — GTK4 interface (helpers, block widgets, EdmdApp)
-"""
+  """
+
 
 import argparse
 import json
@@ -44,13 +44,11 @@ parser.add_argument("-t", "--test", action="store_true", default=None,
                     help="Re-route Discord output to terminal instead of webhook")
 parser.add_argument("-d", "--trace", action="store_true", default=None,
                     help="Print verbose debug/trace output")
-parser.add_argument("-g", "--gui", action="store_true", default=None,
-                    help="Alias for --mode gtk4 (launch GTK4 GUI)")
-parser.add_argument("--mode", choices=["terminal", "textual", "gtk4", "electron"],
+parser.add_argument("--mode", choices=["terminal", "textual", "electron"],
                     default=None, metavar="MODE",
-                    help="UI mode: terminal (default) | textual | gtk4 | electron")
+                    help="UI mode: terminal (default) | textual | electron")
 parser.add_argument("--log-file", metavar="PATH",
-                    help="Tee all terminal output to PATH (safe with --mode gtk4; avoids pipe buffer deadlock)")
+                    help="Tee all terminal output to PATH (avoids pipe buffer deadlock)")
 parser.add_argument("--upgrade",         action="store_true", default=False,
                     help="Pull latest release and restart")
 parser.add_argument("--upgrade-nightly", action="store_true", default=False,
@@ -153,10 +151,6 @@ def _do_upgrade(nightly: bool = False) -> None:
         print(pull.stderr.strip() or pull.stdout.strip()); sys.exit(1)
     if "Already up to date" in pull.stdout:
         print(f"\n  Already up to date (v{VERSION}). Nothing to do.\n")
-        # If we were launched from the GUI, relaunch it rather than dying
-        if "--gui" in sys.argv:
-            new_argv = [a for a in sys.argv if a not in ("--upgrade", "--upgrade-nightly")]
-            os.execv(sys.executable, [sys.executable] + new_argv)
         sys.exit(0)
     print(pull.stdout.strip()); print()
 
@@ -464,21 +458,18 @@ print(
 
 
 # ── UI mode ───────────────────────────────────────────────────────────────────
-# Priority: --mode CLI flag > --gui alias > config [UI] Mode value > default
-# --gui is kept as a backwards-compatible alias for --mode gtk4. THIS WILL CHANGE!!
+# Priority: --mode CLI flag > config [UI] Mode value > default
 
 _cfg_mode = mgr.ui_cfg.get("Mode", "terminal").lower().strip()
 
 if args.mode:
     ui_mode = args.mode
-elif args.gui:
-    ui_mode = "gtk4"
-elif _cfg_mode in ("terminal", "textual", "gtk4", "electron"):
+elif _cfg_mode in ("terminal", "textual", "electron"):
     ui_mode = _cfg_mode
 else:
     ui_mode = "terminal"
 
-gui_mode = (ui_mode == "gtk4")   # kept for internal compat (emitter, update notices)
+gui_mode = False   # GTK4 removed
 
 
 # ── Emitter ───────────────────────────────────────────────────────────────────
@@ -558,8 +549,6 @@ if _update_notice:
     )
     if not gui_mode:
         print(_term_msg)
-    if gui_mode:
-        gui_queue.put(("update_notice", ("release", _value)))
     emitter.set_update_notice(_value)
 
 # TODO: Fix this update code and figure out why its unreachable...
@@ -623,86 +612,8 @@ if __name__ == "__main__":
 
         run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
 
-    elif ui_mode == "gtk4":
-        try:
-            from gui.app import EdmdApp
-        except ImportError as e:
-            print(
-                f"{Terminal.WARN}ERROR:{Terminal.END} GTK4 mode requested but gui/ could not be loaded: {e}\n"
-                f"Ensure PyGObject (GTK4) is installed: pacman -S python-gobject gtk4"
-            )
-            sys.exit(1)
-
-        monitor_thread = threading.Thread(target=run_monitor, daemon=True)
-        monitor_thread.start()
-
-        status_thread = threading.Thread(
-            target=_poll_status_json,
-            args=(journal_dir, state, gui_queue),
-            daemon=True,
-        )
-        status_thread.start()
-
-        # ── Suppress known-unfixable GTK progress bar sizing warning ─────────
-        # "GtkGizmo (progress) reported min width -2" fires on every window
-        # close when a ProgressBar widget is present.  This is a GTK internal
-        # bug with no application-level fix.
-        #
-        # GTK emits this via g_log() directly to fd 2 (C-level stderr) so
-        # GLib.log_set_handler from Python does NOT intercept it.  We redirect
-        # fd 2 through a pipe whose pump thread pattern-matches and drops the
-        # offending line before writing everything else to the original stderr.
-        # In trace mode the filter is never installed so the line still shows.
-        if not trace_mode:
-            try:
-                import os as _os, threading as _th
-
-                _orig_fd   = _os.dup(2)                     # save real stderr
-                _r, _w     = _os.pipe()
-                _os.dup2(_w, 2)                             # stderr → pipe write end
-                _os.close(_w)
-                _orig_out  = _os.fdopen(_orig_fd, "wb", buffering=0)
-                _DROP      = (b"GtkGizmo", b"progress", b"min width")
-
-                def _pump():
-                    buf = b""
-                    with _os.fdopen(_r, "rb", buffering=0) as pipe:
-                        while True:
-                            chunk = pipe.read(256)
-                            if not chunk:
-                                break
-                            buf += chunk
-                            while b"\n" in buf:
-                                line, buf = buf.split(b"\n", 1)
-                                line += b"\n"
-                                if not all(p in line for p in _DROP):
-                                    _orig_out.write(line)
-                                    _orig_out.flush()
-                                    if _log_fh is not None:
-                                        try:
-                                            _log_fh.write(line.decode("utf-8", errors="replace"))
-                                            _log_fh.flush()
-                                        except Exception:
-                                            pass
-                    if buf and not all(p in buf for p in _DROP):
-                        _orig_out.write(buf)
-                        _orig_out.flush()
-                        if _log_fh is not None:
-                            try:
-                                _log_fh.write(buf.decode("utf-8", errors="replace"))
-                                _log_fh.flush()
-                            except Exception:
-                                pass
-
-                _th.Thread(target=_pump, daemon=True,
-                           name="stderr-filter").start()
-            except Exception:
-                pass  # non-fatal
-
-        app = EdmdApp(core, PROGRAM, VERSION)
-        app.run(None)
-
     elif ui_mode == "electron":
+
         from core.electron_bridge import ElectronBridge
 
         bridge = ElectronBridge(core, gui_queue)
