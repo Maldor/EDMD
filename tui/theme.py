@@ -356,7 +356,7 @@ _PALETTES = {
         "$title-bg": "#1a2030",
         "$fg":       "#d0d8e8",
         "$dim":      "#556070",
-        "$accent":   "#3d8fd4",   # matches GTK4 default-blue.css
+        "$accent":   "#3d8fd4",
         "$border":   "#253050",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
@@ -370,7 +370,7 @@ _PALETTES = {
         "$title-bg": "#201c28",
         "$fg":       "#dcd8e8",
         "$dim":      "#60587a",
-        "$accent":   "#9b59b6",   # matches GTK4 default-purple.css
+        "$accent":   "#9b59b6",
         "$border":   "#302845",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
@@ -384,7 +384,7 @@ _PALETTES = {
         "$title-bg": "#261818",
         "$fg":       "#e8d8d8",
         "$dim":      "#7a5858",
-        "$accent":   "#cc3333",   # matches GTK4 default-red.css
+        "$accent":   "#cc3333",
         "$border":   "#3d2020",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
@@ -398,7 +398,7 @@ _PALETTES = {
         "$title-bg": "#231f14",
         "$fg":       "#ede8d4",
         "$dim":      "#7a7050",
-        "$accent":   "#d4a017",   # matches GTK4 default-yellow.css
+        "$accent":   "#d4a017",
         "$border":   "#3a3018",
         "$green":    "#57e389",
         "$amber":    "#f8e45c",
@@ -421,7 +421,7 @@ _PALETTES["default-dark"] = _PALETTES["default"]
 
 
 def _load_custom_palette(css_path) -> dict | None:
-    """Parse a GTK4 theme CSS file and extract a TUI-compatible palette dict."""
+    """Parse an old GTK4 theme CSS file and extract a TUI-compatible palette dict."""
     import re as _re
     try:
         block_m = _re.search(r":root\s*\{([^}]+)\}", css_path.read_text(encoding="utf-8"), _re.DOTALL)

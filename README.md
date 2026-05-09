@@ -7,7 +7,7 @@
 
 **Real-time session monitoring dashboard for Elite Dangerous**
 
-*Session tracking · Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Fleet assets · CAPI · Discord · Textual TUI · GTK4 GUI · Electron GUI*
+*Session tracking · Combat · Trade · Mining · Exploration · Missions · Exobiology · PowerPlay · Fleet assets · CAPI · Discord · Textual TUI · Electron GUI*
 
 ---
 
@@ -58,7 +58,7 @@ All game state flows through a unified `DataProvider` — CAPI when authenticate
 
 <div align="center">
 <img src="images/tui-screenshot.png" alt="EDMD Textual TUI" width="900"/>
-<br><em>Textual TUI — same layout, no GTK4 required</em>
+<br><em>Textual TUI</em>
 </div>
 
 ---

@@ -5,7 +5,7 @@
     <TabSet :tabs="tabs" style="flex:1;min-height:0;">
       <template #summary>
         <div v-if="!providers.length && !d.duration" class="dim">Session not started</div>
-        <!-- Duration row first — matches GTK4 where Duration is the first Summary grid row -->
+        <!-- Duration row first -->
         <div v-if="d.duration" class="kv-row">
           <span class="kv-key">Duration</span>
           <span class="kv-val">{{ d.duration }}</span>

@@ -1,6 +1,6 @@
 """tui/blocks/career.py — Career lifetime statistics block.
 
-Mirrors the GTK4 career block exactly in terms of data fields, sections,
+Mirrors the old GTK4 career block exactly in terms of data fields, sections,
 and ordering within each tab.  Tab labels are abbreviated to fit the TUI
 tab bar width.
 """

@@ -56,7 +56,7 @@ headerbar.edmd-header .title {
 }
 /* ── Custom window controls ─────────────────────────────────────────────── */
 /* Adwaita CSD buttons are hidden (set_show_title_buttons False).
-   We use plain Gtk.Button with .wctl-btn / .wctl-close classes instead. */
+   We use plain old Gtk.Button with .wctl-btn / .wctl-close classes instead. */
 
 headerbar.edmd-header button.wctl-btn {
     min-height: 0;

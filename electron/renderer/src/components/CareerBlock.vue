@@ -4,7 +4,7 @@
 
     <TabSet :tabs="tabs" style="flex:1;min-height:0;">
 
-      <!-- Summary — mirrors GTK4 summary_box section headers -->
+      <!-- Summary — mirrors old GTK4 summary_box section headers -->
       <template #summary>
         <div v-if="d.scanning" class="dim padded">Scanning journals…</div>
         <template v-else>

@@ -76,7 +76,7 @@
         </div>
       </template>
 
-      <!-- Modules — full list grouped by category, matching GTK4 -->
+      <!-- Modules — full list grouped by category -->
       <template #modules>
         <div v-if="!hasModules" class="dim padded">
           Open outfitting at a station to populate stored modules.

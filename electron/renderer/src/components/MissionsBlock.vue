@@ -5,7 +5,7 @@
       <div v-if="!d.has_detail" class="dim">No active missions</div>
 
       <template v-else>
-        <!-- Active count left, reward right — matching GTK4 grid alignment -->
+        <!-- Active count left, reward right -->
         <div class="mission-grid">
           <span class="col-key">Active</span>
           <span class="col-count">{{ d.n_missions }}/{{ d.full_stack }}</span>
@@ -26,7 +26,7 @@
 
         <div class="sep-line"></div>
 
-        <!-- Stack height: kills | total credit value — matches GTK4 layout -->
+        <!-- Stack height: kills | total credit value -->
         <div class="mission-grid">
           <span class="col-key dim">Stack height</span>
           <span class="col-count dim">{{ d.stack_height }}</span>

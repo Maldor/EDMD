@@ -1,7 +1,5 @@
 # EDMD GUI Theming
-
-The GTK4 interface supports full CSS theming. Themes are loaded from the `themes/` directory at startup.
-
+This might be unavailable for the moment
 ---
 
 ## How Themes Work
@@ -23,7 +21,7 @@ This means spacing fixes and layout changes apply to all themes at once, and cre
 | `default-purple` | 🟣 Purple `#9b59b6` | |
 | `default-red` | 🔴 Red `#cc3333` | |
 | `default-yellow` | 🟡 Yellow `#d4a017` | |
-| `default-light` | System | Accent follows your Adwaita GTK theme |
+| `default-light` | System | |
 
 The avatar mark in the GUI sidebar adapts to the active theme:
 

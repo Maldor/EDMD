@@ -1,6 +1,6 @@
 # EDMD Installation Guide
 
-EDMD is a Python daemon for real-time Elite Dangerous session monitoring. It supports three UI modes: a GTK4 graphical interface (Linux), a Textual terminal UI (all platforms), and an Electron desktop app (Windows, Linux, macOS).
+EDMD is a Python daemon for real-time Elite Dangerous session monitoring. It supports two UI modes: A Textual terminal UI (all platforms), and an Electron desktop app (Windows, Linux, macOS).
 
 ---
 
@@ -55,7 +55,7 @@ Config file location: `~/Library/Application Support/EDMD/config.toml`
 Arch ships current versions of everything EDMD needs.
 
 ```bash
-sudo pacman -S python-psutil python-gobject gtk4
+sudo pacman -S python-psutil python-gobject
 pip install discord-webhook cryptography --break-system-packages
 ```
 
@@ -67,7 +67,6 @@ nano ~/.local/share/EDMD/config.toml   # set JournalFolder at minimum
 
 ./edmd.py                    # terminal output only
 ./edmd.py --mode textual     # Textual TUI
-./edmd.py --mode gtk4        # GTK4 GUI
 ```
 
 ---~~
@@ -75,7 +74,7 @@ nano ~/.local/share/EDMD/config.toml   # set JournalFolder at minimum
 ~~## Linux — Debian / Ubuntu
 
 ```bash
-sudo apt install python3-psutil python3-gi gir1.2-gtk-4.0
+sudo apt install python3-psutil python3-gi
 pip install discord-webhook cryptography --break-system-packages
 ```
 
@@ -87,7 +86,6 @@ nano ~/.local/share/EDMD/config.toml
 
 ./edmd.py
 ./edmd.py --mode textual
-./edmd.py --mode gtk4
 ```
 
 ---~~
@@ -95,7 +93,7 @@ nano ~/.local/share/EDMD/config.toml
 ~~## Linux — Fedora
 
 ```bash
-sudo dnf install python3-psutil python3-gobject gtk4
+sudo dnf install python3-psutil python3-gobject
 pip install discord-webhook cryptography --break-system-packages
 ```
 
@@ -133,7 +131,7 @@ If no config file is found on startup, EDMD creates one with safe defaults and p
 | Dependency | Purpose | Install method |
 |------------|---------|----------------|
 | `python-psutil` | Process utilities | Package manager (Linux) · pip (Windows/macOS) |
-| `python-gobject` + `gtk4` | GTK4 GUI (Linux only) | Package manager only |
+| `python-gobject` | For Deprecated GTK4 GUI (Linux only) | Package manager only |
 | `discord-webhook` | Discord notifications | pip |
 | `cryptography` | CAPI auth and secure transport | pip |
 | `websockets>=12.0` | Electron bridge | pip (bundled on Windows) |
@@ -157,7 +155,7 @@ python3 -c "import psutil, discord_webhook, cryptography; print('All dependencie
 Install via package manager: `sudo pacman -S python-psutil` (Arch) · `sudo apt install python3-psutil` (Debian/Ubuntu).
 
 **`ModuleNotFoundError: No module named 'gi'`**
-Install `python-gobject` (Arch) · `python3-gi` (Debian) · `python3-gobject` (Fedora), and GTK4 itself.
+Install `python-gobject` (Arch) · `python3-gi` (Debian) · `python3-gobject` (Fedora).
 
 **`ModuleNotFoundError: No module named 'discord_webhook'`**
 Run `pip install discord-webhook --break-system-packages`.
@@ -170,9 +168,6 @@ EDMD will show an error dialog with a button to open `config.toml`. Set `Journal
 
 **EDMD fails to start on Windows — no error shown**
 Open `%APPDATA%\EDMD\electron-launcher.log` in any text editor. All startup activity including Python errors is logged there.
-
-**`GLib.GError` or blank GTK4 window**
-Ensure `adwaita-icon-theme` (or equivalent) is installed.
 
 **sshfs for remote access**
 `sudo pacman -S sshfs` (Arch) · `sudo apt install sshfs` (Debian/Ubuntu) · `sudo dnf install fuse-sshfs` (Fedora). See [docs/guides/REMOTE_ACCESS.md](docs/guides/REMOTE_ACCESS.md).~~

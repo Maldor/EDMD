@@ -6,7 +6,7 @@
       <span class="mkt-label">{{ marketLabel }}</span>
     </div>
     <div class="panel-body cargo-body">
-      <!-- Column headers — 4 columns matching GTK4: name | qty | sell | avg -->
+      <!-- Column headers — 4 columns matching old GTK4: name | qty | sell | avg -->
       <div class="col-hdr">
         <span class="c-name">Commodity</span>
         <span class="c-qty">Qty</span>

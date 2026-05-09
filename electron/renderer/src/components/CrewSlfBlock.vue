@@ -1,5 +1,5 @@
 <template>
-  <!-- Hidden entirely when no active crew, matching GTK4 behaviour -->
+  <!-- Hidden entirely when no active crew, matching old GTK4 behaviour -->
   <div v-if="d.has_crew" class="panel">
     <!-- Header: CREW: NAME + SLF type (right) + rank + variant -->
     <div class="panel-header crew-hdr">
@@ -15,7 +15,7 @@
 
     <div class="panel-body">
       <div class="grid">
-        <!-- SLF status first — matching GTK4/TUI order: SLF, Hired, Active, Paid -->
+        <!-- SLF status first — matching TUI order: SLF, Hired, Active, Paid -->
         <template v-if="d.has_fighter_bay">
           <span class="k">SLF</span>
           <span class="v" :class="slfCls">{{ slfStatus }}</span>

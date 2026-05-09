@@ -1,7 +1,7 @@
 /* ── EDMD Elite theme ──────────────────────────────────────────────────────── */
 
 :root {
-  /* Elite orange — primary accent, matches GTK4/TUI themes */
+  /* Elite orange — primary accent, matches TUI themes */
   --accent:        #e07b20;
   --accent-dim:    #a05810;
   --accent-bright: #f09030;

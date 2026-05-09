@@ -2,7 +2,7 @@
   <!-- Full bar is draggable; only .no-drag children capture mouse events -->
   <div class="titlebar" @dblclick="onDblClick">
 
-    <!-- LEFT: menu buttons matching GTK4 menu bar order -->
+    <!-- LEFT: menu buttons matching old GTK4 menu bar order -->
     <div class="tb-left no-drag">
       <div class="tb-menu-group">
         <!-- File -->
@@ -54,7 +54,7 @@
       </span>
     </div>
 
-    <!-- RIGHT: window controls matching GTK4 order: fs | min | max | close -->
+    <!-- RIGHT: window controls matching old GTK4 order: fs | min | max | close -->
     <div class="tb-right no-drag">
       <button class="wc-btn" @click="doFullscreen" title="Toggle Fullscreen">⛶</button>
       <button class="wc-btn" @click="doMinimize"   title="Minimize">—</button>
