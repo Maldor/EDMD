@@ -6,18 +6,17 @@ All business logic lives in the packages below:
   core/     — state, config, emit, journal loop, plugin loader, shared API
   components/ — all application components
   plugins/  — user plugin directory
-  """
-
+"""
 
 import argparse
 import json
 import os
 import platform as _pl
+import queue
 import subprocess as _sp
 import sys
 import threading
 import time
-import queue
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -26,11 +25,14 @@ _HERE = Path(__file__).parent.resolve()
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from core.state  import PROGRAM, VERSION, AUTHOR, GITHUB_REPO, DEBUG_MODE
-
-from core.emit   import Terminal
-from core.config import resolve_config_path, load_config_file, ConfigManager, migrate_config_if_needed
-
+from core.config import (
+    ConfigManager,
+    load_config_file,
+    migrate_config_if_needed,
+    resolve_config_path,
+)
+from core.emit import Terminal
+from core.state import AUTHOR, DEBUG_MODE, GITHUB_REPO, PROGRAM, VERSION
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -38,30 +40,61 @@ parser = argparse.ArgumentParser(
     prog=PROGRAM,
     description="Continuous monitoring of Elite Dangerous AFK sessions.",
 )
-parser.add_argument("-p", "--config_profile",
-                    help="Load a specific config profile")
-parser.add_argument("-t", "--test", action="store_true", default=None,
-                    help="Re-route Discord output to terminal instead of webhook")
-parser.add_argument("-d", "--trace", action="store_true", default=None,
-                    help="Print verbose debug/trace output")
-parser.add_argument("--mode", choices=["terminal", "textual", "electron"],
-                    default=None, metavar="MODE",
-                    help="UI mode: terminal (default) | textual | electron")
-parser.add_argument("--log-file", metavar="PATH",
-                    help="Tee all terminal output to PATH (avoids pipe buffer deadlock)")
-parser.add_argument("--upgrade",         action="store_true", default=False,
-                    help="Pull latest release and restart")
-parser.add_argument("--upgrade-nightly", action="store_true", default=False,
-                    help="Pull latest commit (nightly/dev) and restart")
+parser.add_argument("-p", "--config_profile", help="Load a specific config profile")
+parser.add_argument(
+    "-g",
+    "--gui",
+    action="store_true",
+    default=None,
+    help="Launch the GUI instead of the terminal, will use TUI",
+)
+parser.add_argument(
+    "-t",
+    "--test",
+    action="store_true",
+    default=None,
+    help="Re-route Discord output to terminal instead of webhook",
+)
+parser.add_argument(
+    "-d",
+    "--trace",
+    action="store_true",
+    default=None,
+    help="Print verbose debug/trace output",
+)
+parser.add_argument(
+    "--mode",
+    choices=["terminal", "textual", "electron"],
+    default=None,
+    metavar="MODE",
+    help="UI mode: terminal (default) | textual | electron",
+)
+parser.add_argument(
+    "--log-file",
+    metavar="PATH",
+    help="Tee all terminal output to PATH (avoids pipe buffer deadlock)",
+)
+parser.add_argument(
+    "--upgrade",
+    action="store_true",
+    default=False,
+    help="Pull latest release and restart",
+)
+parser.add_argument(
+    "--upgrade-nightly",
+    action="store_true",
+    default=False,
+    help="Pull latest commit (nightly/dev) and restart",
+)
 
 args = parser.parse_args()
-
 
 
 # ── Electron startup-error helper ────────────────────────────────────────────
 # When running as an Electron subprocess, fatal startup errors are written to
 # EDMD_DATA_DIR/electron-error.json so the renderer can show a friendly message
 # instead of silently hanging until the JS port-file timeout fires.
+
 
 def _electron_fatal(
     error_type: str,
@@ -76,6 +109,7 @@ def _electron_fatal(
     (detected via the EDMD_ELECTRON_LOG env var set by main.js).
     """
     import json as _json
+
     _electron_log = os.environ.get("EDMD_ELECTRON_LOG", "")
     if not _electron_log:
         # Not running under Electron — just print and let caller sys.exit
@@ -85,10 +119,10 @@ def _electron_fatal(
     except Exception:
         return
     _err = {
-        "type":        error_type,
-        "title":       title,
-        "message":     message,
-        "action":      action,
+        "type": error_type,
+        "title": title,
+        "message": message,
+        "action": action,
         "config_path": str(config_path) if config_path else "",
     }
     try:
@@ -105,7 +139,7 @@ def _electron_fatal(
 # Will likely need to run through this a couple of times and make sure that it is
 # pulling the correct data from the new repo, but until then, I'm half tempted to
 # comment it out until I can get a different system in place.
-
+"""
 def _do_upgrade(nightly: bool = False) -> None:
     repo_dir = _HERE
     mode_label = "Nightly (dev)" if nightly else "Release"
@@ -125,8 +159,8 @@ def _do_upgrade(nightly: bool = False) -> None:
     dirty = _sp.run(["git", "-C", str(repo_dir), "status", "--porcelain"],
                     capture_output=True, text=True)
     def _is_user_file(line: str) -> bool:
-        """Return True if this git status line refers to a user-owned path
-        that should not block or warn on upgrade."""
+#        Return True if this git status line refers to a user-owned path
+#        that should not block or warn on upgrade.
         path = line.strip().lstrip("?! MADRCU").strip()
         return (
             path.endswith("config.toml")
@@ -170,7 +204,8 @@ def _do_upgrade(nightly: bool = False) -> None:
 if args.upgrade or getattr(args, "upgrade_nightly", False):
     _do_upgrade(nightly=getattr(args, "upgrade_nightly", False))
     sys.exit(0)  # unreachable — execv replaces process
-
+"""
+# This entire update sequence will need to be redone because of a upcoming semantic versioning change
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
@@ -192,6 +227,7 @@ print(f"{Terminal.CYAN}{'=' * len(title)}\n{title}\n{'=' * len(title)}{Terminal.
 
 _update_notice: tuple[str, str] | None = None
 
+
 def _check_for_update() -> None:
     global _update_notice
     import re as _re
@@ -211,13 +247,16 @@ def _check_for_update() -> None:
             if resp.status == 200:
                 tag = json.loads(resp.read()).get("tag_name", "").lstrip("v").strip()
                 if tag and tag != VERSION:
+
                     def _vkey(v):
                         m = _re.match(r"^(\d+)([a-z]*)$", v)
                         return (int(m.group(1)), m.group(2)) if m else (0, "")
+
                     if _vkey(tag) > _vkey(VERSION):
                         _update_notice = ("release", tag)
     except Exception:
         pass
+
 
 _update_thread = threading.Thread(target=_check_for_update, daemon=True)
 _update_thread.start()
@@ -229,36 +268,47 @@ config_path = resolve_config_path(Path(__file__))
 if config_path is None:
     # No config found — generate a default one in the user data directory
     # so EDMD can start immediately.  The user can edit it via Preferences.
-    from core.state import EDMD_DATA_DIR
     from core.config import (
+        CFG_DEFAULTS_DISCORD,
+        CFG_DEFAULTS_EDASTRO,
+        CFG_DEFAULTS_EDDN,
+        CFG_DEFAULTS_EDSM,
+        CFG_DEFAULTS_EXTRA,
+        CFG_DEFAULTS_INARA,
+        CFG_DEFAULTS_NOTIFY,
+        CFG_DEFAULTS_SETTINGS,
+        CFG_DEFAULTS_UI,
         config_to_toml,
-        CFG_DEFAULTS_SETTINGS, CFG_DEFAULTS_EXTRA, CFG_DEFAULTS_UI,
-        CFG_DEFAULTS_DISCORD, CFG_DEFAULTS_EDDN, CFG_DEFAULTS_EDSM,
-        CFG_DEFAULTS_EDASTRO, CFG_DEFAULTS_INARA, CFG_DEFAULTS_NOTIFY,
     )
+    from core.state import EDMD_DATA_DIR
+
     config_path = EDMD_DATA_DIR / "config.toml"
     _default_cfg = {
-        "Settings":  {**CFG_DEFAULTS_SETTINGS, **CFG_DEFAULTS_EXTRA},
-        "Discord":   CFG_DEFAULTS_DISCORD,
-        "UI":        CFG_DEFAULTS_UI,
+        "Settings": {**CFG_DEFAULTS_SETTINGS, **CFG_DEFAULTS_EXTRA},
+        "Discord": CFG_DEFAULTS_DISCORD,
+        "UI": CFG_DEFAULTS_UI,
         "LogLevels": CFG_DEFAULTS_NOTIFY,
-        "EDDN":      CFG_DEFAULTS_EDDN,
-        "EDSM":      CFG_DEFAULTS_EDSM,
-        "EDAstro":   CFG_DEFAULTS_EDASTRO,
-        "Inara":     CFG_DEFAULTS_INARA,
+        "EDDN": CFG_DEFAULTS_EDDN,
+        "EDSM": CFG_DEFAULTS_EDSM,
+        "EDAstro": CFG_DEFAULTS_EDASTRO,
+        "Inara": CFG_DEFAULTS_INARA,
     }
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(config_to_toml(_default_cfg), encoding="utf-8")
         print(f"[EDMD] No config found — wrote default config to: {config_path}")
     except OSError as _e:
-        print(f"{Terminal.WARN}WARNING:{Terminal.END} Could not write default config: {_e}")
+        print(
+            f"{Terminal.WARN}WARNING:{Terminal.END} Could not write default config: {_e}"
+        )
         # Fall through — ConfigManager will use built-in defaults
 
-migrate_config_if_needed(config_path)  # silently rewrite old [GUI]/sub-table format before loading
+migrate_config_if_needed(
+    config_path
+)  # silently rewrite old [GUI]/sub-table format before loading
 config_dict = load_config_file(config_path)
-notify_test = bool(args.test)  if args.test  is not None else False
-trace_mode  = bool(args.trace) if args.trace is not None else DEBUG_MODE
+notify_test = bool(args.test) if args.test is not None else False
+trace_mode = bool(args.trace) if args.trace is not None else DEBUG_MODE
 
 # ── Log file (--log-file) ─────────────────────────────────────────────────────
 # Opens a log file and tees ALL stdout output to it alongside the terminal.
@@ -272,15 +322,18 @@ _log_fh = None
 
 if args.log_file:
     import io as _io
+
     _log_path = Path(args.log_file).expanduser().resolve()
     try:
         _log_fh = open(_log_path, "w", encoding="utf-8", buffering=1)
 
         class _TeeWriter(_io.TextIOBase):
             """Write to both the original stdout and a log file simultaneously."""
+
             def __init__(self, primary, secondary):
-                self._primary   = primary
+                self._primary = primary
                 self._secondary = secondary
+
             def write(self, text):
                 self._primary.write(text)
                 self._primary.flush()
@@ -290,12 +343,14 @@ if args.log_file:
                 except Exception:
                     pass
                 return len(text)
+
             def flush(self):
                 self._primary.flush()
                 try:
                     self._secondary.flush()
                 except Exception:
                     pass
+
             @property
             def encoding(self):
                 return getattr(self._primary, "encoding", "utf-8")
@@ -314,9 +369,9 @@ mgr = ConfigManager(config_dict, config_path, config_profile=args.config_profile
 
 from core.state import MonitorState, SessionData, load_session_state
 
-state          = MonitorState()
+state = MonitorState()
 active_session = SessionData()
-lifetime       = SessionData()
+lifetime = SessionData()
 gui_queue: queue.Queue = queue.Queue()
 
 
@@ -325,35 +380,62 @@ gui_queue: queue.Queue = queue.Queue()
 from core.journal import find_latest_journal
 
 journal_dir_str = mgr.app_settings.get("JournalFolder", "")
-journal_dir     = Path(journal_dir_str).expanduser() if journal_dir_str else None
+journal_dir = Path(journal_dir_str).expanduser() if journal_dir_str else None
 
 if not journal_dir or not journal_dir.is_dir():
     # Auto-detect the standard Windows and Linux journal locations as a fallback.
     # This lets Electron users on Windows launch without needing config.toml.
     import platform as _platform
+
     _candidates = []
     if _platform.system() == "Windows":
         import os as _os
+
         _candidates = [
             Path(_os.environ.get("USERPROFILE", Path.home()))
-            / "Saved Games" / "Frontier Developments" / "Elite Dangerous",
+            / "Saved Games"
+            / "Frontier Developments"
+            / "Elite Dangerous",
         ]
     # Might drop Mac support in the future.
     # Its a pain to work with at work, don't want to do that here
     # Sorry Mac Users... But I don't think FDev supports you either
     elif _platform.system() == "Darwin":
         _candidates = [
-            Path.home() / "Library" / "Application Support"
-            / "Frontier Developments" / "Elite Dangerous",
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "Frontier Developments"
+            / "Elite Dangerous",
         ]
     else:  # Linux — Steam common locations
         _candidates = [
-            Path.home() / ".steam" / "steam" / "steamapps" / "compatdata"
-            / "359320" / "pfx" / "drive_c" / "users" / "steamuser"
-            / "Saved Games" / "Frontier Developments" / "Elite Dangerous",
-            Path.home() / ".local" / "share" / "Steam" / "steamapps"
-            / "compatdata" / "359320" / "pfx" / "drive_c" / "users"
-            / "steamuser" / "Saved Games" / "Frontier Developments"
+            Path.home()
+            / ".steam"
+            / "steam"
+            / "steamapps"
+            / "compatdata"
+            / "359320"
+            / "pfx"
+            / "drive_c"
+            / "users"
+            / "steamuser"
+            / "Saved Games"
+            / "Frontier Developments"
+            / "Elite Dangerous",
+            Path.home()
+            / ".local"
+            / "share"
+            / "Steam"
+            / "steamapps"
+            / "compatdata"
+            / "359320"
+            / "pfx"
+            / "drive_c"
+            / "users"
+            / "steamuser"
+            / "Saved Games"
+            / "Frontier Developments"
             / "Elite Dangerous",
         ]
     for _c in _candidates:
@@ -417,11 +499,14 @@ except OSError:
 # Scan backwards through journals to find FID.  The current journal may only
 # contain a Fileheader if the game just created it; prior journals are reliable.
 
+
 def _scan_fid_from_journals(jdir: Path) -> str:
     """Return the Frontier account FID from the most recent journal that has one."""
     for _jp in sorted(jdir.glob("Journal*.log"), reverse=True):
         try:
-            for _line in reversed(_jp.read_text(encoding="utf-8", errors="replace").splitlines()):
+            for _line in reversed(
+                _jp.read_text(encoding="utf-8", errors="replace").splitlines()
+            ):
                 try:
                     _ev = json.loads(_line.strip())
                     if _ev.get("event") in ("Commander", "LoadGame") and _ev.get("FID"):
@@ -432,7 +517,8 @@ def _scan_fid_from_journals(jdir: Path) -> str:
             pass
     return ""
 
-from core.state import set_active_fid, get_last_fid
+
+from core.state import get_last_fid, set_active_fid
 
 _fid = _scan_fid_from_journals(journal_dir) or get_last_fid()
 if _fid:
@@ -445,10 +531,10 @@ else:
 print(f"{Terminal.YELL}Commander name:{Terminal.END} {state.pilot_name or '(unknown)'}")
 
 _config_profile = args.config_profile
-_config_info    = ""
+_config_info = ""
 if not _config_profile and state.pilot_name and state.pilot_name in config_dict:
     _config_profile = state.pilot_name
-    _config_info    = " (auto)"
+    _config_info = " (auto)"
     mgr = ConfigManager(config_dict, config_path, config_profile=_config_profile)
 
 print(
@@ -469,7 +555,7 @@ elif _cfg_mode in ("terminal", "textual", "electron"):
 else:
     ui_mode = "terminal"
 
-gui_mode = False   # GTK4 removed
+gui_mode = False  # GTK4 removed
 
 
 # ── Emitter ───────────────────────────────────────────────────────────────────
@@ -477,7 +563,8 @@ gui_mode = False   # GTK4 removed
 from core.emit import Emitter, emit_summary
 
 emitter = Emitter(
-    mgr, state,
+    mgr,
+    state,
     gui_queue=gui_queue,
     notify_test=notify_test,
     gui_mode=gui_mode,
@@ -486,11 +573,11 @@ emitter = Emitter(
 
 # ── CoreAPI + plugins ─────────────────────────────────────────────────────────
 
-from core.core_api      import CoreAPI
+from core.core_api import CoreAPI
+from core.data import DataProvider
+from core.journal import build_dispatch_map
 from core.plugin_loader import PluginLoader, PluginStorage
-from core.journal       import build_dispatch_map
-from core.data          import DataProvider
-from core.state         import EDMD_DATA_DIR, cmdr_data_dir
+from core.state import EDMD_DATA_DIR, cmdr_data_dir
 
 # DataProvider — unified source of truth, instantiated before CoreAPI
 _dp_storage = PluginStorage(cmdr_data_dir() / "core")
@@ -517,14 +604,20 @@ data_provider._plugin_call = core.plugin_call
 loader = PluginLoader(_HERE)
 loader.load_all(core)
 plugin_dispatch = build_dispatch_map(list(core._plugins.values()))
-data_provider.start()   # start CAPI poll thread after plugins loaded
+data_provider.start()  # start CAPI poll thread after plugins loaded
 
 
 # ── Bootstrap from journal history ────────────────────────────────────────────
 
 print("\nStarting... (Press Ctrl+C to stop)\n")
 
-from core.journal import bootstrap_fighter_bay, bootstrap_slf, bootstrap_crew, bootstrap_missions, bootstrap_burn_rate
+from core.journal import (
+    bootstrap_burn_rate,
+    bootstrap_crew,
+    bootstrap_fighter_bay,
+    bootstrap_missions,
+    bootstrap_slf,
+)
 
 bootstrap_fighter_bay(state, journal_dir)
 bootstrap_slf(state, journal_dir, trace_mode=trace_mode)
@@ -540,7 +633,7 @@ bootstrap_burn_rate(state, journal_dir, active_session, trace_mode=trace_mode)
 # Generate or suppress diagnostics for code that is determined to be structurally unreachable or unreachable by type analysis.
 _update_thread.join(timeout=2)
 if _update_notice:
-    _kind, _value = _update_notice   # _kind is always "release" now.
+    _kind, _value = _update_notice  # _kind is always "release" now.
     _repo_url = f"https://github.com/{GITHUB_REPO}"
     _term_msg = (
         f"{Terminal.YELL}\u26a0 Update available: v{_value}{Terminal.END}"
@@ -558,7 +651,8 @@ if _update_notice:
 load_session_state(journal_file, active_session)
 state.sessionstart(active_session)
 emit_summary(
-    emitter, state,
+    emitter,
+    state,
     core.session_providers,
     core._plugins.get("session_stats"),
 )
@@ -566,22 +660,33 @@ emit_summary(
 
 # ── Monitor + launch ──────────────────────────────────────────────────────────
 
-from core.journal      import run_monitor as _run_monitor, _poll_status_json
-from core.state        import save_session_state  # Session state persistence? See state.py line 363
+from core.journal import _poll_status_json
+from core.journal import run_monitor as _run_monitor
+from core.state import (
+    save_session_state,  # Session state persistence? See state.py line 363
+)
 
 _edmd_start_mono = time.monotonic()
+
 
 def run_monitor() -> None:
     _run_monitor(
         journal_file,
-        state, active_session, lifetime,
-        emitter, mgr, gui_queue, journal_dir,
+        state,
+        active_session,
+        lifetime,
+        emitter,
+        mgr,
+        gui_queue,
+        journal_dir,
         _edmd_start_mono,
         trace_mode=trace_mode,
         plugin_dispatch=plugin_dispatch,
         data_provider=data_provider,
         core=core,
     )
+
+
 # Wonder why we are complaining about journal_file and journal_dir...
 
 if __name__ == "__main__":
@@ -590,6 +695,7 @@ if __name__ == "__main__":
             from tui.app import run_tui
         except ImportError as _tui_err:
             import traceback as _tb
+
             print(
                 f"{Terminal.WARN}ERROR:{Terminal.END} Textual TUI import failed: {_tui_err}\n"
                 f"sys.path: {sys.path}\n"
@@ -613,11 +719,10 @@ if __name__ == "__main__":
         run_tui(core, PROGRAM, VERSION, theme=_tui_theme)
 
     elif ui_mode == "electron":
-
         from core.electron_bridge import ElectronBridge
 
         bridge = ElectronBridge(core, gui_queue)
-        port   = bridge.start()
+        port = bridge.start()
 
         if port == 0:
             _msg = (
@@ -625,7 +730,9 @@ if __name__ == "__main__":
                 "Install it with:\n"
                 "  pip install 'websockets>=12.0'"
             )
-            print(f"{Terminal.WARN}ERROR:{Terminal.END} Electron bridge failed to start.\n{_msg}")
+            print(
+                f"{Terminal.WARN}ERROR:{Terminal.END} Electron bridge failed to start.\n{_msg}"
+            )
             _electron_fatal(
                 "no_websockets",
                 "Missing Python dependency: websockets",
@@ -654,12 +761,15 @@ if __name__ == "__main__":
             while True:
                 monitor_thread.join(timeout=2.0)
                 if not monitor_thread.is_alive():
-                    print("[EDMD] Monitor thread exited — bridge staying up for renderer")
+                    print(
+                        "[EDMD] Monitor thread exited — bridge staying up for renderer"
+                    )
                     # Keep the main thread alive so the bridge stays running
                     # and the renderer can display a connection-lost state.
                     # Wait indefinitely (cross-platform) so the bridge
                     # stays alive for the renderer.
                     import time as _time
+
                     while True:
                         _time.sleep(1)
         except KeyboardInterrupt:
