@@ -46,6 +46,7 @@ desktop.ini
 *.swo
 *~
 .zed/
+ruff.toml
 
 # ── Custom themes ─────────────────────────────────────────────────────────────
 # Track the directory itself but ignore any CSS files placed inside it.

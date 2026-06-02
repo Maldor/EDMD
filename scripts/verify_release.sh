@@ -13,6 +13,9 @@
 #
 # Requirements: ssh-keygen (OpenSSH 8.0+), sha256sum
 
+echo "This script is not configured correctly, this script will now exit"
+exit 1
+
 set -euo pipefail
 
 # Must match the SIGNING_IDENTITY GitHub Actions secret
