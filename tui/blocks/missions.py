@@ -95,7 +95,7 @@ class MissionsBlock(TuiBlock):
             rows.append(KVRow(faction, _val(str(kc), rew_f)))
 
         rows.append(Label("─" * 40, classes="sep"))
-        # Stack height: kills | total credit value — matches GTK4 layout.
+        # Stack height: kills | total credit value.
         # Wing credits noted in parentheses when present.
         total_wing = sum(
             int(info.get("reward", 0))

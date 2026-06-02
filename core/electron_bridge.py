@@ -46,7 +46,7 @@ def _get_home_display(core) -> dict | None:
     """Return home location display data for the Commander Info tab.
     Returns None only when the commander plugin is not loaded.
     When loaded, always returns a dict so the Home System row is always visible,
-    showing 'unknown' when not set (matching GTK4 behavior exactly).
+    showing 'unknown' when not set.
     """
     cmdr = core._plugins.get("commander")
     if not cmdr:
@@ -392,7 +392,7 @@ def _ser_assets(core: "CoreAPI") -> dict:
             "eng":      eng_str,
         }
 
-    # GTK4-matching slot-based category assignment (from gui/blocks/assets.py)
+    # Old GTK4-matching slot-based category assignment (from gui/blocks/assets.py)
     _SLOT_CATS = [
         ("TinyHardpoint",          "Utility Mounts"),
         ("HugeHardpoint",          "Hardpoints"),

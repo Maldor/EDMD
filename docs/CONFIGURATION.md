@@ -43,7 +43,7 @@
 
 | Key | Default | Hot | Description |
 |-----|---------|:---:|-------------|
-| `Mode` | `"terminal"` | ❌ | UI mode: `terminal` (plain output), `textual` (TUI dashboard), `gtk4` (GTK4 GUI — Linux only), or `electron` (Electron GUI — all platforms) |
+| `Mode` | `"terminal"` | ❌ | UI mode: `terminal` (plain output), `textual` (TUI dashboard), or `electron` (Electron GUI — all platforms) |
 | `Theme` | `"default"` | ❌ | Theme name — changing this in Preferences triggers an automatic restart |
 
 ---
@@ -96,7 +96,7 @@ python edmd.py [-p PROFILE] [-g] [-t] [-d] [--upgrade]
 | `-d`, `--trace` | Print verbose debug and trace output to terminal |
 | `--upgrade` | Pull the latest version from GitHub and restart with the same arguments. Cannot be combined with other flags. |
 
-In TUI mode (and GTK4 GUI on Linux), an upgrade notice appears when a new version is available. Run `./edmd.py --upgrade` at any time to pull the latest source and relaunch.
+In TUI mode, an upgrade notice appears when a new version is available. Run `./edmd.py --upgrade` at any time to pull the latest source and relaunch.
 
 ---
 

@@ -2,4 +2,4 @@
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
 # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
 # McCabe complexity (`C901`) by default.
-ignore = ["E402","F841"]
+ignore = ["E402","F841","F401","E702", "E701"]

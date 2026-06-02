@@ -1,6 +1,6 @@
 <template>
   <div class="panel">
-    <!-- GTK4-matching two-line header -->
+    <!-- old GTK4-matching two-line header -->
     <div class="panel-header cmdr-hdr">
       <div class="hdr-col-left">
         <div class="hdr-line1">{{ cmdrLine1 }}</div>

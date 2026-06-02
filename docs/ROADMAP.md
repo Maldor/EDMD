@@ -54,7 +54,7 @@ Selector in menu bar, create-new-profile dialog, restart with `-p PROFILENAME`.
 Fleet carriers owned by a squadron are not tracked — journal coverage is incomplete.
 
 ### Web UI / HTTP Dashboard
-Built-in HTTP server with SSE for browser-based remote monitoring. Deferred until GTK GUI reaches stable feature set. See extended design notes in git history.
+Built-in HTTP server with SSE for browser-based remote monitoring.
 
 ---
 
@@ -62,7 +62,6 @@ Built-in HTTP server with SSE for browser-based remote monitoring. Deferred unti
 
 - Stored ship loadouts are only as current as the last time each ship was boarded
 - Carrier finance field paths have multiple fallbacks but have not been confirmed across all carrier types — use `--trace` if values are missing
-- GTK progressbar warning on close (`GtkGizmo min width -2`) — intentionally set aside
 - Block collapse state is not persisted across restarts
 - SLF shield state is not tracked — not exposed via journal or Status.json
 - Minor faction reputation reflects only the current system; absent between sessions

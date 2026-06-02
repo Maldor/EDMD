@@ -4,7 +4,7 @@ Cross-platform graphical frontend for EDMD. Wraps `edmd.py` as a subprocess
 and renders the live dashboard in an Electron window via a local WebSocket bridge.
 
 The Python backend is completely unchanged — all existing modes (`terminal`,
-`textual`, `gtk4`) continue to work exactly as before.
+`textual`) continue to work exactly as before.
 
 ---
 ## Notice

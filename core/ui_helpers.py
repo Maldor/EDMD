@@ -1,7 +1,7 @@
 """
 core/ui_helpers.py — Pure-Python display helpers shared between TUI and GUI.
 
-No GTK4, no gi, no textual — safe to import anywhere.
+No gi, no textual — safe to import anywhere.
 """
 
 from __future__ import annotations

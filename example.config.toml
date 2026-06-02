@@ -122,14 +122,11 @@ PeriodicCredits  = 2   # Credits earned in the quarter-hour summary
 PeriodicMerits   = 2   # Merits earned in the quarter-hour summary (powerplay only)
 
 
-# ── GUI ──────────────────────────────────────────────────────────────────────
-# Launch the GTK4 graphical interface alongside terminal output.
-# Requires PyGObject: pacman -S python-gobject gtk4
-#
 [UI]
-Mode       = "terminal"        # terminal (default) | textual | gtk4
-                               # CLI: --mode terminal|textual|gtk4  or  --gui (alias for gtk4)
+Mode       = "terminal"        # terminal (default) | textual
+                                # CLI: --mode terminal|textual
 Theme      = "default"         # palette filename in themes/ without .css extension
+
                                # built-in: "default", "default-dark",
                                #           "default-light", "default-blue",
                                #           "default-green", "default-purple",
@@ -138,8 +135,7 @@ Theme      = "default"         # palette filename in themes/ without .css extens
                                #           (copy themes/custom/my-theme.css to start)
 FontFamily = "JetBrains Mono"  # any installed monospace font; leave blank for system default
 FontSize   = 14                # base font size in px (10–24); all em-relative sizes scale with it
-SoftwareRenderer = false       # set true if EDMD causes compositor starvation on Linux
-                               # Switches GTK4 renderer to Cairo (CPU-side).
+
 
 
 # ==============================================================================
@@ -178,7 +174,7 @@ Discord.WebhookURL     = 'https://discord.com/api/webhooks/1234567890/your-webho
 
 [REMOTE]
 Settings.JournalFolder = "/home/username/mnt/ed-journals"
-UI.Mode                = "gtk4"
+UI.Mode                = "terminal"
 UI.Theme               = "default"
 Discord.WebhookURL     = ""
 Discord.UserID         = 0

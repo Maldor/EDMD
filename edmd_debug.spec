@@ -11,7 +11,6 @@ a = Analysis(
            ('docs', 'docs'),
            ('electron', 'electron'),
            ('fonts', 'fonts'),
-           ('gui', 'gui'),
            ('images', 'images'),
            ('themes', 'themes'),
            ('tui', 'tui')

@@ -64,7 +64,7 @@ def config_to_toml(d: dict) -> str:
         single [ProfileName] table whose sub-section keys use dotted notation:
             [EDP1]
             Settings.JournalFolder = "..."
-            UI.Mode = "gtk4"
+            UI.Mode = "textual"
         The old [EDP1.Settings] / [EDP1.UI] sub-table style is NEVER produced.
 
     This is the single authoritative writer for config.toml.  Both
@@ -111,7 +111,7 @@ def config_to_toml(d: dict) -> str:
 def _apply_gui_to_ui(gui_dict: dict) -> dict:
     """Convert a [GUI] / profile GUI sub-dict to [UI] representation.
 
-        Enabled = true   →  Mode = "gtk4"
+        Enabled = true   →  Mode = "textual"
         Enabled = false  →  Mode = "terminal"
         (absent)         →  Mode unchanged / not added
         All other keys   →  kept as-is (Theme, FontFamily, FontSize, …)
@@ -120,7 +120,7 @@ def _apply_gui_to_ui(gui_dict: dict) -> dict:
     enabled = src.pop("Enabled", None)
     result: dict = {}
     if enabled is True:
-        result["Mode"] = "gtk4"
+        result["Mode"] = "textual"
     elif enabled is False:
         result["Mode"] = "terminal"
     result.update(src)
@@ -133,7 +133,7 @@ def migrate_config_if_needed(config_path: Path) -> bool:
     Handles all of:
       • [GUI] global section  →  [UI]  (Enabled= → Mode=)
       • [ProfileName.GUI] sub-table  →  ProfileName.UI.*  (dotted key)
-      • ProfileName.GUI.Enabled = true in a profile block  →  UI.Mode = "gtk4"
+      • ProfileName.GUI.Enabled = true in a profile block  →  UI.Mode = "textual"
       • [ProfileName.Section] sub-table headers  →  [ProfileName] + dotted keys
 
     Detection uses a raw-text regex so clean canonical files are never touched.
@@ -214,7 +214,7 @@ CFG_DEFAULTS_EXTRA = {
 }
 
 CFG_DEFAULTS_UI = {
-    "Mode":             "terminal",  # terminal | textual | gtk4
+    "Mode":             "terminal",  # terminal | textual
     "Theme":            "default",
     "FontSize":         14,
     "FontFamily":       "JetBrains Mono",

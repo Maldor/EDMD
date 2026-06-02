@@ -1,7 +1,7 @@
 <template>
   <div class="panel">
     <div class="panel-header">Engineering</div>
-    <!-- 7 tabs matching GTK4 exactly: Raw, Mfg, Enc, Comp, Items, Cons, Data -->
+    <!-- 7 tabs matching old GTK4 exactly: Raw, Mfg, Enc, Comp, Items, Cons, Data -->
     <TabSet :tabs="tabs" style="flex:1;min-height:0;">
       <template v-for="tab in tabs" :key="tab.id" v-slot:[tab.id]>
         <div class="mat-count-hdr">
