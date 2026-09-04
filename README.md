@@ -25,6 +25,14 @@ Maintained by **CMDR MALDOR96**, with permission
 
 ---
 
+# Notice of depreciation
+Life has been life. I have not been able to devote time and energy into this project that it deserves. The good news is that the original developer rebuilt this project from scratch and its now available on github. You can it from here:
+https://github.com/drworman/EDLD
+Any of my updates if they are appropriate and can be ported over will find their way to his project.
+I do still intend on contributing where I can, but it will not be on here. It was wonderful to see the code in action and be able to work on what little I have.
+Please go support the original developers work because its quite good.
+- Maldor96
+
 ## Overview
 
 EDMD is a real-time session monitoring dashboard for Elite Dangerous. It tails your journal and presents a live dashboard — a GTK4 window, a Textual terminal UI, or an Electron app — alongside the game, tracking everything you do across combat, trade, mining, exploration, missions, exobiology, and PowerPlay.
